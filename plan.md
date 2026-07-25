@@ -120,15 +120,20 @@ is a commitment to implement it**:
 | Capability | Methods | Position |
 |---|---|---|
 | `fs.readTextFile` / `fs.writeTextFile` | `readTextFile`, `writeTextFile` | **v1** — an agent editing code needs them |
-| `terminal` | `createTerminal`, `terminalOutput`, `waitForTerminalExit`, `killTerminal`, `releaseTerminal` | **v1 scope decision** — see Decisions |
+| `terminal` | `createTerminal`, `terminalOutput`, `waitForTerminalExit`, `killTerminal`, `releaseTerminal` | **not supported** — `terminal: false`, see Decisions |
 | elicitation (`form` + `url`) | `elicitation/create`, `elicitation/complete` | blocked on ACP |
 | `mcp/connect` etc. | client-hosted MCP servers | out of scope for v1 |
 
-`fs` and `terminal` mean this package touches the user's files and spawns
-processes, so both need a **confinement policy** (which roots are reachable, what
-the user consented to) and, for terminals, **process-group ownership and reaping**
-— the same discipline `FoundationModelsShelltool` applies. Not a thin display
-layer.
+`fs` still means this package touches the user's files, so it needs a real
+**confinement policy** — which roots are reachable, and what the user consented to.
+Not a thin display layer, even without terminals.
+
+**Declining `terminal` is a supported position, not a hole.** Every gated method
+has a refusing default, and the capability flag is exactly how a client says "not
+me." Agents that want a shell either do without or route it through their own
+tools — which, for our agent, is precisely what `FoundationModelsShelltool` already
+is. An ACP client advertising terminals would be volunteering to reimplement that
+process discipline a second time, on the wrong side of the protocol.
 
 ## Transports, and who owns the agent process
 
@@ -153,9 +158,13 @@ layer.
 - **Projection, never a record (decided):** the container is rebuildable from
   `session/load` and never treated as durable history. The agent's `Transcript` is
   the record; history browsing reads *that*, not this.
-- **Terminals in v1 — open.** Advertising `terminal` commits us to process
-  ownership and reaping. Decide before advertising; refusing is a valid, honest
-  answer that some agents will simply work around.
+- **Terminals unsupported (decided):** advertise `terminal: false` and keep the
+  refusing defaults for all five `terminal/*` methods. Advertising it would commit
+  this package to spawning, process-group ownership, and reaping — the discipline
+  `FoundationModelsShelltool` already implements *inside the agent*, where the tool
+  and its policy live. Duplicating it client-side would put process control on the
+  wrong side of the protocol and give us two shells to secure instead of one.
+  Revisit only if a concrete agent we care about genuinely cannot work without it.
 
 ## Milestones
 
@@ -175,7 +184,8 @@ layer.
   including agent-process ownership and reaping if we spawn it.
 - [ ] **M7 — Elicitation.** Form and URL modes as bindable state, honoring the
   spec's consent and no-credentials-back rules. Blocked on ACP.
-- [ ] **M8 — Terminals.** Only if the Decisions item lands as yes.
+- **M8 — Terminals: not planned.** `terminal: false`; see Decisions. Listed here
+  only so its absence reads as a decision rather than an omission.
 
 ## Testing strategy
 
