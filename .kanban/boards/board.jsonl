@@ -1,0 +1,1 @@
+{"id":"01KYD4C4CF3DSR9RAM7NYZ97CC","timestamp":"2026-07-25T17:15:11.119973Z","op":"create","item_id":"board","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1 @@\n+name: FoundationModelsACPClient\n","reverse_patch":"--- original\n+++ modified\n@@ -1 +0,0 @@\n-name: FoundationModelsACPClient\n","transaction_id":null}
