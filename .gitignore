@@ -15,3 +15,7 @@ Package.resolved
 .shell/
 .code-context/
 .claude/settings.local.json
+
+# Kanban internals
+.kanban/*.log
+.kanban/tasks/.trash/
