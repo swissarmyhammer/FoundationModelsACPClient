@@ -30,10 +30,40 @@ public final class SwiftUIACPClient: Client {
 
     /// The connection state. The host that attaches a transport sets it;
     /// this lands with the transport milestone (M6).
-    public var connectionState: ConnectionState = .disconnected
+    ///
+    /// A change to ``ConnectionState/disconnected`` flushes the coalescing
+    /// buffer of every session synchronously, so the last partial chunk is
+    /// never left buffered when the connection closes.
+    public var connectionState: ConnectionState = .disconnected {
+        didSet {
+            guard connectionState == .disconnected else { return }
+            for state in sessions.values {
+                state.flushPendingChunks()
+            }
+        }
+    }
+
+    /// The cadence between coalesced flushes for each session this client
+    /// creates.
+    private let coalescingCadence: Duration
+
+    /// The clock that schedules the coalesced flushes.
+    private let clock: any Clock<Duration>
 
     /// Creates a client with no sessions.
-    public init() {}
+    ///
+    /// - Parameters:
+    ///   - coalescingCadence: The cadence between coalesced flushes for each
+    ///     session this client creates.
+    ///   - clock: The clock that schedules the coalesced flushes. Tests
+    ///     inject a manual clock, so they do not read the wall clock.
+    public init(
+        coalescingCadence: Duration = ACPSessionState.defaultCoalescingCadence,
+        clock: any Clock<Duration> = ContinuousClock()
+    ) {
+        self.coalescingCadence = coalescingCadence
+        self.clock = clock
+    }
 
     /// Returns the observable state for one session, and creates it when
     /// the session is new.
@@ -44,7 +74,7 @@ public final class SwiftUIACPClient: Client {
         if let existing = sessions[id] {
             return existing
         }
-        let created = ACPSessionState()
+        let created = ACPSessionState(coalescingCadence: coalescingCadence, clock: clock)
         sessions[id] = created
         return created
     }

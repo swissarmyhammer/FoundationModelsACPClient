@@ -385,6 +385,8 @@ private let usedTokens = 1_500
     await client.sessionUpdate(
         UpdateSessionNotification(sessionId: otherSession, update: agentChunk(text: "two", message: "agent-2"))
     )
+    client.session(for: testSession).flushPendingChunks()
+    client.session(for: otherSession).flushPendingChunks()
 
     #expect(client.sessions.count == 2)
     #expect(client.session(for: testSession).entries == [.agentMessage(MessageId(rawValue: "agent-1"))])

@@ -1,8 +1,63 @@
 ---
+comments:
+- actor: claude-code
+  id: 01m0ady87xw25nqrkct8bjajz5
+  text: |-
+    Research complete.
+
+    Findings:
+    - `ACPSessionState.apply(_:)` mutates the observable `aggregator` property one time for each chunk. It also sets `inFlightAgentMessageID` / `inFlightThoughtID` on each chunk. Thus N chunks cause approximately 2N observable mutations.
+    - `SessionUpdateAggregator` (wire package) is a struct. A local copy can receive all buffered chunks, then one assignment back causes one observable mutation for each flush.
+    - The `@ObservationIgnored` attribute keeps the chunk buffer out of observation, so buffering causes zero invalidations.
+    - Non-chunk updates must flush the buffer first. This keeps the applied order identical to plain application, which gives byte-identical final text.
+    - Turn end arrives as `state_update` (a non-chunk update), so the flush-before rule covers the turn-end flush.
+    - Connection close: `SwiftUIACPClient.connectionState` gets a `didSet` that flushes all sessions when the value becomes `.disconnected`.
+    - Clock injection: store `any Clock<Duration>` with a `ContinuousClock()` default. Tests use a manual clock that only moves when the test advances it.
+    - Existing tests in SessionStateTests assert state immediately after chunk-only drives. The `drive` helper must flush at the end, and the two-session test must flush each session.
+
+    Plan: TDD. Write the failing mutation-count test first, watch it fail, then implement coalescing in `ACPSessionState` plus the connection-close flush in `SwiftUIACPClient`.
+  timestamp: 2026-08-18T12:36:02.429980+00:00
+- actor: claude-code
+  id: 01m0aepdgq5c5p63c5c91e7pmz
+  text: |-
+    Implementation complete, with the /tdd workflow.
+
+    TDD record:
+    - RED 1: `rapidChunksCauseFarFewerObservableMutationsThanChunks` failed with 203 mutations against the limit of 20 for 200 chunks. This shows the missing coalescing.
+    - GREEN 1: `ACPSessionState` got a non-observable chunk buffer (`@ObservationIgnored`), a flush that folds all buffered chunks into one local `SessionUpdateAggregator` copy and writes it back one time, and a scheduled flush task on an injected clock. After this step the mutation count is a small constant (fewer than 20 for 200 chunks).
+    - RED 2: `aConnectionCloseFlushesEveryBufferedSession` failed. GREEN 2: `SwiftUIACPClient.connectionState` got a `didSet` that flushes every session synchronously on `.disconnected`.
+    - The card's other tests also landed: cadence flush with a manual clock, turn-end flush of a mid-buffer remainder, interleaved message/thought coalescing without cross contamination, and byte-identical concatenation with whitespace and unicode.
+
+    Design facts:
+    - Only `agent_message_chunk` and `agent_thought_chunk` coalesce. Every other update flushes the buffer first and then applies. Thus the applied order, and the final text, stays identical to plain one-by-one application.
+    - A turn end arrives as `state_update`, so the flush-before rule gives the synchronous turn-end flush.
+    - `flushPendingChunks()` is public, so a host can flush at any boundary.
+    - The cadence and the clock are injectable: `ACPSessionState(coalescingCadence:clock:)` and `SwiftUIACPClient(coalescingCadence:clock:)`, default `.milliseconds(33)` and `ContinuousClock`. Tests use a `ManualClock` (a full `Clock` conformance with cancellation support), so no test reads the wall clock.
+    - The flush appends into the in-flight message in place (`messages[id, default: []].append`), with one observable aggregator write for each flush. The in-flight id only mutates when it changes.
+    - The test `drive` helper now flushes at the end, so the existing assertions read landed state. The two-session test flushes each session.
+
+    What did not work: the first cadence test advanced the manual clock before the flush task registered its sleeper, so the flush never fired. The fix is `ManualClock.sleeperCount` plus a cooperative wait before the advance. No wall-clock sleep was added.
+
+    Verification: `swift test` — 33 tests, 0 failures, 0 warnings, 5 stable repeat runs.
+  timestamp: 2026-08-18T12:49:14.263209+00:00
+- actor: claude-code
+  id: 01m0aepjht2agrc0n6vc1zv3re
+  text: |-
+    ### implement — changed
+    - evidence: 5 files — Sources/FoundationModelsACPClient/ACPSessionState.swift, Sources/FoundationModelsACPClient/SwiftUIACPClient.swift, Tests/FoundationModelsACPClientTests/CoalescingTests.swift (new), Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift, Tests/FoundationModelsACPClientTests/SessionStateTests.swift. `swift test`: 33 tests, 0 failures, 0 warnings. Mutation count: 200 rapid chunks give fewer than 20 observable mutations (203 before the change).
+    - next: /review
+  timestamp: 2026-08-18T12:49:19.418717+00:00
+- actor: claude-code
+  id: 01m0aerg8mxs80n6n6dzevcz3e
+  text: |-
+    ### test — green
+    - evidence: `swift build` (clean, after `rm -rf .build`) — build complete, 0 warnings, 0 errors. `swift test` — 33 tests passed, 0 failed, 0 skipped.
+    - next: none. The build is clean.
+  timestamp: 2026-08-18T12:50:22.612711+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: todo
-position_ordinal: '8280'
+position_column: doing
+position_ordinal: '80'
 title: M2 Coalesce token-rate chunks so SwiftUI does not thrash
 ---
 ## What

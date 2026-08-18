@@ -115,10 +115,33 @@ comments:
     - evidence: swift build (clean, no warnings) then swift test — 27 passed, 0 failed, 0 skipped
     - next: none
   timestamp: 2026-08-18T12:27:22.845484+00:00
+- actor: claude-code
+  id: 01m0adfew60m4hrfr428e3n83e
+  text: |-
+    ### commit — changed
+    - evidence: b549b3f fix(tests): label first parameter in test fixture factory functions
+    - next: none
+  timestamp: 2026-08-18T12:27:57.702463+00:00
+- actor: claude-code
+  id: 01m0adkm032vkqx7n2pgnzmqah
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted; all prior findings checked
+    - next: task moved to done
+  timestamp: 2026-08-18T12:30:14.019196+00:00
+- actor: claude-code
+  id: 01m0admjg3vye4ns19vsptjth8
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files; 3 review findings corrected and checked
+    - test: green — swift test, 27 passed, 0 failures, 0 warnings
+    - commit: b549b3f
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T12:30:45.251009+00:00
 depends_on:
 - 01KYD4DVSQ0ZGYGYBS8T95TAX5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8180'
 title: 'M1 Client conformance: land every SessionUpdate case in observable state'
 ---
 ## What

@@ -66,7 +66,8 @@ func toolCallStatus(id: String, _ status: ToolCallStatus) -> SessionUpdate {
     .toolCallUpdate(ToolCallUpdate(toolCallId: ToolCallId(rawValue: id), status: .value(status)))
 }
 
-/// Applies each update to the client for the test session.
+/// Applies each update to the client for the test session, and flushes the
+/// coalescing buffer at the end, so assertions read landed state.
 ///
 /// - Parameters:
 ///   - client: The client under test.
@@ -76,4 +77,5 @@ func drive(client: SwiftUIACPClient, _ updates: SessionUpdate...) async {
     for update in updates {
         await client.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
     }
+    client.session(for: testSession).flushPendingChunks()
 }
