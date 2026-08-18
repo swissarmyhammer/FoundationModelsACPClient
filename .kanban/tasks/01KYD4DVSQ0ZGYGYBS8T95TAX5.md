@@ -46,7 +46,35 @@ comments:
     - evidence: swift build (clean rebuild) — build complete, 0 warnings; swift test — 2 tests run, 0 failures, 0 skipped
     - next: no action needed. Build and tests are clean.
   timestamp: 2026-08-18T11:54:14.366752+00:00
-position_column: doing
+- actor: claude-code
+  id: 01m0abjr8ne6maqhbcvwsqwa50
+  text: |-
+    ### commit — changed
+    - evidence: 58de998 feat: add M0 scaffold for FoundationModelsACPClient package
+    - next: ready for review
+  timestamp: 2026-08-18T11:54:48.469030+00:00
+- actor: claude-code
+  id: 01m0abp1km10x5zk1gm54zwamg
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted, 7 attempted; 4 files reviewed, 4 files skipped by .reviewignore (.kanban/)
+    - next: none — task moved to done
+
+    step: review
+    outcome: clean
+    evidence: review sha HEAD~1..HEAD — counts: 0 findings, 0 confirmed, 0 refuted
+    task: ^t95tax5
+  timestamp: 2026-08-18T11:56:36.340576+00:00
+- actor: claude-code
+  id: 01m0abpkf2p44gjggdctn49jx2
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files (Package.swift, ci.yml, ACPClient.swift, LinkageSmokeTests.swift, ForbiddenImportTests.swift)
+    - test: green — swift test, 2 passed, 0 failures, 0 warnings
+    - commit: 58de998
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T11:56:54.626545+00:00
+position_column: done
 position_ordinal: '80'
 title: 'M0 Scaffold: SwiftPM package depending on the ACP wire only'
 ---
