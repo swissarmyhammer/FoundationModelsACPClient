@@ -24,7 +24,7 @@ func textBlock(_ text: String) -> ContentBlock {
 ///   - text: The text of the chunk.
 ///   - message: The raw message id.
 /// - Returns: The update.
-func userChunk(_ text: String, message: String = "user-1") -> SessionUpdate {
+func userChunk(text: String, message: String = "user-1") -> SessionUpdate {
     .userMessageChunk(ContentChunk(content: textBlock(text), messageId: MessageId(rawValue: message)))
 }
 
@@ -34,7 +34,7 @@ func userChunk(_ text: String, message: String = "user-1") -> SessionUpdate {
 ///   - text: The text of the chunk.
 ///   - message: The raw message id.
 /// - Returns: The update.
-func agentChunk(_ text: String, message: String = "agent-1") -> SessionUpdate {
+func agentChunk(text: String, message: String = "agent-1") -> SessionUpdate {
     .agentMessageChunk(ContentChunk(content: textBlock(text), messageId: MessageId(rawValue: message)))
 }
 
@@ -44,7 +44,7 @@ func agentChunk(_ text: String, message: String = "agent-1") -> SessionUpdate {
 ///   - text: The text of the chunk.
 ///   - message: The raw message id.
 /// - Returns: The update.
-func thoughtChunk(_ text: String, message: String = "thought-1") -> SessionUpdate {
+func thoughtChunk(text: String, message: String = "thought-1") -> SessionUpdate {
     .agentThoughtChunk(ContentChunk(content: textBlock(text), messageId: MessageId(rawValue: message)))
 }
 
@@ -62,7 +62,7 @@ func idleState(stopReason: StopReason?) -> SessionUpdate {
 ///   - id: The raw tool-call id.
 ///   - status: The status to carry.
 /// - Returns: The update.
-func toolCallStatus(_ id: String, _ status: ToolCallStatus) -> SessionUpdate {
+func toolCallStatus(id: String, _ status: ToolCallStatus) -> SessionUpdate {
     .toolCallUpdate(ToolCallUpdate(toolCallId: ToolCallId(rawValue: id), status: .value(status)))
 }
 
@@ -72,7 +72,7 @@ func toolCallStatus(_ id: String, _ status: ToolCallStatus) -> SessionUpdate {
 ///   - client: The client under test.
 ///   - updates: The updates to apply, in order.
 @MainActor
-func drive(_ client: SwiftUIACPClient, _ updates: SessionUpdate...) async {
+func drive(client: SwiftUIACPClient, _ updates: SessionUpdate...) async {
     for update in updates {
         await client.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
     }

@@ -52,6 +52,69 @@ comments:
     - evidence: `swift build` (clean, from scratch) — 0 warnings, build complete. `swift test` — 27 tests, 0 failures, 0 skipped.
     - next: no action needed.
   timestamp: 2026-08-18T12:14:39.911913+00:00
+- actor: claude-code
+  id: 01m0acr8z94cbqyzznxaxh0p54
+  text: |-
+    ### commit — changed
+    - evidence: 2876468 feat(client): add SwiftUIACPClient with full SessionUpdate state
+    - next: none
+  timestamp: 2026-08-18T12:15:17.993117+00:00
+- actor: claude-code
+  id: 01m0ad22m3nhyfygzfxe0s0gb7
+  text: |-
+    ### review — findings
+    - evidence: 3 findings — Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:47, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:65, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:75 (scope: review sha HEAD~1..HEAD; counts: 3 findings, 3 confirmed, 2 refuted)
+    - next: Obey each finding in the new `## Review Findings (2026-08-18 07:15)` checklist. The task stays in `review`.
+
+    step: review
+    outcome: findings
+    evidence: 3 findings — Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:47, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:65, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:75
+    task: ^9j9a1r5
+  timestamp: 2026-08-18T12:20:39.171627+00:00
+- actor: claude-code
+  id: 01m0ad2kvw5nz3g4024fca9vae
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 6 files (SwiftUIACPClient.swift, ACPSessionState.swift, SessionEntry.swift, SessionStateTests.swift, WireConformanceTests.swift, SessionUpdateFixtures.swift)
+    - test: green — swift test, 27 passed, 0 failures, 0 warnings
+    - commit: 2876468
+    - review: findings — Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:47, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:65, Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:75
+  timestamp: 2026-08-18T12:20:56.828458+00:00
+- actor: claude-code
+  id: 01m0adca4padnee1bdwyq2pcm6
+  text: |-
+    Corrected the three `swift/fluent-usage` findings and removed the same cause from the whole fixtures file.
+
+    - `thoughtChunk` now has the signature `thoughtChunk(text:message:)` as the finding specifies.
+    - `toolCallStatus` now has the signature `toolCallStatus(id:_:)` as the finding specifies.
+    - `drive` now has the signature `drive(client:_:)` as the finding specifies.
+    - `userChunk` and `agentChunk` have the same cause as `thoughtChunk`: each makes a `SessionUpdate` from text with a first parameter that has no label. They now have the label `text:` also.
+    - `textBlock(_:)` keeps no label. The conversion from a `String` to a text `ContentBlock` keeps the full value and adds no data. The rule permits no label for a value-preserving conversion.
+    - `idleState(stopReason:)` already has a label. No change.
+
+    Updated all call sites in `SessionStateTests.swift` and `WireConformanceTests.swift`. A grep for the old call forms finds zero matches.
+
+    Evidence: `swift test` -> 27 tests passed, 0 failures, 0 warnings, 0 skips. The three finding items on the card are set to done.
+  timestamp: 2026-08-18T12:26:14.550965+00:00
+- actor: claude-code
+  id: 01m0adchtart009v0hvmvjergf
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift (5 signatures labeled), Tests/FoundationModelsACPClientTests/SessionStateTests.swift (all call sites), Tests/FoundationModelsACPClientTests/WireConformanceTests.swift (4 call sites); `swift test` -> 27 passed, 0 failures, 0 warnings; 3 of 3 findings checked
+    - next: /review
+
+    step: implement
+    outcome: changed
+    evidence: 3 files — Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift, Tests/FoundationModelsACPClientTests/SessionStateTests.swift, Tests/FoundationModelsACPClientTests/WireConformanceTests.swift; swift test 27 passed, 0 failures, 0 warnings; 3 findings checked
+    task: ^9j9a1r5
+  timestamp: 2026-08-18T12:26:22.410966+00:00
+- actor: claude-code
+  id: 01m0adectx1f60pd7jmm6dtgbr
+  text: |-
+    ### test — green
+    - evidence: swift build (clean, no warnings) then swift test — 27 passed, 0 failed, 0 skipped
+    - next: none
+  timestamp: 2026-08-18T12:27:22.845484+00:00
 depends_on:
 - 01KYD4DVSQ0ZGYGYBS8T95TAX5
 position_column: doing
@@ -100,3 +163,14 @@ Note from implementation: the wire package now speaks ACP stable v2, so the case
 ## Workflow
 
 - Use `/tdd` -- write failing tests first.
+
+## Review Findings (2026-08-18 07:15)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 6 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:47` `swift/fluent-usage` — First parameter of non-value-preserving factory function should be labeled. Creating a SessionUpdate from text is not a simple type conversion. Change signature to `func thoughtChunk(text: String, message: String = "thought-1") -> SessionUpdate` to label the first parameter.
+- [x] `Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:65` `swift/fluent-usage` — First parameter of non-value-preserving factory function should be labeled. Creating a SessionUpdate from an id and status is not a simple type conversion. Change signature to `func toolCallStatus(id: String, _ status: ToolCallStatus) -> SessionUpdate` to label the first parameter.
+- [x] `Tests/FoundationModelsACPClientTests/SessionUpdateFixtures.swift:75` `swift/fluent-usage` — First parameter of function with side effects should be labeled. Driving a client with updates is not a value-preserving conversion. Change signature to `func drive(client: SwiftUIACPClient, _ updates: SessionUpdate...) async` to label the first parameter.

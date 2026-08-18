@@ -24,7 +24,7 @@ private let usedTokens = 1_500
 @MainActor @Test func userMessageChunkCreatesAUserEntryWithItsContent() async {
     let client = SwiftUIACPClient()
 
-    await drive(client, userChunk("hello"))
+    await drive(client: client, userChunk(text: "hello"))
 
     let state = client.session(for: testSession)
     #expect(state.entries == [.userMessage(MessageId(rawValue: "user-1"))])
@@ -34,7 +34,7 @@ private let usedTokens = 1_500
 @MainActor @Test func agentMessageChunksAppendIntoOneInFlightMessage() async {
     let client = SwiftUIACPClient()
 
-    await drive(client, agentChunk("first "), agentChunk("second"))
+    await drive(client: client, agentChunk(text: "first "), agentChunk(text: "second"))
 
     let state = client.session(for: testSession)
     let messageID = MessageId(rawValue: "agent-1")
@@ -47,11 +47,11 @@ private let usedTokens = 1_500
     let client = SwiftUIACPClient()
 
     await drive(
-        client,
-        thoughtChunk("think-a"),
-        agentChunk("say-a"),
-        thoughtChunk("think-b"),
-        agentChunk("say-b")
+        client: client,
+        thoughtChunk(text: "think-a"),
+        agentChunk(text: "say-a"),
+        thoughtChunk(text: "think-b"),
+        agentChunk(text: "say-b")
     )
 
     let state = client.session(for: testSession)
@@ -68,9 +68,9 @@ private let usedTokens = 1_500
     let client = SwiftUIACPClient()
     let messageID = MessageId(rawValue: "agent-1")
 
-    await drive(client, agentChunk("draft"))
+    await drive(client: client, agentChunk(text: "draft"))
     await drive(
-        client,
+        client: client,
         .agentMessage(AgentMessage(messageId: messageID, content: .value([textBlock("final")])))
     )
 
@@ -85,7 +85,7 @@ private let usedTokens = 1_500
     let thoughtID = MessageId(rawValue: "thought-9")
 
     await drive(
-        client,
+        client: client,
         .userMessage(UserMessage(messageId: userID, content: .value([textBlock("question")]))),
         .agentThought(AgentThought(messageId: thoughtID, content: .value([textBlock("reasoning")])))
     )
@@ -113,7 +113,7 @@ private let usedTokens = 1_500
         title: .value("Read a file")
     )
 
-    await drive(client, .toolCallUpdate(update))
+    await drive(client: client, .toolCallUpdate(update))
 
     let state = client.session(for: testSession)
     #expect(state.entries == [.toolCall(callID)])
@@ -132,11 +132,11 @@ private let usedTokens = 1_500
     let callID = ToolCallId(rawValue: "call-1")
 
     await drive(
-        client,
+        client: client,
         .toolCallUpdate(
             ToolCallUpdate(toolCallId: callID, status: .value(.pending), title: .value("Search"))
         ),
-        toolCallStatus("call-1", .completed)
+        toolCallStatus(id: "call-1", .completed)
     )
 
     let state = client.session(for: testSession)
@@ -151,14 +151,14 @@ private let usedTokens = 1_500
     let secondID = ToolCallId(rawValue: "call-2")
 
     await drive(
-        client,
+        client: client,
         .toolCallUpdate(
             ToolCallUpdate(toolCallId: firstID, status: .value(.inProgress), title: .value("shell"))
         ),
         .toolCallUpdate(
             ToolCallUpdate(toolCallId: secondID, status: .value(.inProgress), title: .value("shell"))
         ),
-        toolCallStatus("call-1", .completed)
+        toolCallStatus(id: "call-1", .completed)
     )
 
     let state = client.session(for: testSession)
@@ -173,7 +173,7 @@ private let usedTokens = 1_500
 
     // The id was never announced before. The documented behavior is to
     // adopt it: the first sighting creates the tool call.
-    await drive(client, toolCallStatus("call-unseen", .completed))
+    await drive(client: client, toolCallStatus(id: "call-unseen", .completed))
 
     let state = client.session(for: testSession)
     #expect(state.entries == [.toolCall(callID)])
@@ -185,7 +185,7 @@ private let usedTokens = 1_500
     let callID = ToolCallId(rawValue: "call-1")
 
     await drive(
-        client,
+        client: client,
         .toolCallContentChunk(
             ToolCallContentChunk(content: .content(Content(content: textBlock("line-1"))), toolCallId: callID)
         ),
@@ -216,7 +216,7 @@ private let usedTokens = 1_500
     ]
 
     for (id, status) in statuses {
-        await drive(client, toolCallStatus(id, status))
+        await drive(client: client, toolCallStatus(id: id, status))
     }
 
     let state = client.session(for: testSession)
@@ -237,18 +237,18 @@ private let usedTokens = 1_500
     let state = client.session(for: testSession)
     #expect(state.turnState == .idle)
 
-    await drive(client, .stateUpdate(.running(RunningStateUpdate())))
+    await drive(client: client, .stateUpdate(.running(RunningStateUpdate())))
     #expect(state.turnState == .running)
 
-    await drive(client, .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
+    await drive(client: client, .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
     #expect(state.turnState == .awaitingInput)
 
-    await drive(client, idleState(stopReason: .endTurn))
+    await drive(client: client, idleState(stopReason: .endTurn))
     #expect(state.turnState == .idle)
     #expect(state.lastStopReason == .endTurn)
 
     // An idle update without a stop reason keeps the last reported reason.
-    await drive(client, .stateUpdate(.running(RunningStateUpdate())), idleState(stopReason: nil))
+    await drive(client: client, .stateUpdate(.running(RunningStateUpdate())), idleState(stopReason: nil))
     #expect(state.turnState == .idle)
     #expect(state.lastStopReason == .endTurn)
 }
@@ -261,10 +261,10 @@ private let usedTokens = 1_500
     let first = PlanEntry(content: "step one", priority: .medium, status: .pending)
     let second = PlanEntry(content: "step one", priority: .medium, status: .completed)
 
-    await drive(client, .planUpdate(PlanUpdate(plan: .items(PlanItems(entries: [first], planId: planID)))))
+    await drive(client: client, .planUpdate(PlanUpdate(plan: .items(PlanItems(entries: [first], planId: planID)))))
     #expect(client.session(for: testSession).plans[planID] == [first])
 
-    await drive(client, .planUpdate(PlanUpdate(plan: .items(PlanItems(entries: [second], planId: planID)))))
+    await drive(client: client, .planUpdate(PlanUpdate(plan: .items(PlanItems(entries: [second], planId: planID)))))
     #expect(client.session(for: testSession).plans[planID] == [second])
 }
 
@@ -272,10 +272,10 @@ private let usedTokens = 1_500
     let client = SwiftUIACPClient()
     let command = AvailableCommand(description: "Makes a plan", name: "create_plan")
 
-    await drive(client, .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [command])))
+    await drive(client: client, .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [command])))
     #expect(client.session(for: testSession).availableCommands == [command])
 
-    await drive(client, .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])))
+    await drive(client: client, .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])))
     #expect(client.session(for: testSession).availableCommands.isEmpty)
 }
 
@@ -287,7 +287,7 @@ private let usedTokens = 1_500
         type: .boolean(SessionConfigBoolean(currentValue: true))
     )
 
-    await drive(client, .configOptionUpdate(ConfigOptionUpdate(configOptions: [option])))
+    await drive(client: client, .configOptionUpdate(ConfigOptionUpdate(configOptions: [option])))
 
     #expect(client.session(for: testSession).configOptions == [option])
 }
@@ -297,19 +297,19 @@ private let usedTokens = 1_500
     let state = client.session(for: testSession)
 
     await drive(
-        client,
+        client: client,
         .sessionInfoUpdate(SessionInfoUpdate(title: .value("Refactor"), updatedAt: .value("2026-08-18T00:00:00Z")))
     )
     #expect(state.title == "Refactor")
     #expect(state.updatedAt == "2026-08-18T00:00:00Z")
 
     // An omitted field keeps the stored value.
-    await drive(client, .sessionInfoUpdate(SessionInfoUpdate(updatedAt: .value("2026-08-18T01:00:00Z"))))
+    await drive(client: client, .sessionInfoUpdate(SessionInfoUpdate(updatedAt: .value("2026-08-18T01:00:00Z"))))
     #expect(state.title == "Refactor")
     #expect(state.updatedAt == "2026-08-18T01:00:00Z")
 
     // An explicit null clears the stored value.
-    await drive(client, .sessionInfoUpdate(SessionInfoUpdate(title: .cleared)))
+    await drive(client: client, .sessionInfoUpdate(SessionInfoUpdate(title: .cleared)))
     #expect(state.title == nil)
 }
 
@@ -317,7 +317,7 @@ private let usedTokens = 1_500
     let client = SwiftUIACPClient()
     let usage = UsageUpdate(size: contextWindowSize, used: usedTokens)
 
-    await drive(client, .usageUpdate(usage))
+    await drive(client: client, .usageUpdate(usage))
 
     #expect(client.session(for: testSession).usage == usage)
 }
@@ -327,7 +327,7 @@ private let usedTokens = 1_500
     let terminalID = TerminalId(rawValue: "term-1")
 
     await drive(
-        client,
+        client: client,
         .terminalUpdate(TerminalUpdate(terminalId: terminalID, command: .value("ls"))),
         .terminalOutputChunk(
             TerminalOutputChunk(data: Data("first ".utf8).base64EncodedString(), terminalId: terminalID)
@@ -346,11 +346,11 @@ private let usedTokens = 1_500
 
 @MainActor @Test func anUnknownUpdateChangesNoObservableState() async {
     let client = SwiftUIACPClient()
-    await drive(client, agentChunk("hello"), idleState(stopReason: .endTurn))
+    await drive(client: client, agentChunk(text: "hello"), idleState(stopReason: .endTurn))
     let state = client.session(for: testSession)
     let entriesBefore = state.entries
 
-    await drive(client, .unknown("future_update", .object(["detail": .string("x")])))
+    await drive(client: client, .unknown("future_update", .object(["detail": .string("x")])))
 
     #expect(state.entries == entriesBefore)
     #expect(state.turnState == .idle)
@@ -362,11 +362,11 @@ private let usedTokens = 1_500
 @MainActor @Test func entryIdentityIsStableAcrossUpdates() async {
     let client = SwiftUIACPClient()
 
-    await drive(client, agentChunk("a"), toolCallStatus("call-1", .pending))
+    await drive(client: client, agentChunk(text: "a"), toolCallStatus(id: "call-1", .pending))
     let state = client.session(for: testSession)
     let identitiesBefore = state.entries.map(\.id)
 
-    await drive(client, agentChunk("b"), toolCallStatus("call-1", .completed), thoughtChunk("t"))
+    await drive(client: client, agentChunk(text: "b"), toolCallStatus(id: "call-1", .completed), thoughtChunk(text: "t"))
 
     let identitiesAfter = state.entries.map(\.id)
     #expect(Array(identitiesAfter.prefix(identitiesBefore.count)) == identitiesBefore)
@@ -380,10 +380,10 @@ private let usedTokens = 1_500
     let otherSession = SessionId(rawValue: "session-2")
 
     await client.sessionUpdate(
-        UpdateSessionNotification(sessionId: testSession, update: agentChunk("one"))
+        UpdateSessionNotification(sessionId: testSession, update: agentChunk(text: "one"))
     )
     await client.sessionUpdate(
-        UpdateSessionNotification(sessionId: otherSession, update: agentChunk("two", message: "agent-2"))
+        UpdateSessionNotification(sessionId: otherSession, update: agentChunk(text: "two", message: "agent-2"))
     )
 
     #expect(client.sessions.count == 2)
@@ -401,7 +401,7 @@ private let usedTokens = 1_500
     } onChange: {
         changed.withLock { $0 = true }
     }
-    await drive(client, .stateUpdate(.running(RunningStateUpdate())))
+    await drive(client: client, .stateUpdate(.running(RunningStateUpdate())))
 
     #expect(changed.withLock { $0 })
 }

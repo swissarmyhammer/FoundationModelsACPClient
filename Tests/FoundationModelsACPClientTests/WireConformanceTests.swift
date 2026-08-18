@@ -101,11 +101,11 @@ private func fullScript() -> [SessionUpdate] {
     let callID = ToolCallId(rawValue: "call-1")
     let terminalID = TerminalId(rawValue: "term-1")
     return [
-        userChunk("ask", message: "user-1"),
+        userChunk(text: "ask", message: "user-1"),
         .userMessage(UserMessage(messageId: userID, content: .value([textBlock("question")]))),
-        agentChunk("draft", message: "agent-1"),
+        agentChunk(text: "draft", message: "agent-1"),
         .agentMessage(AgentMessage(messageId: agentID, content: .value([textBlock("answer")]))),
-        thoughtChunk("hmm", message: "thought-1"),
+        thoughtChunk(text: "hmm", message: "thought-1"),
         .agentThought(AgentThought(messageId: thoughtID, content: .value([textBlock("reasoning")]))),
         .stateUpdate(.running(RunningStateUpdate())),
         .toolCallUpdate(
@@ -114,7 +114,7 @@ private func fullScript() -> [SessionUpdate] {
         .toolCallContentChunk(
             ToolCallContentChunk(content: .content(Content(content: textBlock("line"))), toolCallId: callID)
         ),
-        toolCallStatus("call-1", .completed),
+        toolCallStatus(id: "call-1", .completed),
         .terminalUpdate(TerminalUpdate(terminalId: terminalID, command: .value("ls"))),
         .terminalOutputChunk(
             TerminalOutputChunk(data: Data("hi".utf8).base64EncodedString(), terminalId: terminalID)
