@@ -54,6 +54,69 @@ comments:
     - evidence: `swift build` (clean, after `rm -rf .build`) — build complete, 0 warnings, 0 errors. `swift test` — 33 tests passed, 0 failed, 0 skipped.
     - next: none. The build is clean.
   timestamp: 2026-08-18T12:50:22.612711+00:00
+- actor: claude-code
+  id: 01m0aeswvby1z4e8k7yn7xjt7j
+  text: |-
+    ### commit — changed
+    - evidence: f4d0a5c feat(session-state): group fast token chunks before they update the view
+    - next: none
+  timestamp: 2026-08-18T12:51:08.267329+00:00
+- actor: claude-code
+  id: 01m0aeywydhc5qs0dxem668aya
+  text: |-
+    ### review — findings
+    - evidence: 2 findings — Sources/FoundationModelsACPClient/ACPSessionState.swift:102, Tests/FoundationModelsACPClientTests/CoalescingTests.swift:20
+    - next: correct the two findings, then run the review again
+
+    step: review
+    outcome: findings
+    evidence: 2 findings — Sources/FoundationModelsACPClient/ACPSessionState.swift:102, Tests/FoundationModelsACPClientTests/CoalescingTests.swift:20
+    task: ^asds3x6
+  timestamp: 2026-08-18T12:53:52.205536+00:00
+- actor: claude-code
+  id: 01m0aezf9fzhqf92wk1q21kep7
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 5 files (ACPSessionState.swift, SwiftUIACPClient.swift, CoalescingTests.swift new, SessionUpdateFixtures.swift, SessionStateTests.swift)
+    - test: green — swift test, 33 passed, 0 failures, 0 warnings
+    - commit: f4d0a5c
+    - review: findings — Sources/FoundationModelsACPClient/ACPSessionState.swift:102, Tests/FoundationModelsACPClientTests/CoalescingTests.swift:20
+  timestamp: 2026-08-18T12:54:10.991973+00:00
+- actor: claude-code
+  id: 01m0af36jd0bf1pf3kjnf1f6gv
+  text: |-
+    Finding correction complete.
+
+    The rule is swiftlint `no_magic_numbers`. It permits a literal in a direct declaration, but it reports a literal that is a function argument. Both flagged lines had the shape `.milliseconds(<literal>)`, so each literal now has its own named constant:
+
+    - `ACPSessionState.swift`: `defaultCoalescingCadenceMilliseconds = 33` (private static let), and `defaultCoalescingCadence` now reads `.milliseconds(defaultCoalescingCadenceMilliseconds)`.
+    - `CoalescingTests.swift`: `testCadenceMilliseconds = 40` (private let), and `testCadence` now reads `.milliseconds(testCadenceMilliseconds)`.
+
+    A search of the whole package for literals in argument position found no other cause: the only other matches are `Mutex(0)` and `.minutes(1)`, and the rule permits `0` and `1`.
+
+    The card checkboxes are now current: both findings are checked, and all 10 acceptance and test checkboxes are checked, because the M2 coalescing work satisfies them and the tests hold them.
+
+    Verification: `swift test` — 33 tests, 0 failures, 0 warnings.
+  timestamp: 2026-08-18T12:56:13.133261+00:00
+- actor: claude-code
+  id: 01m0af3c15aax7h3r2qmmdbqwd
+  text: |-
+    ### implement — changed
+    - evidence: 2 files — Sources/FoundationModelsACPClient/ACPSessionState.swift, Tests/FoundationModelsACPClientTests/CoalescingTests.swift. 2 findings corrected and checked. `swift test`: 33 tests, 0 failures, 0 warnings. 10 acceptance and test checkboxes checked.
+    - next: /review
+
+    step: implement
+    outcome: changed
+    evidence: 2 files — Sources/FoundationModelsACPClient/ACPSessionState.swift, Tests/FoundationModelsACPClientTests/CoalescingTests.swift; 2 findings corrected; swift test 33 passed, 0 failures, 0 warnings
+    task: ^asds3x6
+  timestamp: 2026-08-18T12:56:18.725803+00:00
+- actor: claude-code
+  id: 01m0af4z5rrcjp9ww1bt7jjapr
+  text: |-
+    ### test — green
+    - evidence: swift build (clean, 0 warnings, 0 errors) and swift test — 33 passed, 0 failed, 0 skipped
+    - next: none
+  timestamp: 2026-08-18T12:57:11.096050+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
 position_column: doing
@@ -78,20 +141,30 @@ Requirements:
 
 ## Acceptance Criteria
 
-- [ ] Deltas are batched and flushed on a configurable display-rate cadence.
-- [ ] Final text is byte-identical to concatenation of all chunks.
-- [ ] Turn end (and connection close) flushes any buffer synchronously.
-- [ ] Appends mutate the in-flight message in place; no array rebuild per chunk.
-- [ ] Cadence is injectable so tests need no wall-clock sleeps.
+- [x] Deltas are batched and flushed on a configurable display-rate cadence.
+- [x] Final text is byte-identical to concatenation of all chunks.
+- [x] Turn end (and connection close) flushes any buffer synchronously.
+- [x] Appends mutate the in-flight message in place; no array rebuild per chunk.
+- [x] Cadence is injectable so tests need no wall-clock sleeps.
 
 ## Tests
 
-- [ ] N rapid chunks produce **far fewer than N** observable mutations -- assert the count, since this is the whole point of the task.
-- [ ] Concatenation equality: final text equals the joined chunks exactly, including whitespace and unicode.
-- [ ] A turn ending mid-buffer flushes the remainder.
-- [ ] Interleaved message and thought chunks each coalesce into their own target without cross-contamination.
-- [ ] No test depends on real elapsed time.
+- [x] N rapid chunks produce **far fewer than N** observable mutations -- assert the count, since this is the whole point of the task.
+- [x] Concatenation equality: final text equals the joined chunks exactly, including whitespace and unicode.
+- [x] A turn ending mid-buffer flushes the remainder.
+- [x] Interleaved message and thought chunks each coalesce into their own target without cross-contamination.
+- [x] No test depends on real elapsed time.
 
 ## Workflow
 
 - Use `/tdd` -- write the failing mutation-count test first; it is the specification.
+
+## Review Findings (2026-08-18 07:51)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/ACPSessionState.swift:102` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `Tests/FoundationModelsACPClientTests/CoalescingTests.swift:20` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

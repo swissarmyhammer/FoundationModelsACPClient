@@ -95,11 +95,15 @@ public final class ACPSessionState {
     /// The identities that already have an entry in ``entries``.
     private var knownEntryIdentities: Set<SessionEntry.ID> = []
 
+    /// The default coalescing cadence, in milliseconds.
+    private static let defaultCoalescingCadenceMilliseconds = 33
+
     /// The default display-rate cadence for chunk coalescing.
     ///
     /// The value gives approximately 30 flushes for each second. That rate is
     /// smooth for a reader and far under the token rate.
-    public static let defaultCoalescingCadence: Duration = .milliseconds(33)
+    public static let defaultCoalescingCadence: Duration =
+        .milliseconds(defaultCoalescingCadenceMilliseconds)
 
     /// The cadence between coalesced flushes.
     private let coalescingCadence: Duration

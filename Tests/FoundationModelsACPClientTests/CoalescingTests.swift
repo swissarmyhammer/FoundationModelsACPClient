@@ -16,8 +16,11 @@ private let rapidChunkCount = 200
 /// must be far under `rapidChunkCount`, because coalescing is the point.
 private let coalescedMutationLimit = 20
 
+/// The test cadence, in milliseconds.
+private let testCadenceMilliseconds = 40
+
 /// The cadence that these tests give the client under test.
-private let testCadence: Duration = .milliseconds(40)
+private let testCadence: Duration = .milliseconds(testCadenceMilliseconds)
 
 /// The highest number of cooperative yields a test waits for the scheduled
 /// flush task to run. The wait is cooperative, so no test reads the wall
