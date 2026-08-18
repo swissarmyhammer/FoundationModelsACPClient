@@ -100,10 +100,33 @@ comments:
     - evidence: swift build (clean rebuild) — 0 errors, 0 warnings. swift test — 53 tests passed, 0 failed, 0 skipped.
     - next: none. The build and test suite are clean.
   timestamp: 2026-08-18T15:43:49.664196+00:00
+- actor: claude-code
+  id: 01m0arpzc4szm7y5k6azvmybvw
+  text: |-
+    ### commit — changed
+    - evidence: 0b1a97b fix(client): replace magic numbers with named constants
+    - next: none
+  timestamp: 2026-08-18T15:44:18.308646+00:00
+- actor: claude-code
+  id: 01m0arv6tp5xtycdzp2e0zdzky
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted; all prior findings are checked
+    - next: none — task moved to done
+  timestamp: 2026-08-18T15:46:37.014084+00:00
+- actor: claude-code
+  id: 01m0arvnnknekhhge31gsjc3ds
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 2 files; 3 review findings corrected and checked
+    - test: green — swift test, 53 passed, 0 failures, 0 warnings
+    - commit: 0b1a97b
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T15:46:52.211021+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: doing
-position_ordinal: '8180'
+position_column: done
+position_ordinal: '8580'
 title: 'M6 Transports: in-process pairing and stdio to an external agent'
 ---
 ## What
