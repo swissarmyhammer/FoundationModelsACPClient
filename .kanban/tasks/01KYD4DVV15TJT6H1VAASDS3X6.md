@@ -117,10 +117,38 @@ comments:
     - evidence: swift build (clean, 0 warnings, 0 errors) and swift test — 33 passed, 0 failed, 0 skipped
     - next: none
   timestamp: 2026-08-18T12:57:11.096050+00:00
+- actor: claude-code
+  id: 01m0af5p07nnttrbjgpbfm4q8h
+  text: |-
+    ### commit — changed
+    - evidence: ca98afc refactor(session-state): use named constants for cadence values
+    - next: none
+  timestamp: 2026-08-18T12:57:34.471223+00:00
+- actor: claude-code
+  id: 01m0af92edbmwzv9jq1t4wmsg9
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted. All items in the section "Review Findings (2026-08-18 07:51)" have the checked state.
+    - next: none. The task moved to the done column.
+
+    step: review
+    outcome: clean
+    evidence: review sha HEAD~1..HEAD — counts: 0 findings, 0 confirmed, 0 refuted; all items in the section "Review Findings (2026-08-18 07:51)" have the checked state
+    task: ^asds3x6
+  timestamp: 2026-08-18T12:59:25.517969+00:00
+- actor: claude-code
+  id: 01m0af9nxna98pq7qe5m2r3386
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 2 files; 2 review findings corrected and checked
+    - test: green — swift test, 33 passed, 0 failures, 0 warnings
+    - commit: ca98afc
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T12:59:45.461957+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8280'
 title: M2 Coalesce token-rate chunks so SwiftUI does not thrash
 ---
 ## What

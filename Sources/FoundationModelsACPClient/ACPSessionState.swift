@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 import Observation
 
@@ -87,6 +88,17 @@ public final class ACPSessionState {
     /// The last stop reason an idle `state_update` reported. An idle update
     /// that omits its stop reason keeps the stored value.
     public private(set) var lastStopReason: StopReason?
+
+    /// The permission requests that wait for the user's answer, in arrival
+    /// order.
+    ///
+    /// This is the concurrency policy: the container supports more than one
+    /// outstanding request at the same time. Each request keeps its position
+    /// until it resolves, and each request resolves independently of the
+    /// others. Resolve one request with
+    /// ``answerPermissionRequest(_:with:)`` or with
+    /// ``cancelPermissionRequest(_:)``.
+    public private(set) var pendingPermissionRequests: [PendingPermissionRequest] = []
 
     /// The accumulated per-identity state, folded with the wire package's
     /// own upsert rules.
@@ -192,6 +204,136 @@ public final class ACPSessionState {
             recordChunkIdentity(kind: item.kind, messageID: item.messageID)
         }
         aggregator = folded
+    }
+
+    /// The lifecycle state of one permission request between arrival and
+    /// resolution.
+    ///
+    /// The three cases are mutually exclusive. A resolved request has no
+    /// entry at all, so no state and no continuation outlives a request.
+    private enum PermissionRequestState {
+        /// The request arrived. Its continuation is not registered yet.
+        case awaitingRegistration
+
+        /// A cancellation arrived before the continuation registered. The
+        /// registration reads this case and answers `cancelled` at once,
+        /// so the continuation never suspends.
+        case cancelledBeforeRegistration
+
+        /// The agent's call is suspended on this continuation.
+        case suspended(CheckedContinuation<RequestPermissionResponse, Never>)
+    }
+
+    /// The lifecycle state of each unresolved permission request, keyed by
+    /// the request id. The storage is not observable; the UI binds to
+    /// ``pendingPermissionRequests`` instead.
+    @ObservationIgnored private var permissionRequestStates: [UUID: PermissionRequestState] = [:]
+
+    /// Suspends until the user answers or cancels the permission request.
+    ///
+    /// The call adds one entry to ``pendingPermissionRequests`` and holds
+    /// the continuation until one of these resolutions arrives:
+    ///
+    /// - ``answerPermissionRequest(_:with:)`` resolves it with the
+    ///   selected option.
+    /// - ``cancelPermissionRequest(_:)`` and
+    ///   ``cancelAllPermissionRequests()`` resolve it with `cancelled`.
+    /// - Cancellation of the surrounding task resolves it with
+    ///   `cancelled`. The connection cancels that task when the agent
+    ///   withdraws the request, when the turn gets cancelled, or when the
+    ///   transport closes.
+    ///
+    /// Each resolution removes the pending entry and resumes the
+    /// continuation exactly one time, so no continuation leaks and no
+    /// ghost prompt stays on screen.
+    ///
+    /// - Parameter request: The permission request from the agent.
+    /// - Returns: The user's decision, or the `cancelled` outcome.
+    public func awaitPermissionDecision(
+        for request: RequestPermissionRequest
+    ) async -> RequestPermissionResponse {
+        let id = UUID()
+        permissionRequestStates[id] = .awaitingRegistration
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if case .cancelledBeforeRegistration = permissionRequestStates[id] {
+                    permissionRequestStates[id] = nil
+                    continuation.resume(returning: RequestPermissionResponse(outcome: .cancelled))
+                } else {
+                    pendingPermissionRequests.append(
+                        PendingPermissionRequest(id: id, request: request)
+                    )
+                    permissionRequestStates[id] = .suspended(continuation)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelPermissionRequest(id)
+            }
+        }
+    }
+
+    /// Answers one pending permission request with the selected option.
+    ///
+    /// The call removes the pending entry and resolves the agent's
+    /// in-flight request. A call with an unknown or already resolved id
+    /// changes nothing.
+    ///
+    /// - Parameters:
+    ///   - id: The id of the pending request.
+    ///   - optionId: The id of the selected option. Give the id of one
+    ///     option of the request.
+    public func answerPermissionRequest(_ id: UUID, with optionId: PermissionOptionId) {
+        resolvePermissionRequest(
+            id: id,
+            outcome: .selected(SelectedPermissionOutcome(optionId: optionId))
+        )
+    }
+
+    /// Cancels one permission request.
+    ///
+    /// The call removes the pending entry and resolves the agent's
+    /// in-flight request with the `cancelled` outcome, which is the spec's
+    /// outcome for a request the user did not decide. A call with an
+    /// unknown or already resolved id changes nothing.
+    ///
+    /// - Parameter id: The id of the request.
+    public func cancelPermissionRequest(_ id: UUID) {
+        switch permissionRequestStates[id] {
+        case .suspended:
+            resolvePermissionRequest(id: id, outcome: .cancelled)
+        case .awaitingRegistration:
+            permissionRequestStates[id] = .cancelledBeforeRegistration
+        case .cancelledBeforeRegistration, nil:
+            // The request is already cancelled or already resolved.
+            break
+        }
+    }
+
+    /// Cancels every pending permission request.
+    ///
+    /// The host calls this on connection close, so a dropped connection
+    /// leaves no pending prompt and leaks no continuation.
+    public func cancelAllPermissionRequests() {
+        for id in pendingPermissionRequests.map(\.id) {
+            cancelPermissionRequest(id)
+        }
+    }
+
+    /// Removes one pending permission request and resumes its suspended
+    /// continuation with the outcome.
+    ///
+    /// A request whose continuation is not suspended stays unchanged, so
+    /// no continuation can resume two times.
+    ///
+    /// - Parameters:
+    ///   - id: The id of the request.
+    ///   - outcome: The outcome to answer with.
+    private func resolvePermissionRequest(id: UUID, outcome: RequestPermissionOutcome) {
+        guard case .suspended(let continuation) = permissionRequestStates[id] else { return }
+        permissionRequestStates[id] = nil
+        pendingPermissionRequests.removeAll { $0.id == id }
+        continuation.resume(returning: RequestPermissionResponse(outcome: outcome))
     }
 
     /// One buffered chunk update and the in-flight target it lands on.

@@ -423,24 +423,3 @@ private let usedTokens = 1_500
     #expect(client.connectionState == .connected)
     #expect(changed.withLock { $0 })
 }
-
-// MARK: - Permission
-
-@MainActor @Test func requestPermissionAnswersCancelledUntilPendingStateLands() async throws {
-    let client = SwiftUIACPClient()
-    let request = RequestPermissionRequest(
-        options: [
-            PermissionOption(
-                kind: .allowOnce,
-                name: "Allow once",
-                optionId: PermissionOptionId(rawValue: "allow-once")
-            )
-        ],
-        sessionId: testSession,
-        title: "Run the tool?"
-    )
-
-    let response = try await client.requestPermission(request)
-
-    #expect(response.outcome == .cancelled)
-}

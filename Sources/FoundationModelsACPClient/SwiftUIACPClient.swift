@@ -33,12 +33,15 @@ public final class SwiftUIACPClient: Client {
     ///
     /// A change to ``ConnectionState/disconnected`` flushes the coalescing
     /// buffer of every session synchronously, so the last partial chunk is
-    /// never left buffered when the connection closes.
+    /// never left buffered when the connection closes. The same change
+    /// cancels every pending permission request, so a dropped connection
+    /// leaves no ghost prompt on screen and leaks no continuation.
     public var connectionState: ConnectionState = .disconnected {
         didSet {
             guard connectionState == .disconnected else { return }
             for state in sessions.values {
                 state.flushPendingChunks()
+                state.cancelAllPermissionRequests()
             }
         }
     }
@@ -87,18 +90,21 @@ public final class SwiftUIACPClient: Client {
         session(for: notification.sessionId).apply(notification.update)
     }
 
-    /// Answers the agent's permission request.
+    /// Answers the agent's permission request with the user's decision.
     ///
-    /// This is a placeholder until the pending-requests milestone (M3)
-    /// lands bindable permission state. It answers `cancelled`, which is
-    /// the spec's outcome for a request the user did not decide. It never
-    /// selects an option for the user.
+    /// The request lands as pending state on its session
+    /// (``ACPSessionState/pendingPermissionRequests``), and this call
+    /// suspends until the UI resolves it. A cancellation of this call —
+    /// the agent withdraws the request, the turn gets cancelled, or the
+    /// connection drops — clears the pending state and answers
+    /// `cancelled`, which is the spec's outcome for a request the user
+    /// did not decide. It never selects an option for the user.
     ///
     /// - Parameter params: The permission request.
-    /// - Returns: The `cancelled` outcome.
+    /// - Returns: The user's decision, or the `cancelled` outcome.
     public func requestPermission(
         _ params: RequestPermissionRequest
     ) async throws -> RequestPermissionResponse {
-        RequestPermissionResponse(outcome: .cancelled)
+        await session(for: params.sessionId).awaitPermissionDecision(for: params)
     }
 }
