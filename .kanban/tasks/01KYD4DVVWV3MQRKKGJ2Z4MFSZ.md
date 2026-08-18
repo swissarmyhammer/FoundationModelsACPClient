@@ -64,10 +64,34 @@ comments:
     - evidence: swift build (0 errors, 0 warnings); swift build --build-tests (0 errors, 0 warnings); swift test — 39 tests passed, 0 failed, 0 skipped
     - next: none. The build is clean.
   timestamp: 2026-08-18T14:50:16.014483+00:00
+- actor: claude-code
+  id: 01m0ann4spftdn9g24vh1tjh0c
+  text: |-
+    ### commit — changed
+    - evidence: a1d9960 feat(session): add pending permission request as bindable state
+    - next: none
+  timestamp: 2026-08-18T14:50:52.598826+00:00
+- actor: claude-code
+  id: 01m0anvqyjc8rbne5xhbmk5mj4
+  text: |-
+    step: review
+    outcome: clean
+    evidence: review sha HEAD~1..HEAD — counts: findings 0, confirmed 0, refuted 2; 6 files reviewed, 4 files not reviewed (.kanban/ from .reviewignore)
+    task: ^2z4mfsz
+  timestamp: 2026-08-18T14:54:28.818162+00:00
+- actor: claude-code
+  id: 01m0anwa8esvyftc98y8py6wpe
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 6 files (PendingPermissionRequest.swift new, ACPSessionState.swift, SwiftUIACPClient.swift, ACPClient.swift, PermissionRequestTests.swift new, SessionStateTests.swift)
+    - test: green — swift test, 39 passed, 0 failures, 0 warnings
+    - commit: a1d9960
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T14:54:47.566325+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8380'
 title: 'M3 Pending requests as bindable state: permission now, elicitation later'
 ---
 ## What

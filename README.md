@@ -18,3 +18,18 @@ SwiftUI, so it stays usable from AppKit/UIKit and testable headlessly.
 
 > **Status: design only.** No implementation yet — see
 > [`plan.md`](plan.md) for the architecture, decisions, and milestones.
+
+## Known limitation: staleness after compaction
+
+The agent's record is not monotonic. Compaction rewrites the agent's
+transcript, and entries that a client already showed can stop to exist. The
+`session/update` stream is append-only, so a client that only accumulates
+updates becomes stale after compaction.
+
+`ACPSessionState` can rebuild its full state from a `session/resume` replay:
+call `beginRehydration()`, make the `session/resume` call, and then call
+`endRehydration()`. But ACP defines no history-invalidation signal at this
+time, so the client cannot know when the agent compacted the record. Until
+ACP defines that signal (tracked in `FoundationModelsACP`), staleness after
+compaction is a known bug. The host must start a reload itself, for example
+each time it opens a session again.

@@ -36,6 +36,13 @@ public enum TurnState: Hashable, Sendable {
 /// The upsert rules come from the wire package's own
 /// `SessionUpdateAggregator`, so this container holds no second copy of them.
 ///
+/// The agent's record is not monotonic: compaction rewrites it, and entries
+/// that this container showed can stop to exist. ``beginRehydration()``,
+/// ``endRehydration()``, and ``cancelRehydration()`` rebuild this projection
+/// from a `session/resume` replay. ACP defines no history-invalidation signal
+/// at this time, so the host must start that reload itself; until a reload,
+/// the projection can be stale after compaction.
+///
 /// `agent_message_chunk` and `agent_thought_chunk` arrive at token rate. This
 /// container does not mutate observable state for each of those chunks.
 /// It collects them in a buffer and flushes the buffer on a display-rate
@@ -168,12 +175,20 @@ public final class ACPSessionState {
 
     /// Folds one session update into the observable state.
     ///
+    /// While a rehydration capture is active, the update goes into the
+    /// capture buffer instead, and ``endRehydration()`` rebuilds the state
+    /// from that buffer.
+    ///
     /// A coalescible chunk lands in the buffer, and the buffer flushes on the
     /// cadence. Any other update flushes the buffer first and then applies,
     /// so the applied order stays equal to plain one-by-one application.
     ///
     /// - Parameter update: The update to apply.
     public func apply(_ update: SessionUpdate) {
+        if isRehydrating {
+            rehydrationReplay.append(update)
+            return
+        }
         if let pending = pendingChunk(for: update) {
             enqueue(pending)
             return
@@ -204,6 +219,92 @@ public final class ACPSessionState {
             recordChunkIdentity(kind: item.kind, messageID: item.messageID)
         }
         aggregator = folded
+    }
+
+    /// Tells whether a rehydration capture is active.
+    ///
+    /// ``beginRehydration()`` sets it, and ``endRehydration()`` or
+    /// ``cancelRehydration()`` clears it. A UI can bind to it to show a
+    /// reload indicator.
+    public private(set) var isRehydrating = false
+
+    /// The captured replay of an active rehydration. The buffer is not
+    /// observable, so a capture causes no invalidation.
+    @ObservationIgnored private var rehydrationReplay: [SessionUpdate] = []
+
+    /// Starts a rehydration capture.
+    ///
+    /// The agent's record is not monotonic: compaction rewrites it, and
+    /// entries that this container showed can stop to exist. A rebuild from
+    /// a `session/resume` replay is the correction. Call this before the
+    /// `session/resume` call. Each update that ``apply(_:)`` then receives
+    /// goes into a capture buffer and does not touch the observable state.
+    /// Call ``endRehydration()`` after the `session/resume` response, or
+    /// ``cancelRehydration()`` when the call fails.
+    ///
+    /// The call flushes the coalescing buffer first, so the prior state is
+    /// complete while the capture is active.
+    public func beginRehydration() {
+        flushPendingChunks()
+        rehydrationReplay.removeAll()
+        isRehydrating = true
+    }
+
+    /// Ends the rehydration capture and rebuilds the state from it.
+    ///
+    /// The rebuild discards the accumulated record projection and applies
+    /// the captured replay through the same code path as a live stream.
+    /// Thus a container that loads mid-session reaches the same state as a
+    /// container that streamed from the start, and a second reload with the
+    /// same replay changes nothing.
+    ///
+    /// The whole rebuild is one synchronous main-actor pass, so a UI never
+    /// renders the empty intermediate state. Pending permission requests
+    /// are live request state, not record state; they stay pending and
+    /// their continuations stay held.
+    ///
+    /// A call with no active capture changes nothing.
+    public func endRehydration() {
+        guard isRehydrating else { return }
+        isRehydrating = false
+        let replay = rehydrationReplay
+        rehydrationReplay.removeAll()
+        resetRecordProjection()
+        for update in replay {
+            applyUnbuffered(update)
+        }
+    }
+
+    /// Discards the rehydration capture and keeps the prior state.
+    ///
+    /// The host calls this when the `session/resume` call fails, so a
+    /// partial replay never becomes the state. The prior state stays as it
+    /// was: possibly stale, but consistent. A call with no active capture
+    /// changes nothing.
+    public func cancelRehydration() {
+        guard isRehydrating else { return }
+        isRehydrating = false
+        rehydrationReplay.removeAll()
+    }
+
+    /// Clears every field that the record projects into, back to the value
+    /// an empty session state holds.
+    ///
+    /// ``pendingPermissionRequests`` and its continuations stay untouched:
+    /// they are live request state, not record state.
+    private func resetRecordProjection() {
+        aggregator = SessionUpdateAggregator()
+        entries = []
+        knownEntryIdentities = []
+        inFlightAgentMessageID = nil
+        inFlightThoughtID = nil
+        availableCommands = []
+        configOptions = []
+        title = nil
+        updatedAt = nil
+        usage = nil
+        turnState = .idle
+        lastStopReason = nil
     }
 
     /// The lifecycle state of one permission request between arrival and
