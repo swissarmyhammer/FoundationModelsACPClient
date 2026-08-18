@@ -48,10 +48,33 @@ comments:
     - evidence: swift build (clean) — 0 warnings, build complete. swift test — 46 passed, 0 failed, 0 skipped.
     - next: none
   timestamp: 2026-08-18T15:09:16.410293+00:00
+- actor: claude-code
+  id: 01m0apr41c4f1vqhexqcm57e5j
+  text: |-
+    ### commit — changed
+    - evidence: 15a2073 feat(session): rebuild session state from session/load
+    - next: none
+  timestamp: 2026-08-18T15:09:58.700312+00:00
+- actor: claude-code
+  id: 01m0apw76fjtrfma5wa4zeryhx
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted; 2 files reviewed, 4 files excluded by .reviewignore (.kanban/)
+    - next: none — task moved to done
+  timestamp: 2026-08-18T15:12:13.007015+00:00
+- actor: claude-code
+  id: 01m0apws7e8kdsna3rf53rabvv
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (ACPSessionState.swift, RehydrationTests.swift new, README.md)
+    - test: green — swift test, 46 passed, 0 failures, 0 warnings
+    - commit: 15a2073
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T15:12:31.470280+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8480'
 title: M4 Rehydrate from session/load, because the record is non-monotonic
 ---
 ## What
