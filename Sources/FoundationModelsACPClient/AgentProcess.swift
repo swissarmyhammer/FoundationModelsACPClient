@@ -313,9 +313,10 @@ public struct AgentProcess: Sendable {
 
     // MARK: - Reading
 
-    /// The read buffer size, large enough to drain a typical pipe burst in
-    /// one syscall — the same size the wire package's own reader uses.
-    private static let readBufferSize = 64 * 1024
+    /// The read buffer size in bytes (64 KiB), large enough to drain a
+    /// typical pipe burst in one syscall — the same size the wire package's
+    /// own reader uses.
+    private static let readBufferSize = 65536
 
     /// Starts the reader thread for the agent's stdout.
     ///

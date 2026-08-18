@@ -47,6 +47,59 @@ comments:
     - evidence: swift build (clean rebuild) — 0 warnings, 0 errors; swift test — 53 passed, 0 failed, 0 skipped
     - next: none. The build and test suite are clean.
   timestamp: 2026-08-18T15:36:29.028143+00:00
+- actor: claude-code
+  id: 01m0ara28ebc2dvzex5pfp7p1a
+  text: |-
+    ### commit — changed
+    - evidence: f1d3700 feat(transport): add in-process pairing and stdio connect to an external agent
+    - next: none
+  timestamp: 2026-08-18T15:37:15.278075+00:00
+- actor: claude-code
+  id: 01m0arg55grtvfb0wtn70rvv7p
+  text: |-
+    ### review — findings
+    - evidence: 3 findings — Sources/FoundationModelsACPClient/AgentProcess.swift:318, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:13, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:16
+    - next: Obey each finding in the "## Review Findings (2026-08-18 10:37)" section. Then run the review again.
+
+    step: review
+    outcome: findings
+    evidence: 3 findings — Sources/FoundationModelsACPClient/AgentProcess.swift:318, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:13, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:16
+    task: ^nfbzx9w
+  timestamp: 2026-08-18T15:40:34.864888+00:00
+- actor: claude-code
+  id: 01m0argpstq09ydfa2401fpg8d
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 6 files (AgentProcess.swift, ProcessRegistry.swift, SwiftUIACPClient+Connect.swift, AgentProcessTests.swift, InProcessConnectionTests.swift, TransportTestSupport.swift)
+    - test: green — swift test, 53 passed, 0 failures, 0 warnings
+    - commit: f1d3700
+    - review: findings — Sources/FoundationModelsACPClient/AgentProcess.swift:318, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:13, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:16
+  timestamp: 2026-08-18T15:40:52.922840+00:00
+- actor: claude-code
+  id: 01m0armdqhwqc699nd9aspw69p
+  text: |-
+    Corrections for the 3 magic-number findings:
+
+    - `Sources/FoundationModelsACPClient/AgentProcess.swift` — the expression `64 * 1024` put two literals into an operator chain, which the rule reports. The declaration now holds the one value `65536` directly, and the doc comment says "64 KiB". The declaration itself names the value, which the rule permits. A scan of the full file found no other cause: each other numeric literal is `0` or `1`, which the rule permits.
+    - `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift` — the literals `10` and `20` were function arguments to `.seconds(_:)` and `.milliseconds(_:)`, which the rule reports. Two new named constants, `limitSeconds` and `pollIntervalMilliseconds`, now hold the values, and the `Duration` declarations use the constants. A scan of the full file found no other cause: the only other numeric literal is the `0` in `kill(pid, 0)`, which the rule permits.
+
+    All 3 items in "## Review Findings (2026-08-18 10:37)" are set to `- [x]` on the card. `swift test`: 53 tests, 0 failures, 0 warnings.
+  timestamp: 2026-08-18T15:42:54.705868+00:00
+- actor: claude-code
+  id: 01m0armhf4jwayvztp5f804q8v
+  text: |-
+    step: implement
+    outcome: changed
+    evidence: 2 files — Sources/FoundationModelsACPClient/AgentProcess.swift, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift; 3 of 3 findings corrected and set to [x]; swift test — 53 tests, 0 failures, 0 warnings
+    task: ^nfbzx9w
+  timestamp: 2026-08-18T15:42:58.532446+00:00
+- actor: claude-code
+  id: 01m0arp3d0wvd1nja49vggrnss
+  text: |-
+    ### test — green
+    - evidence: swift build (clean rebuild) — 0 errors, 0 warnings. swift test — 53 tests passed, 0 failed, 0 skipped.
+    - next: none. The build and test suite are clean.
+  timestamp: 2026-08-18T15:43:49.664196+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
 position_column: doing
@@ -91,3 +144,14 @@ Prefer reusing the family's existing pattern over inventing a third variant.
 ## Workflow
 
 - Use `/tdd` -- write failing tests first.
+
+## Review Findings (2026-08-18 10:37)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 6 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/AgentProcess.swift:318` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:13` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:16` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

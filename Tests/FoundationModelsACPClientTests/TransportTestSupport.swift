@@ -9,11 +9,17 @@ import FoundationModelsACP
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {
+    /// The number of seconds in ``limit``.
+    private static let limitSeconds = 10
+
+    /// The number of milliseconds in ``pollInterval``.
+    private static let pollIntervalMilliseconds = 20
+
     /// The longest time a test waits for a condition to become true.
-    static let limit: Duration = .seconds(10)
+    static let limit: Duration = .seconds(limitSeconds)
 
     /// The pause between two polls of a condition.
-    static let pollInterval: Duration = .milliseconds(20)
+    static let pollInterval: Duration = .milliseconds(pollIntervalMilliseconds)
 }
 
 /// Polls `condition` until it is true or until the time limit ends.
