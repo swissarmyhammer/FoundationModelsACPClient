@@ -16,64 +16,6 @@ private let scriptedContextWindowSize = 200_000
 /// The used-token count that the scripted usage update reports.
 private let scriptedUsedTokens = 1_500
 
-/// A stub agent that sends a fixed update script during one prompt turn.
-private final class StubAgent: Agent {
-    /// The connection back to the client.
-    private let connection: AgentSideConnection
-
-    /// The session that the script belongs to.
-    private let session: SessionId
-
-    /// The updates to send, in order, when a prompt arrives.
-    private let script: [SessionUpdate]
-
-    /// Creates the stub.
-    ///
-    /// - Parameters:
-    ///   - connection: The connection back to the client.
-    ///   - session: The session that the script belongs to.
-    ///   - script: The updates to send during the prompt turn.
-    init(connection: AgentSideConnection, session: SessionId, script: [SessionUpdate]) {
-        self.connection = connection
-        self.session = session
-        self.script = script
-    }
-
-    func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        InitializeResponse(
-            info: Implementation(name: "stub-agent", version: "1.0.0"),
-            protocolVersion: params.protocolVersion
-        )
-    }
-
-    func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-        throw RequestError.methodNotFound("session/new")
-    }
-
-    func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        throw RequestError.methodNotFound("session/list")
-    }
-
-    func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        throw RequestError.methodNotFound("session/resume")
-    }
-
-    func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
-        throw RequestError.methodNotFound("session/close")
-    }
-
-    func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        for update in script {
-            try await connection.sessionUpdate(
-                UpdateSessionNotification(sessionId: session, update: update)
-            )
-        }
-        return PromptResponse()
-    }
-
-    func sessionCancel(_ params: CancelSessionNotification) async {}
-}
-
 /// The scripted plan entry.
 private let scriptedPlanEntry = PlanEntry(content: "read the file", priority: .medium, status: .inProgress)
 
@@ -135,7 +77,7 @@ func everySessionUpdateCaseLandsInObservableStateOverTheWire() async throws {
     let model = SwiftUIACPClient()
     let connection = await ClientSideConnection(stream: clientEnd) { _ in model }
     let agentConnection = await AgentSideConnection(stream: agentEnd) { agentSide in
-        StubAgent(connection: agentSide, session: testSession, script: fullScript())
+        ScriptedStubAgent(connection: agentSide, session: testSession, script: fullScript())
     }
 
     _ = try await connection.prompt(
