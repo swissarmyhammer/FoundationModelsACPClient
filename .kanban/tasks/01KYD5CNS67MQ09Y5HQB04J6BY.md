@@ -50,10 +50,38 @@ comments:
     - evidence: `swift package clean && swift build` — build complete, 0 warnings. `swift build --build-tests` — build complete, 0 warnings. `swift test` — 61 tests, 0 failures, 0 skipped.
     - next: none.
   timestamp: 2026-08-18T20:18:55.592345+00:00
+- actor: claude-code
+  id: 01m0b8f52h50zgtwcc7hdbd5td
+  text: |-
+    ### commit — changed
+    - evidence: 435dfcb feat(terminals): show terminal output owned by the agent
+    - next: none
+  timestamp: 2026-08-18T20:19:39.217466+00:00
+- actor: claude-code
+  id: 01m0b8kmqjprjcrr9nwakcpbms
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD — 0 findings, 0 confirmed, 0 refuted; 4 files reviewed
+    - next: none. The task moved to done.
+
+    step: review
+    outcome: clean
+    evidence: 0 findings, 0 confirmed, 0 refuted (review sha HEAD~1..HEAD)
+    task: ^b04j6by
+  timestamp: 2026-08-18T20:22:06.322597+00:00
+- actor: claude-code
+  id: 01m0b8m3p2p38b0g5n5vx8y6y3
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files (ACPSessionState+Terminals.swift new, TerminalDisplayTests.swift new, ScriptedStubAgent.swift new, WireConformanceTests.swift)
+    - test: green — swift test, 61 passed, 0 failures, 0 warnings
+    - commit: 435dfcb
+    - review: clean — 0 findings on HEAD~1..HEAD; task moved to done
+  timestamp: 2026-08-18T20:22:21.634004+00:00
 depends_on:
 - 01KYD4DVT6HNNEWD1EK9J9A1R5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8680'
 title: M5 Render agent-owned display terminals
 ---
 ## What

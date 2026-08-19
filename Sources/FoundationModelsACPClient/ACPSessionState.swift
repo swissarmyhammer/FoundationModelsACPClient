@@ -307,28 +307,11 @@ public final class ACPSessionState {
         lastStopReason = nil
     }
 
-    /// The lifecycle state of one permission request between arrival and
-    /// resolution.
-    ///
-    /// The three cases are mutually exclusive. A resolved request has no
-    /// entry at all, so no state and no continuation outlives a request.
-    private enum PermissionRequestState {
-        /// The request arrived. Its continuation is not registered yet.
-        case awaitingRegistration
-
-        /// A cancellation arrived before the continuation registered. The
-        /// registration reads this case and answers `cancelled` at once,
-        /// so the continuation never suspends.
-        case cancelledBeforeRegistration
-
-        /// The agent's call is suspended on this continuation.
-        case suspended(CheckedContinuation<RequestPermissionResponse, Never>)
-    }
-
     /// The lifecycle state of each unresolved permission request, keyed by
     /// the request id. The storage is not observable; the UI binds to
     /// ``pendingPermissionRequests`` instead.
-    @ObservationIgnored private var permissionRequestStates: [UUID: PermissionRequestState] = [:]
+    @ObservationIgnored private var permissionRequestStates =
+        PendingRequestStates<RequestPermissionResponse>()
 
     /// Suspends until the user answers or cancels the permission request.
     ///
@@ -354,17 +337,15 @@ public final class ACPSessionState {
         for request: RequestPermissionRequest
     ) async -> RequestPermissionResponse {
         let id = UUID()
-        permissionRequestStates[id] = .awaitingRegistration
+        permissionRequestStates.recordArrival(of: id)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                if case .cancelledBeforeRegistration = permissionRequestStates[id] {
-                    permissionRequestStates[id] = nil
-                    continuation.resume(returning: RequestPermissionResponse(outcome: .cancelled))
-                } else {
+                if permissionRequestStates.suspend(id, with: continuation) {
                     pendingPermissionRequests.append(
                         PendingPermissionRequest(id: id, request: request)
                     )
-                    permissionRequestStates[id] = .suspended(continuation)
+                } else {
+                    continuation.resume(returning: RequestPermissionResponse(outcome: .cancelled))
                 }
             }
         } onCancel: {
@@ -400,15 +381,8 @@ public final class ACPSessionState {
     ///
     /// - Parameter id: The id of the request.
     public func cancelPermissionRequest(_ id: UUID) {
-        switch permissionRequestStates[id] {
-        case .suspended:
-            resolvePermissionRequest(id: id, outcome: .cancelled)
-        case .awaitingRegistration:
-            permissionRequestStates[id] = .cancelledBeforeRegistration
-        case .cancelledBeforeRegistration, nil:
-            // The request is already cancelled or already resolved.
-            break
-        }
+        guard permissionRequestStates.noteCancellation(of: id) else { return }
+        resolvePermissionRequest(id: id, outcome: .cancelled)
     }
 
     /// Cancels every pending permission request.
@@ -431,8 +405,7 @@ public final class ACPSessionState {
     ///   - id: The id of the request.
     ///   - outcome: The outcome to answer with.
     private func resolvePermissionRequest(id: UUID, outcome: RequestPermissionOutcome) {
-        guard case .suspended(let continuation) = permissionRequestStates[id] else { return }
-        permissionRequestStates[id] = nil
+        guard let continuation = permissionRequestStates.takeSuspended(id) else { return }
         pendingPermissionRequests.removeAll { $0.id == id }
         continuation.resume(returning: RequestPermissionResponse(outcome: outcome))
     }

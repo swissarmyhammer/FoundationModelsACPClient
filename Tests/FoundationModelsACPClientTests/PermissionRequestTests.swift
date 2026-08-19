@@ -32,21 +32,6 @@ private func permissionRequest(title: String = "Run the tool?") -> RequestPermis
     RequestPermissionRequest(options: [allowOption, rejectOption], sessionId: testSession, title: title)
 }
 
-/// Waits until the condition is true.
-///
-/// The wait obeys task cancellation, so the test time limit stops a wait
-/// that does not end.
-///
-/// - Parameter condition: The condition to wait for.
-/// - Throws: `CancellationError` when the surrounding task gets cancelled.
-@MainActor
-private func waitUntil(_ condition: () -> Bool) async throws {
-    while !condition() {
-        try Task.checkCancellation()
-        await Task.yield()
-    }
-}
-
 @MainActor @Test(.timeLimit(.minutes(1)))
 func answeringAPendingPermissionRequestResolvesTheAgentCallWithTheSelectedOption() async throws {
     let model = SwiftUIACPClient()
@@ -153,10 +138,16 @@ func twoOverlappingRequestsStayPendingTogetherAndResolveIndependently() async th
 
 @Test
 func advertisedCapabilitiesMatchTheImplementedMethods() {
-    // ACP stable v2 gates no client method behind a capability, and this
-    // client implements no unstable extension. The client therefore
-    // advertises the empty capability set and nothing more.
-    #expect(ACPClient.advertisedCapabilities == ClientCapabilities())
+    // ACP stable v2 gates elicitation behind the `elicitation` capability
+    // field. This client implements both elicitation modes, so it
+    // advertises form and url support, and nothing more.
+    let expected = ClientCapabilities(
+        elicitation: ElicitationCapabilities(
+            form: ElicitationFormCapabilities(),
+            url: ElicitationUrlCapabilities()
+        )
+    )
+    #expect(ACPClient.advertisedCapabilities == expected)
 }
 
 /// A stub agent that asks for permission during its one prompt turn.

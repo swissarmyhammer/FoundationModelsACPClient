@@ -12,9 +12,17 @@ public enum ACPClient {
 
     /// The client capabilities that this client sends during `initialize`.
     ///
-    /// ACP stable v2 defines no standard client capability field, and this
-    /// client implements no unstable extension. The value is therefore the
-    /// empty capability set: the client advertises only the methods it
-    /// implements, and nothing more.
-    public static let advertisedCapabilities = ClientCapabilities()
+    /// The client advertises only the modes it implements, and nothing
+    /// more. ``SwiftUIACPClient`` implements both elicitation modes: form
+    /// mode as bindable pending state that the UI answers with
+    /// schema-shaped values, and url mode as pending state with a
+    /// consent-gated URL that `elicitation/complete` closes. The value
+    /// therefore advertises the `elicitation` capability with `form` and
+    /// `url`.
+    public static let advertisedCapabilities = ClientCapabilities(
+        elicitation: ElicitationCapabilities(
+            form: ElicitationFormCapabilities(),
+            url: ElicitationUrlCapabilities()
+        )
+    )
 }

@@ -242,7 +242,7 @@ private func joinedText(of state: ACPSessionState, for id: MessageId) -> String 
 ///
 /// - Parameter condition: The condition to wait for.
 @MainActor
-private func waitUntil(_ condition: () -> Bool) async {
+private func yieldUntil(_ condition: () -> Bool) async {
     var remaining = maxYieldCount
     while remaining > 0, !condition() {
         remaining -= 1
@@ -281,9 +281,9 @@ private func waitUntil(_ condition: () -> Bool) async {
     await send(agentChunk(text: "two"), to: client)
     #expect(state.messageContent(for: messageID).isEmpty)
 
-    await waitUntil { clock.sleeperCount > 0 }
+    await yieldUntil { clock.sleeperCount > 0 }
     clock.advance(by: testCadence)
-    await waitUntil { !state.messageContent(for: messageID).isEmpty }
+    await yieldUntil { !state.messageContent(for: messageID).isEmpty }
 
     #expect(joinedText(of: state, for: messageID) == "one two")
     #expect(state.entries == [.agentMessage(messageID)])

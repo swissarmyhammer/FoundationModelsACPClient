@@ -22,6 +22,21 @@ enum TransportTestDeadline {
     static let pollInterval: Duration = .milliseconds(pollIntervalMilliseconds)
 }
 
+/// Waits until the condition is true.
+///
+/// The wait obeys task cancellation, so the test time limit stops a wait
+/// that does not end.
+///
+/// - Parameter condition: The condition to wait for.
+/// - Throws: `CancellationError` when the surrounding task gets cancelled.
+@MainActor
+func waitUntil(_ condition: () -> Bool) async throws {
+    while !condition() {
+        try Task.checkCancellation()
+        await Task.yield()
+    }
+}
+
 /// Polls `condition` until it is true or until the time limit ends.
 ///
 /// - Parameters:
