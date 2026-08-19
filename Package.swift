@@ -40,6 +40,14 @@ let package = Package(
         ),
         // Tests, on Swift Testing. The suite holds the linkage smoke test and
         // the forbidden-import scanner.
+        //
+        // This manifest declares no integration test target, and that is the
+        // whole unit/integration split. The agent-process suite is its own
+        // package, `IntegrationTests/Package.swift`, which depends on this
+        // one by path. So `swift test` here runs the unit tests and nothing
+        // else — not because a person remembered a flag, but because SwiftPM
+        // cannot see a target this manifest does not declare. Run that suite
+        // with `swift test --package-path IntegrationTests`.
         .testTarget(
             name: "FoundationModelsACPClientTests",
             dependencies: [

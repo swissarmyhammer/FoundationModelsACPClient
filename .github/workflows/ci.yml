@@ -1,5 +1,11 @@
 name: CI
 
+# The unit/integration split is structural. The root `Package.swift` declares
+# no integration target. The agent-process suite is its own package under
+# `IntegrationTests/`, so `swift test` at the root cannot reach it. Nothing
+# below sets an environment variable to select a suite, and nothing may start
+# to do so. The sibling package FoundationModelsMultitool uses the same split.
+
 on:
   push:
     branches: [main]
@@ -13,3 +19,30 @@ concurrency:
 jobs:
   unit:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
+
+  integration:
+    name: Integration (real agent subprocesses)
+    runs-on: [self-hosted, macOS]
+    # The unit job must run first. A compile error or a unit failure then
+    # reports in minutes, and no integration run starts on a broken tree.
+    # `CIWorkflowTests` pins this edge from the unit suite.
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Clean build directory
+        run: rm -rf IntegrationTests/.build
+
+      # This step also restores the compile coupling the nested package
+      # loses: the root build does not compile the integration files at all,
+      # so this build is the only thing that keeps them from rotting.
+      - name: Build the integration tests
+        run: swift build --package-path IntegrationTests --build-tests
+
+      - name: Run the integration suite
+        run: swift test --package-path IntegrationTests

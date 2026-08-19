@@ -3,14 +3,15 @@ import FoundationModelsACP
 
 @testable import FoundationModelsACPClient
 
-// This file holds the shared helpers for the transport tests. Each helper
+// This file holds the shared helpers for the integration tests. Each helper
 // bounds a wait with a deadline, so a test failure shows as a failed
 // expectation and never as a hang.
 //
-// The nested `IntegrationTests` package keeps a copy of its own, in its
-// `Support/TransportTestSupport.swift`. The two copies stay separate on
-// purpose: a test target cannot share source with a test target in an
-// other package.
+// The unit target keeps a copy of its own in
+// `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift`. The two
+// copies stay separate on purpose: a test target cannot share source with a
+// test target in an other package, and the sibling package
+// FoundationModelsMultitool makes the same choice.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {
@@ -25,21 +26,6 @@ enum TransportTestDeadline {
 
     /// The pause between two polls of a condition.
     static let pollInterval: Duration = .milliseconds(pollIntervalMilliseconds)
-}
-
-/// Waits until the condition is true.
-///
-/// The wait obeys task cancellation, so the test time limit stops a wait
-/// that does not end.
-///
-/// - Parameter condition: The condition to wait for.
-/// - Throws: `CancellationError` when the surrounding task gets cancelled.
-@MainActor
-func waitUntil(_ condition: () -> Bool) async throws {
-    while !condition() {
-        try Task.checkCancellation()
-        await Task.yield()
-    }
 }
 
 /// Polls `condition` until it is true or until the time limit ends.
@@ -103,6 +89,23 @@ func makeInitializeRequest() -> InitializeRequest {
     )
 }
 
+/// Connects `client` over `transport` and completes the initialize
+/// handshake, for the tests that do not assert on the handshake itself.
+///
+/// - Parameters:
+///   - client: The client to connect.
+///   - transport: The transport to run over.
+/// - Returns: The initialized connection.
+@MainActor
+func initializedConnection(
+    for client: SwiftUIACPClient,
+    over transport: any ACPTransport
+) async throws -> ClientSideConnection {
+    let connection = await client.connect(over: transport)
+    _ = try await connection.initialize(makeInitializeRequest())
+    return connection
+}
+
 /// Drives one prompt turn and waits until the agent's streamed reply landed
 /// in the observable session state.
 ///
@@ -131,4 +134,15 @@ func promptTurnLandsReply(
         state.flushPendingChunks()
         return state.messageContent(for: messageID) == [.text(TextContent(text: expectedText))]
     }
+}
+
+/// Tells whether a process with `pid` exists.
+///
+/// A zombie process exists until a reap collects it, so this helper also
+/// proves the reap: after a correct reap, the answer is `false`.
+///
+/// - Parameter pid: The process id to probe.
+/// - Returns: `true` when a signal-0 probe reaches a process.
+func processExists(_ pid: pid_t) -> Bool {
+    kill(pid, 0) == 0
 }
