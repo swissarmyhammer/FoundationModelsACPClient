@@ -1,35 +1,69 @@
 # FoundationModelsACPClient
 
-The [Agent Client Protocol](https://agentclientprotocol.com) **Client** role for
-Swift, as an `@Observable` container — so a SwiftUI app can drive an ACP agent
-over the protocol rather than through a private back door.
+[![CI](https://github.com/swissarmyhammer/FoundationModelsACPClient/actions/workflows/ci.yml/badge.svg)](https://github.com/swissarmyhammer/FoundationModelsACPClient/actions/workflows/ci.yml)
 
-Peer to
-[FoundationModelsACPAgent](https://github.com/swissarmyhammer/FoundationModelsACPAgent):
-one package per ACP role.
-
-- **In-process** — paired in-memory transport to an agent in the same app.
-- **Out-of-process** — stdio to any ACP agent, ours or a third party's.
-
-It depends on
+The [Agent Client Protocol](https://agentclientprotocol.com) **Client** role
+for Swift, as an `@Observable` container. Your app connects to an ACP agent —
+in the same process, or an external process over stdio — and its views bind
+to the session state that the agent's update stream fills. The package
+depends only on
 [FoundationModelsACP](https://github.com/swissarmyhammer/FoundationModelsACP)
-(the wire) and `Observation`, and nothing else. It deliberately does not import
-SwiftUI, so it stays usable from AppKit/UIKit and testable headlessly.
+(the wire) and Observation. It does not import SwiftUI, so AppKit, UIKit,
+and headless tests can use it too.
 
-> **Status: design only.** No implementation yet — see
-> [`plan.md`](plan.md) for the architecture, decisions, and milestones.
+```swift
+import FoundationModelsACP
+import FoundationModelsACPClient
+
+let client = SwiftUIACPClient()
+
+// Spawn an ACP agent, and connect over its stdio.
+let agent = try AgentProcess(command: "/usr/local/bin/my-acp-agent")
+let connection = await client.connect(over: agent.transport)
+
+_ = try await connection.initialize(InitializeRequest(
+    info: Implementation(name: "my-app", version: "1.0.0"),
+    protocolVersion: ACPClient.supportedProtocolVersion,
+    capabilities: ACPClient.advertisedCapabilities
+))
+let session = try await connection.newSession(
+    NewSessionRequest(cwd: AbsolutePath(rawValue: "/Users/me/project")!))
+_ = try await connection.prompt(PromptRequest(
+    prompt: [.text(TextContent(text: "Hello"))],
+    sessionId: session.sessionId))
+
+// The streamed reply lands in observable state a view can bind to:
+let entries = client.session(for: session.sessionId).entries
+```
+
+For an agent in the same process, make a transport pair with
+`InMemoryTransport.pair()` and connect over the client end.
+
+## Install
+
+Add the package to the dependencies in your `Package.swift`:
+
+```swift
+.package(
+    url: "git@github.com:swissarmyhammer/FoundationModelsACPClient.git",
+    branch: "main"
+)
+```
+
+## Documentation
+
+The architecture, the decisions, and the milestones are in
+[`plan.md`](plan.md). The peer package for the ACP **Agent** role is
+[FoundationModelsACPAgent](https://github.com/swissarmyhammer/FoundationModelsACPAgent).
 
 ## Known limitation: staleness after compaction
 
-The agent's record is not monotonic. Compaction rewrites the agent's
-transcript, and entries that a client already showed can stop to exist. The
-`session/update` stream is append-only, so a client that only accumulates
-updates becomes stale after compaction.
-
-`ACPSessionState` can rebuild its full state from a `session/resume` replay:
-call `beginRehydration()`, make the `session/resume` call, and then call
-`endRehydration()`. But ACP defines no history-invalidation signal at this
-time, so the client cannot know when the agent compacted the record. Until
-ACP defines that signal (tracked in `FoundationModelsACP`), staleness after
-compaction is a known bug. The host must start a reload itself, for example
-each time it opens a session again.
+Compaction rewrites the agent's record, but the `session/update` stream only
+appends. A client that only collects updates thus becomes stale after
+compaction. `ACPSessionState` can rebuild its full state from a
+`session/resume` replay (`beginRehydration()`, the `session/resume` call,
+then `endRehydration()`), but ACP gives no signal when the agent compacts
+the record. Until ACP defines that signal (tracked in
+[FoundationModelsACP](https://github.com/swissarmyhammer/FoundationModelsACP)),
+the host must start a reload itself, for example each time it opens a
+session again.
