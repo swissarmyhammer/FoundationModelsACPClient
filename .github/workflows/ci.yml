@@ -1,10 +1,15 @@
 name: CI
 
 # The unit/integration split is structural. The root `Package.swift` declares
-# no integration target. The agent-process suite is its own package under
-# `IntegrationTests/`, so `swift test` at the root cannot reach it. Nothing
-# below sets an environment variable to select a suite, and nothing may start
-# to do so. The sibling package FoundationModelsMultitool uses the same split.
+# no integration target: the agent-process suite is its own package under
+# `IntegrationTests/`, so a plain `swift test` at the root cannot reach it.
+# The shared swift-ci.yaml workflow carries that split into CI through its
+# `integration-package-path` input: it builds the nested package in the unit
+# job on every run, and its own integration job (ordered after the unit job
+# inside the shared workflow) builds and runs it. `CIWorkflowTests` in the
+# unit suite pins that the input is set, so a later edit cannot drop the
+# integration suite from CI without a red unit test. Nothing here sets an
+# environment variable to select a suite, and nothing may start to do so.
 
 on:
   push:
@@ -19,30 +24,5 @@ concurrency:
 jobs:
   unit:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
-
-  integration:
-    name: Integration (real agent subprocesses)
-    runs-on: [self-hosted, macOS]
-    # The unit job must run first. A compile error or a unit failure then
-    # reports in minutes, and no integration run starts on a broken tree.
-    # `CIWorkflowTests` pins this edge from the unit suite.
-    needs: unit
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Toolchain versions
-        run: |
-          sw_vers
-          swift --version
-
-      - name: Clean build directory
-        run: rm -rf IntegrationTests/.build
-
-      # This step also restores the compile coupling the nested package
-      # loses: the root build does not compile the integration files at all,
-      # so this build is the only thing that keeps them from rotting.
-      - name: Build the integration tests
-        run: swift build --package-path IntegrationTests --build-tests
-
-      - name: Run the integration suite
-        run: swift test --package-path IntegrationTests
+    with:
+      integration-package-path: IntegrationTests

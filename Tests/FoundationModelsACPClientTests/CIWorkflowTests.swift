@@ -1,32 +1,40 @@
 import Foundation
 import Testing
 
-/// Pins the shipped CI workflow to a fail-fast job order.
+/// Pins the shipped CI workflow to running the integration suite.
 ///
-/// Both jobs in `.github/workflows/ci.yml` can land on the one runner label
-/// `[self-hosted, macOS]`. When no `needs:` edge orders the jobs, GitHub
-/// assigns the runner in an arbitrary order, so the integration job can run
-/// first while the fast unit signal waits. This suite makes sure the
-/// `integration` job declares `needs: unit`, so a later edit cannot remove
-/// the edge without a red unit test. The sibling package
-/// FoundationModelsMultitool pins the same edge in the same way.
+/// `.github/workflows/ci.yml` has one job, `unit`, that calls the shared
+/// `swift-ci.yaml` workflow. That shared workflow only builds and runs the
+/// nested `IntegrationTests` package when the caller sets its
+/// `integration-package-path` input — an unset input silently drops the
+/// integration suite from every CI run, with no red mark anywhere in the
+/// workflow file itself. This suite makes sure the `unit` job sets that
+/// input to `IntegrationTests`, so a later edit cannot drop it without a red
+/// unit test. The ordering after the unit job, and the compile coupling that
+/// keeps these tests from rotting unnoticed, both live inside the shared
+/// workflow now, out of this repository's reach — this suite pins only what
+/// this repository still controls.
 @Suite("CI workflow")
 struct CIWorkflowTests {
-    @Test("the integration job declares needs: unit")
-    func integrationJobDeclaresNeedsUnit() throws {
-        let block = try Self.jobBlock(named: "integration")
-        let declaresNeedsUnit = block.contains { line in
-            line.trimmingCharacters(in: .whitespaces) == "needs: unit"
+    @Test("the unit job sets integration-package-path to IntegrationTests")
+    func unitJobSetsIntegrationPackagePath() throws {
+        let block = try Self.jobBlock(named: "unit")
+        let setsThePackagePath = block.contains { line in
+            line.trimmingCharacters(in: .whitespaces) == "integration-package-path: IntegrationTests"
         }
         #expect(
-            declaresNeedsUnit,
-            "The integration job in .github/workflows/ci.yml must declare \"needs: unit\"."
+            setsThePackagePath,
+            """
+            The unit job in .github/workflows/ci.yml must set \
+            \"integration-package-path: IntegrationTests\", or the shared \
+            swift-ci.yaml workflow silently skips the integration suite.
+            """
         )
     }
 
-    /// The indentation of a job's own keys (`runs-on:`, `needs:`, `steps:`).
-    /// A content line with less indentation opens the next job or the next
-    /// top-level key, so it ends the current job block.
+    /// The indentation of a job's own keys (`uses:`, `with:`, and the keys
+    /// nested under `with:`). A content line with less indentation opens the
+    /// next job or the next top-level key, so it ends the current job block.
     private static let jobKeyIndentation = "    "
 
     /// Reads `.github/workflows/ci.yml` from the repository root through
@@ -42,7 +50,7 @@ struct CIWorkflowTests {
     /// Collects the lines of one job block: the lines under the job's own
     /// key, up to the next content line that stands outside the job.
     ///
-    /// - Parameter name: the job key, for example `"integration"`.
+    /// - Parameter name: the job key, for example `"unit"`.
     /// - Returns: every line inside that job's block.
     /// - Throws: `CIWorkflowTestsError` when the workflow holds no job with
     ///   that name.

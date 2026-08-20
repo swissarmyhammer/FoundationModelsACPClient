@@ -22,10 +22,12 @@ import PackageDescription
 ///     swift test --package-path IntegrationTests    # this suite
 ///
 /// **The compile coupling this package owes CI.** The root build does not
-/// compile these files. `.github/workflows/ci.yml` restores the coupling:
-/// the `integration` job builds and runs this package on every trigger,
-/// after the `unit` job. `CIWorkflowTests` in the unit suite pins that
-/// job order.
+/// compile these files. `.github/workflows/ci.yml` restores the coupling by
+/// passing this package's path to the shared `swift-ci.yaml` workflow's
+/// `integration-package-path` input: that workflow builds this package in
+/// its unit job on every trigger, and runs it in its own integration job,
+/// ordered after the unit job internally. `CIWorkflowTests` in the unit
+/// suite pins that `ci.yml` sets the input.
 ///
 /// **Why the dependency list below repeats the root manifest's.** A SwiftPM
 /// manifest cannot import code from an other manifest. A package may only
