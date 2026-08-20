@@ -1,8 +1,19 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '80'
+comments:
+- actor: claude-code
+  id: 01m0fp29e4y361neadf9tcap2q
+  text: |-
+    ### verify — done
+    - evidence: pushed 090a87e. CI run for that commit: overall success. unit / Build & test: success. unit / Integration (opt-in, real dependencies): success — no longer skipped, since our call now sets integration-package-path: IntegrationTests.
+    - local pre-push checks: root `swift test` 68 tests green (includes the re-pinned CIWorkflowTests check); `swift test --package-path IntegrationTests` 4 tests green.
+    - ci.yml now has one job (unit) calling the shared workflow. Repo-local integration job and needs: unit edge removed. CIWorkflowTests re-pinned to assert ci.yml sets integration-package-path.
+    - workflows-06 reviewed the conversion and approved it, no changes requested.
+    - This closes the skipped-row finding from ^56dyr9f.
+  timestamp: 2026-08-20T13:34:15.492235+00:00
+position_column: done
+position_ordinal: '8980'
 title: Fold the repo-local integration job into the shared swift-ci call
 ---
 Blocked until the workflows-06 session lands the `integration-package-path` input on swissarmyhammer/workflows origin/main. The multitool session will message this session when it lands. Multitool's own conversion card is ^jjyqe1a in that repo — use it as the model.
