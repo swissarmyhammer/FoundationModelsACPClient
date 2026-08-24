@@ -12,20 +12,32 @@ let package = Package(
     ],
     products: [
         // The ACP Client role: an observable container that a UI layer can
-        // bind to. This library knows only the ACP wire and Observation.
+        // bind to. This library knows the ACP wire, Observation, and the
+        // family leaf `FoundationModelsExtras`.
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"])
     ],
     dependencies: [
-        // The ACP wire. This is the only external dependency of this package,
-        // by design (plan.md, "a client, not *our* client"). The pin is
+        // These two are the whole external dependency list of this package,
+        // by design (plan.md, "a client, not *our* client"). Each pin is
         // `branch: "main"` over the SSH URL, matching how every sibling in
         // this family pins an in-family package. A version requirement would
         // conflict for an app that depends on this package and on another
         // in-family consumer at the same time.
+        //
+        // The ACP wire.
         .package(
             url: "git@github.com:swissarmyhammer/FoundationModelsACP.git",
             branch: "main"
-        )
+        ),
+        // The family leaf that owns `ProcessRegistry`, its `sweep(_:)`, and
+        // the `atexit`-installed `ProcessRegistry.global`. Taking the shared
+        // type is what makes every consumer in one host process share one
+        // registry and one sweep, rather than each package sweeping a global
+        // of its own.
+        .package(
+            url: "git@github.com:swissarmyhammer/FoundationModelsExtras.git",
+            branch: "main"
+        ),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -35,7 +47,8 @@ let package = Package(
         .target(
             name: "FoundationModelsACPClient",
             dependencies: [
-                .product(name: "FoundationModelsACP", package: "FoundationModelsACP")
+                .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]
         ),
         // Tests, on Swift Testing. The suite holds the linkage smoke test and
@@ -53,6 +66,7 @@ let package = Package(
             dependencies: [
                 "FoundationModelsACPClient",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]
         ),
     ]

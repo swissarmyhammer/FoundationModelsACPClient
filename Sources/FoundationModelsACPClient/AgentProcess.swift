@@ -6,9 +6,16 @@
 // register the pid in a `ProcessRegistry`; group-kill *and* reap on every
 // teardown path; and backstop everything with the same `atexit` sweep and
 // the same honestly-stated limitation — a normal exit only, never `SIGKILL`
-// or a crash. Those sibling types are internal to their own packages, and
-// this package depends on the ACP wire only, so this file holds this
-// package's own copy of the pattern.
+// or a crash.
+//
+// `ProcessRegistry`, its `sweep(_:)`, and the `atexit`-installed
+// `ProcessRegistry.global` come from `FoundationModelsExtras`, the family
+// leaf that owns them. This package depends on the ACP wire and on that
+// leaf, so every consumer in one host process shares one registry and one
+// sweep rather than each package sweeping a global of its own.
+//
+// What this file owns is the rest of the discipline: the process-group
+// spawn, the group kill, the reap, and the three teardown triggers.
 //
 // Spawning goes through raw `posix_spawn` rather than `Foundation.Process`,
 // for the sibling's own reason: `Process` gives no public way to put a child
@@ -39,6 +46,7 @@
 import Darwin
 import Foundation
 import FoundationModelsACP
+import FoundationModelsExtras
 import Synchronization
 
 /// A failure while constructing an ``AgentProcess`` or while speaking to
