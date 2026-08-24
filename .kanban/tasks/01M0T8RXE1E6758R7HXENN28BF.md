@@ -51,8 +51,24 @@ comments:
     - evidence: 3 files — /Users/wballard/github/swissarmyhammer/FoundationModelsACPClient/Package.swift, /Users/wballard/github/swissarmyhammer/FoundationModelsACPClient/Sources/FoundationModelsACPClient/AgentProcess.swift, /Users/wballard/github/swissarmyhammer/FoundationModelsACPClient/Sources/FoundationModelsACPClient/ProcessRegistry.swift (deleted). `swift build` clean with 0 warnings; `swift test` 68 tests passed; `swift test --package-path IntegrationTests` 4 tests passed. Every acceptance criterion measured.
     - next: /review. One open decision for a person: `swift format -i -r Sources Tests` reindents all 26 files of the repository (no `.swift-format` config, CI runs no format step), so it was reverted and the diff kept to this task.
   timestamp: 2026-08-24T17:07:22.170627+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m0tc40735mtc9f8sjem1c4c6
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 35c1853) — 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. 3 files reviewed; 2 `.kanban/` files excluded by `.reviewignore`. Three code-hygiene rules declined their item because `Sources/FoundationModelsACPClient/ProcessRegistry.swift` no longer exists — that deletion is the purpose of this task.
+    - next: task moved to done. No open findings.
+  timestamp: 2026-08-24T17:12:04.579605+00:00
+- actor: claude-code
+  id: 01m0tc4epe4j2wfrja2d3kwmzv
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (Package.swift, AgentProcess.swift, ProcessRegistry.swift deleted)
+    - test: green — swift test 68 passed, swift test --package-path IntegrationTests 4 passed, 0 warnings
+    - commit: 35c1853
+    - review: clean — 0 findings, review sha HEAD~1..HEAD
+  timestamp: 2026-08-24T17:12:19.406076+00:00
+position_column: done
+position_ordinal: 8a80
 title: Use the shared ProcessRegistry from FoundationModelsExtras; delete the local copy
 ---
 ## What
