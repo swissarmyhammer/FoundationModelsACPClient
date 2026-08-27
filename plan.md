@@ -180,15 +180,16 @@ both.**
   client's files through **MCP** instead.
 - All five `terminal/*` methods: **removed.** Agents use **MCP** for execution, and
   own their display terminals themselves.
-- `clientCapabilities.fs` and `.terminal`: **removed.** And *"stable v2 defines no
-  standard client capability fields."*
+- `clientCapabilities.fs` and `.terminal`: **removed.** The vendored
+  `schema-v2.0.0-alpha.3` defines two client capability fields in their place:
+  `elicitation` and `auth`.
 
-So the stable v2 Client role is **two entry points**: consume `session/update`
-and answer `session/request_permission`. This is verified against the vendored
-package: `public protocol Client` has exactly those two members. Elicitation is
-**unstable-only** — the v2 schema contains no elicitation methods, and the
-generated `MethodTable` lists `elicitation/*` only as unstable method info, with
-nothing on the client surface to gate behind a capability.
+So the stable v2 Client role is **four entry points**: consume `session/update`,
+answer `session/request_permission`, answer `elicitation/create`, and consume
+`elicitation/complete`. This is verified against the vendored package:
+`public protocol Client` has exactly those four members, each one required with
+no default. `ClientCapabilities` gates elicitation behind its `elicitation`
+field, where an omitted field and a `null` field both mean no support.
 
 That is what makes this package honestly a **UI projection**: no confinement
 policy, no path-traversal defense, no process-group ownership, no reaping. The
@@ -199,9 +200,10 @@ than us declining it.
 the agent. Our agent already has `FoundationModelsFileTool` and
 `FoundationModelsShelltool` with their existing confinement and process discipline;
 v2's design says that is the right side of the protocol for them to live on. The
-capability question is settled: `ClientCapabilities` carries only `_meta`, stable
-v2 defines no standard client capability fields, and elicitation waits upstream
-as an unstable surface (M7 tracks it).
+capability question is settled: `ClientCapabilities` carries `elicitation`,
+`auth`, and `_meta`. This package advertises `elicitation` with both modes,
+because it implements both, and it omits `auth` (see the terminal-authentication
+decision below).
 
 ## Transports, and who owns the agent process
 
@@ -237,6 +239,14 @@ as an unstable surface (M7 tracks it).
   never driven" for the evidence), so this package renders it and never drives it.
 - **No filesystem surface (decided by v2):** `fs/*` is gone; agents use MCP. This
   package does not touch the user's files, so it needs no confinement policy.
+- **No terminal authentication (decided).** `schema-v2.0.0-alpha.3` added the
+  `auth` client capability and the `terminal` authentication method. A client
+  advertises `auth.terminal` only when it can run the configured agent
+  invocation again in an interactive terminal. `AgentProcess` spawns the agent
+  with `posix_spawn` on pipes, which gives the user no terminal to type into.
+  Thus `ACPClient.advertisedCapabilities` omits `auth`, which tells the agent to
+  put no `terminal` entry in its `authMethods`. A test pins the omission. A host
+  that owns a terminal builds its own `ClientCapabilities` value.
 
 ## Milestones
 
@@ -262,8 +272,10 @@ as an unstable surface (M7 tracks it).
 - [ ] **M6 — Transports.** In-process pairing plus stdio to an external agent,
   including agent-process ownership and reaping if we spawn it.
 - [ ] **M7 — Elicitation.** Form and URL modes as bindable state, honoring the
-  spec's consent, host-display, and no-credentials-back rules. Blocked upstream:
-  elicitation is unstable-only in v2 (ACP's M8 tracks stabilization).
+  spec's consent, host-display, and no-credentials-back rules. No longer blocked
+  upstream: `schema-v2.0.0-alpha.3` holds `elicitation/create` and
+  `elicitation/complete` on the stable client surface, gated by the
+  `elicitation` client capability.
 - **Filesystem: not applicable.** v2 removed `fs/*` from the client role entirely.
   Listed so its absence reads as the protocol's decision rather than an omission.
 
@@ -285,7 +297,8 @@ as an unstable surface (M7 tracks it).
 ## References
 
 - ACP specification — https://agentclientprotocol.com
-- ACP elicitation (v1 doc; v2 keeps elicitation unstable-only, see M7) —
+- ACP elicitation (v1 doc; v2 keeps the same consent and host-display rules,
+  and puts the two methods on the stable client surface, see M7) —
   https://agentclientprotocol.com/protocol/v1/elicitation
 - FoundationModelsACP (the wire; `Client` protocol, `InMemoryTransport`) — ../FoundationModelsACP
 - FoundationModelsACPAgent (the Agent role peer; see its §9.2 for the derivation

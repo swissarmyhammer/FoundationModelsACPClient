@@ -148,6 +148,13 @@ func advertisedCapabilitiesMatchTheImplementedMethods() {
         )
     )
     #expect(ACPClient.advertisedCapabilities == expected)
+
+    // The vendored `schema-v2.0.0-alpha.3` added the `auth` capability
+    // field. This client keeps that field omitted: `AgentProcess` spawns
+    // the agent on pipes, thus this client cannot run the agent invocation
+    // again in an interactive terminal. The omitted field tells the agent
+    // to put no `terminal` entry in its `authMethods`.
+    #expect(ACPClient.advertisedCapabilities.auth == nil)
 }
 
 /// A stub agent that asks for permission during its one prompt turn.

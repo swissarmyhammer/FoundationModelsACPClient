@@ -19,6 +19,16 @@ public enum ACPClient {
     /// consent-gated URL that `elicitation/complete` closes. The value
     /// therefore advertises the `elicitation` capability with `form` and
     /// `url`.
+    ///
+    /// The value omits the `auth` capability, and that omission is a
+    /// decision. A client advertises `auth.terminal` only when it can run
+    /// the configured agent invocation again in an interactive terminal.
+    /// ``AgentProcess`` spawns the agent with `posix_spawn` on pipes, which
+    /// gives the user no terminal to type into. An omitted `auth` field
+    /// tells the agent to put no `terminal` entry in its `authMethods`, so
+    /// this client never has such a method to run. A host that does own a
+    /// terminal builds its own `ClientCapabilities` value, and handles the
+    /// `terminal` authentication method itself.
     public static let advertisedCapabilities = ClientCapabilities(
         elicitation: ElicitationCapabilities(
             form: ElicitationFormCapabilities(),
