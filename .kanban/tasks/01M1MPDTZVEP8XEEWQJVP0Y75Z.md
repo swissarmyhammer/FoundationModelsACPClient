@@ -118,12 +118,33 @@ comments:
     - evidence: 3 files — Tests/FoundationModelsACPClientTests/ElicitationFixtures.swift (new shared `enum ElicitationFixtures` namespace), Tests/FoundationModelsACPClientTests/DecliningClientTests.swift (both private copies deleted, every call site now uses the shared builders), Tests/FoundationModelsACPClientTests/ElicitationTests.swift (same). Both `## Review Findings` rows are now checked. `timeout 420 swift test` gave 148 tests in 8 suites, 0 failures, 0 warnings.
     - next: `/review` on the change, which moves the card into review.
   timestamp: 2026-09-04T16:21:46.452930+00:00
+- actor: claude-code
+  id: 01m1pkt50kwxvd9ea6d318wqer
+  text: |
+    ### review — clean
+
+    - evidence: `review sha 50119ea~1..50119ea` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. 3 files reviewed, 2 excluded by `.reviewignore`.
+    - prior findings: both items of the 2026-09-04 10:37 section are checked and verified in the tree. No `formElicitationRequest` or `urlElicitationRequest` copy is left in `Tests/`. `Tests/FoundationModelsACPClientTests/ElicitationFixtures.swift` holds the one `ElicitationFixtures` namespace, and both `DecliningClientTests.swift` and `ElicitationTests.swift` call it.
+    - `swift/fluent-usage` question on `formRequest(scope:)`: not a finding. The `make` prefix rule reads a factory on an instance, where `x.iterator()` reads as a thing the receiver has. `ElicitationFixtures.formRequest(scope:)` is a static member of a caseless enum namespace, so there is no receiver that a reader can misread. The name also matches the card word for word. The engine raised no candidate here.
+    - next: task moved to done. Second pass is clean.
+  timestamp: 2026-09-04T16:25:14.515040+00:00
+- actor: claude-code
+  id: 01m1pktvbxfqzhge50pq3xvft8
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files; both findings removed at the cause. The duplication was wider than the two named lines: each file kept private copies of five items, all now in one internal `enum ElicitationFixtures` namespace.
+    - test: green — `timeout 420 swift test`, 148 passed, 0 failed, 0 warnings
+    - commit: 50119ea test(elicitation): extract shared fixtures to remove duplication
+    - review: clean — zero new findings, both prior items checked, task moved to done
+
+    The review judged the `swift/fluent-usage` "factory methods begin with make" question and ruled it not a finding: that rule reads a factory on an *instance*, where `x.iterator()` misreads as a property; a `static func` on a caseless enum has no receiver, so the ambiguity does not arise.
+  timestamp: 2026-09-04T16:25:37.405310+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPCQFQFVAPFCZVVQ95AK7S
 - 01M1MQF486GZVCQNZCMS2KDE0R
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9280'
 title: Decline every permission request and elicitation, and say so on stderr
 ---
 ## What
