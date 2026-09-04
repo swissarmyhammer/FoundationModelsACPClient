@@ -1,12 +1,33 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m1pethxcvwd39x4rwm8q4jpy
+  text: |-
+    Research before writing.
+
+    Wire shapes read from the FoundationModelsACP checkout at /Users/wballard/github/swissarmyhammer/FoundationModelsACP:
+
+    - `RequestPermissionResponse` (Generated/Models6.generated.swift) holds one field, `outcome: RequestPermissionOutcome`.
+    - `RequestPermissionOutcome` (Generated/Unions2.generated.swift) has exactly three cases: `.cancelled`, `.selected(SelectedPermissionOutcome)`, and `.unknown(String, JSONValue)`. `SelectedPermissionOutcome` carries `optionId`.
+    - `PermissionOptionKind` (Generated/Unions.generated.swift) has `.allowOnce`, `.allowAlways`, `.rejectOnce`, `.rejectAlways`, and an unknown case. There is no "cancel" kind, so the card's "reject or cancel option" means: pick a reject option, else answer the `cancelled` outcome.
+    - `CreateElicitationResponse` is NOT a union type. Generated/Unresolved.generated.swift makes it `public typealias CreateElicitationResponse = JSONValue`, because the schema's anyOf variants pin discriminators the generator cannot reconcile. The schema gives the decline shape as `{"action": "decline"}`. `SwiftUIACPClient` already builds that same object through a private `ElicitationResponseWire` enum, which is private to the library target, so the binary builds its own named constants.
+    - `RequestPermissionRequest.subject` is optional (`RequestPermissionSubject?`), with `.toolCall(ToolCallPermissionSubject)` and `.command(CommandPermissionSubject)`. `ToolCallPermissionSubject.toolCall.toolCallId` is the one non-patch field; `CommandPermissionSubject.command` is the command text.
+    - `CreateElicitationRequest.mode` is `CreateElicitationRequest.Payload` with `.form`, `.url`, `.unknown`.
+
+    Test-target facts:
+
+    - `PermissionStubAgent` already exists in PermissionRequestTests.swift and is target-visible, but it throws `methodNotFound("session/new")` too. `ScriptedStubAgent` is the one the card names.
+    - Shared fixtures live in SessionUpdateFixtures.swift (`testSession`, `textBlock`, `agentChunk`, `idleState`) and TransportTestSupport.swift (`waitUntil`, `eventually`, `promptTurnLandsReply`, `makeInitializeRequest`).
+    - A test file that imports both `acp_client` and `FoundationModelsACP` sees two types named `TerminalOutput`, so the binary's own layer needs the module-qualified name `acp_client.TerminalOutput`.
+  timestamp: 2026-09-04T14:58:04.844415+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPCQFQFVAPFCZVVQ95AK7S
 - 01M1MQF486GZVCQNZCMS2KDE0R
-position_column: todo
-position_ordinal: '8780'
+position_column: doing
+position_ordinal: '80'
 title: Decline every permission request and elicitation, and say so on stderr
 ---
 ## What

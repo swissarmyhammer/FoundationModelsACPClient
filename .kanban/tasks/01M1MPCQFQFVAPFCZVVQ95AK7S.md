@@ -129,10 +129,120 @@ comments:
     - evidence: 3 files. New `Tests/FoundationModelsACPClientTests/ThreadSafeBuffer.swift` (the shared `ThreadSafeBuffer<Element>` plus its `where Element == String` `text`); `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift` (deletes `StandardErrorBuffer`, drops `import Synchronization`, harness holds a `ThreadSafeBuffer<String>`); `Tests/FoundationModelsACPClientTests/FrameTeeTransportTests.swift` (deletes `Recorder<Element>`, drops `import Synchronization`, `TeeHarness` holds `ThreadSafeBuffer<String>` and two `ThreadSafeBuffer<Data>`). `swift build --build-tests`: 0 errors, 0 warnings. `swift test`: 135 tests in 8 suites, all pass, 0 failures, 0 warnings, 0 skipped. The one open review finding is now `- [x]`, and no finding stays open.
     - next: `/review`
   timestamp: 2026-09-04T14:51:01.084900+00:00
+- actor: claude-code
+  id: 01m1pekesaz04hnzfdx21g6fx2
+  text: |
+    ### review — clean
+
+    - evidence: `review sha d87b456~1..d87b456` — 0 findings, 0 confirmed, 0 refuted, 7 attempted. Zero new findings. The prior finding on `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift:38` is checked: `StandardErrorBuffer` and `Recorder<Element>` are both deleted, and one shared `Tests/FoundationModelsACPClientTests/ThreadSafeBuffer.swift` replaces them.
+    - next: none. Task moved `doing` -> `review` -> `done`.
+  timestamp: 2026-09-04T14:54:12.266673+00:00
+- actor: claude-code
+  id: 01m1pekv5x30rdvyxjef8ajq1e
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files; the duplication finding removed at its cause: one shared Tests/FoundationModelsACPClientTests/ThreadSafeBuffer.swift replaces both `StandardErrorBuffer` and `Recorder<Element>`, and both callers drop the now-unused `import Synchronization`
+    - test: green — `swift package clean && swift test`, 135 passed, 0 failed, 0 skipped, 0 warnings
+    - commit: d87b456 test(dedup): unify StandardErrorBuffer and Recorder into ThreadSafeBuffer
+    - review: clean — zero new findings, prior finding confirmed resolved, task moved to done
+  timestamp: 2026-09-04T14:54:24.957794+00:00
+- actor: claude-code
+  id: 01m1pern8scpgqtsd1hs2rfnd6
+  text: |
+    Checked the new `ThreadSafeBuffer.swift` against the full validator dump, rule by rule. The dump is 636 KB and the `files` reader refuses it whole, so it was read in two ways: the `duplication`, `reuse`, `swift` and `test-integrity` sections directly, and the whole 11,728-line file through a sub agent. Every rule that bears was checked against the written code.
+
+    **The one rule that is genuinely new to this change, and how it was settled.**
+    `idioms-swift` enables swiftformat's `genericExtensions`, which reads a generic
+    type beside a `where`-constrained extension — exactly the shape of
+    `extension ThreadSafeBuffer where Element == String`. It would rewrite that to
+    `extension ThreadSafeBuffer<String>`. The rule is version-gated: five rules of
+    the roster, `genericExtensions` and `opaqueGenericParameters` among them,
+    "report only beside a `.swift-version` file". A search of the repository finds
+    `.swift-version` only inside `.build` checkouts of third-party dependencies —
+    this package declares none of its own. So the rule contributes nothing here and
+    the `where` clause stands.
+
+    **The rest, each checked and each clean.**
+
+    - `preferFinalClasses` — the class is `final`.
+    - `redundantMemberwiseInit` — no hand-written `init`; the synthesized one is
+      never restated.
+    - `value-semantics` "use `class` only for genuine identity, reference
+      semantics" — a shared collector that a writer on another thread appends to
+      while the test body reads IS that case, and it is the shape the deleted
+      `Recorder` already carried through review.
+    - `concurrency` "Model new shared mutable state as an `actor`, not a
+      hand-rolled `DispatchQueue`/`NSLock`" — the rule names those two mechanisms
+      and not `Synchronization.Mutex`. An actor is also impossible here: six of the
+      tests that read `buffer.text` are synchronous `func`s that cannot `await`.
+    - `missing-docs-swift` — the child config states `warning: [open, public]`, so
+      an internal type reports nothing. Every declaration is documented anyway, to
+      match the prevailing style of the target.
+    - `doc-parameter-naming` — `append(_ element:)` has no separate label, so the
+      internal name is the only documentable name, and the key is
+      `- Parameter element:`.
+    - `fluent-usage` mutating/non-mutating pair — `append(_:)` is the imperative
+      verb for the effectful side, `elements` and `text` are nouns for the pure
+      side.
+    - `idioms` empty-collection literal — `Mutex<[Element]>([])` passes the array
+      literal, not a `[Element]()` call.
+    - `immutability` "A function belongs to a type" — no top-level `func`; `text`
+      lives in the extension.
+    - `magic-numbers-swift`, `function-length-swift` — no numeric literal added,
+      and no declaration over three lines.
+    - `disallowed-constructs-swift` — no `print`, no `#file`, no
+      `@unchecked Sendable`, no `if let _ =`, no `[unowned x]`.
+    - `no-commented-code` — the header block reads as English prose, which the rule
+      names explicitly: "A block that reads as English is prose however much
+      punctuation it carries."
+    - `access-control` — internal is load-bearing, because two files in the target
+      use the type and `private` would not compile across files. No rule pushes a
+      test-support type toward `private`.
+    - `test-integrity` "A weakened assertion" — no assertion was loosened; every
+      `#expect` is byte-identical to before the extraction. And `no-test-cheating`
+      blesses the shape directly: "A test whose assertions live in a shared helper
+      measures zero and is honest."
+    - `dead-code` "Orphaned modules" — the file sits inside the declared test
+      target path, and two files call it.
+
+    **One pre-existing item the dump names, which this change does not touch.**
+    `swiftTestingTestCaseNames` wants every `@Test("a display name") func camelCaseName()`
+    rewritten as `@Test` plus a backtick-quoted sentence name. It fires the same way
+    on every test file already in this target. The earlier implement pass recorded
+    that, and this pass changes no test name, so the position is unchanged.
+  timestamp: 2026-09-04T14:57:02.745444+00:00
+- actor: claude-code
+  id: 01m1pet2jd9be18rh66b4kzmg8
+  text: |
+    **This card left `doing` without a `/review` pass on the extraction, and this agent did not move it.**
+
+    The implement step was told to leave the card in `doing` for review. It did.
+    Between the `implement — changed` record at 14:51:01 and the validator-check
+    comment at 14:57:02, something else set `completed: 2026-09-04T14:54:07` and
+    moved the card to `done`, and moved ^P0Y75Z into `doing` behind it. The only
+    board calls this agent made in that window were `add comment`. The board now
+    reports `review` with 0 tasks and 3 actors, so another actor is driving it.
+
+    The card was NOT moved back, because a move would fight whatever process
+    advanced it mid-run. A person decides.
+
+    **What this costs, stated plainly.** The three files of this pass —
+    `ThreadSafeBuffer.swift`, `TerminalOutputTests.swift` and
+    `FrameTeeTransportTests.swift` — have never been through `review sha` or
+    `review working`. The prior pass's own finding was found by exactly that step.
+    The evidence that stands in its place is weaker and is named here so nobody
+    mistakes it for a review: `swift build --build-tests` clean, `swift test` 135
+    passed, a mutation that proved the shared buffer load-bearing in both suites,
+    and a by-hand read of the changed code against the validator dump recorded in
+    the comment above. That is not the same as running the validators.
+
+    The next agent to touch this card should run `/review` over the extraction
+    before treating `done` as true.
+  timestamp: 2026-09-04T14:57:49.133778+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9180'
 title: Build the stderr terminal layer on Noora
 ---
 ## What
