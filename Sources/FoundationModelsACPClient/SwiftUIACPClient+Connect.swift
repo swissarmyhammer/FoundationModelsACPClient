@@ -28,6 +28,10 @@ extension SwiftUIACPClient {
     /// it over the new connection itself. This package never reconnects on
     /// its own — see ``AgentProcess`` for the no-automatic-respawn policy.
     ///
+    /// The connection serves this client itself. A host that must put its
+    /// own `Client` in front of this container calls
+    /// ``connect(over:logger:client:)`` instead.
+    ///
     /// - Parameters:
     ///   - transport: The bidirectional transport to run over.
     ///   - logger: Diagnostic sink; never stdout.
@@ -36,13 +40,55 @@ extension SwiftUIACPClient {
         over transport: any ACPTransport,
         logger: ACPLogger = .disabled
     ) async -> ClientSideConnection {
+        await connect(over: transport, logger: logger) { $0 }
+    }
+
+    /// Connects this client over `transport`, serving the `Client` that
+    /// `client` returns, and returns the connection that drives the agent.
+    ///
+    /// This is the seam for a host that must answer the agent itself. A
+    /// headless host — a command-line tool with nobody at the keyboard —
+    /// wraps this container in a `Client` that declines every permission
+    /// request and every elicitation, because no person is there to decide
+    /// them, and forwards everything else.
+    ///
+    /// `client` receives this container and returns the `Client` the
+    /// connection serves. It runs one time for each call of this method, on
+    /// the main actor, before the connection starts to serve.
+    ///
+    /// A wrapper must forward ``SwiftUIACPClient/sessionUpdate(_:)`` and
+    /// ``SwiftUIACPClient/elicitationComplete(_:)`` to the container it
+    /// receives. The connection delivers each of those one time, to the
+    /// `Client` it serves and to nothing else, so a wrapper that swallows
+    /// either one leaves the container's observable state stale, and no
+    /// later call repairs it.
+    ///
+    /// ``connectionState`` follows the transport exactly as it does on
+    /// ``connect(over:logger:)``: a wrapper changes which `Client` the
+    /// agent reaches, and changes nothing about the connection's life.
+    ///
+    /// - Parameters:
+    ///   - transport: The bidirectional transport to run over.
+    ///   - logger: Diagnostic sink; never stdout.
+    ///   - client: Builds the `Client` the connection serves, from this
+    ///     container.
+    /// - Returns: The client-side connection, ready to drive the agent.
+    public func connect(
+        over transport: any ACPTransport,
+        logger: ACPLogger = .disabled,
+        client: @escaping @Sendable @MainActor (SwiftUIACPClient) -> any Client
+    ) async -> ClientSideConnection {
         connectionState = .connected
         let observed = DisconnectObservingTransport(wrapping: transport) { [weak self] in
             Task { @MainActor in
                 self?.connectionState = .disconnected
             }
         }
-        return await ClientSideConnection(stream: observed, logger: logger) { _ in self }
+        // The wire package's factory is not main-actor isolated, so the
+        // served client is built here, on the main actor, and handed over
+        // ready-made. That is also what holds `client` to one call.
+        let served = client(self)
+        return await ClientSideConnection(stream: observed, logger: logger) { _ in served }
     }
 }
 

@@ -162,7 +162,10 @@ func advertisedCapabilitiesMatchTheImplementedMethods() {
 /// After the client answers, the stub reports the outcome back as an
 /// agent message, so the test can read the outcome from the observable
 /// session state.
-private final class PermissionStubAgent: Agent {
+///
+/// The wrapping-`Client` seam tests reuse this stub, so it is visible to
+/// the whole test target rather than to this file alone.
+final class PermissionStubAgent: Agent {
     /// The connection back to the client.
     private let connection: AgentSideConnection
 
