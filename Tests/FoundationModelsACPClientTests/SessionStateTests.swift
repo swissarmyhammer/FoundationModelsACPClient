@@ -279,6 +279,16 @@ private let usedTokens = 1_500
     #expect(client.session(for: testSession).availableCommands.isEmpty)
 }
 
+@MainActor @Test func anEmptyCommandListIsNotTheSameAsNoCommandListAtAll() async {
+    let client = SwiftUIACPClient()
+    #expect(!client.session(for: testSession).hasReportedAvailableCommands)
+
+    await drive(client: client, .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])))
+
+    #expect(client.session(for: testSession).hasReportedAvailableCommands)
+    #expect(client.session(for: testSession).availableCommands.isEmpty)
+}
+
 @MainActor @Test func configOptionUpdateReplacesTheConfigOptions() async {
     let client = SwiftUIACPClient()
     let option = SessionConfigOption(

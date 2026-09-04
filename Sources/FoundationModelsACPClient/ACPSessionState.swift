@@ -74,6 +74,16 @@ public final class ACPSessionState {
     /// `available_commands_update`.
     public private(set) var availableCommands: [AvailableCommand] = []
 
+    /// Whether the agent has reported its command list at all.
+    ///
+    /// An agent that reported an EMPTY list and an agent that has reported no
+    /// list yet both leave ``availableCommands`` empty, and the two are
+    /// different facts: the first says the agent runs no command, and the
+    /// second says nothing yet. A reader that shows the same thing for both —
+    /// a command menu, or `acp-client probe` — would state the first where
+    /// only the second is known.
+    public private(set) var hasReportedAvailableCommands = false
+
     /// The session configuration options and their current values, replaced
     /// whole by each `config_option_update`. This is where ACP v2 reports
     /// the session's current mode.
@@ -299,6 +309,7 @@ public final class ACPSessionState {
         inFlightAgentMessageID = nil
         inFlightThoughtID = nil
         availableCommands = []
+        hasReportedAvailableCommands = false
         configOptions = []
         title = nil
         updatedAt = nil
@@ -551,6 +562,7 @@ public final class ACPSessionState {
             break
         case .availableCommandsUpdate(let payload):
             availableCommands = payload.availableCommands
+            hasReportedAvailableCommands = true
         case .configOptionUpdate(let payload):
             configOptions = payload.configOptions
         case .sessionInfoUpdate(let info):

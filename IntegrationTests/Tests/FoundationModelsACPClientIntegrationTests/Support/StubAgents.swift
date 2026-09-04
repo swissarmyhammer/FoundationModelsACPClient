@@ -53,6 +53,60 @@ let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 /// refusal line quotes back.
 let stubAgentPermissionTitle = "Run the stub tool?"
 
+/// The authentication methods a probe stub agent advertises.
+///
+/// Both are `agent` methods. An agent may advertise the `terminal` method only
+/// when the client enabled terminal authentication, and this client does not:
+/// commit 3f30444 pinned that decision.
+let stubAgentAuthMethods: [AuthMethod] = [
+    .agent(
+        AuthMethodAgent(
+            methodId: AuthMethodId(rawValue: "stub-oauth"),
+            name: "Sign in with the stub"
+        )
+    ),
+    .agent(
+        AuthMethodAgent(
+            methodId: AuthMethodId(rawValue: "stub-token"),
+            name: "Paste a stub token"
+        )
+    ),
+]
+
+/// The slash commands a probe stub agent reports when it reports any.
+let stubAgentCommands: [AvailableCommand] = [
+    AvailableCommand(description: "Makes a plan", name: "create_plan"),
+    AvailableCommand(description: "Reads the code", name: "research_codebase"),
+]
+
+/// How a probe stub agent reports its slash commands.
+///
+/// The three cases are the three states `cli-plan.md` §6 asks `probe` to tell
+/// apart, seen from the agent's side.
+enum StubAgentCommandReport {
+    /// The agent reports ``stubAgentCommands``.
+    case twoCommands
+
+    /// The agent reports a command list, and the list holds no command.
+    case emptyList
+
+    /// The agent sends no `available_commands_update` at all.
+    case noUpdate
+
+    /// The commands the agent reports, or `nil` for the case that sends no
+    /// update at all.
+    var reportedCommands: [AvailableCommand]? {
+        switch self {
+        case .twoCommands:
+            stubAgentCommands
+        case .emptyList:
+            []
+        case .noUpdate:
+            nil
+        }
+    }
+}
+
 // MARK: - The stub agents
 
 /// Writes a stub agent that answers every request `cli-plan.md` §14 needs.
@@ -185,6 +239,65 @@ func makeSilentAgent() throws -> String {
     )
 }
 
+/// Writes a stub agent that `acp-client probe` can read a whole report off.
+///
+/// It answers `initialize` with ``stubAgentAuthMethods``, it answers
+/// `session/new`, it reports its slash commands the way `commands` says, and it
+/// answers `session/close`. It sends nothing a prompt would produce, because
+/// `probe` sends no prompt.
+///
+/// The command list goes out right after the `session/new` answer, which is
+/// where a real agent sends it and which is also the moment that proves `probe`
+/// reads the list off the observable container: the connection drops an update
+/// for a session with no subscriber yet, and the container has no such gate.
+///
+/// - Parameters:
+///   - commands: How the agent reports its slash commands.
+///   - transcript: Where the agent appends every request line it reads, or
+///     `nil` to record none.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeProbeAgent(
+    commands: StubAgentCommandReport = .twoCommands,
+    transcript: String? = nil,
+    pidFile: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            transcript: transcript,
+            initialize: .reports(stubAgentAuthMethods),
+            availableCommands: commands.reportedCommands
+        )
+    )
+}
+
+/// Writes a stub agent that answers `initialize` with a JSON-RPC error.
+///
+/// `cli-plan.md` §9 gives a protocol failure exit code 1, and §11 lets no agent
+/// outlive the command whichever way the command ended. An agent that refuses
+/// the handshake reaches both rows, and it stays alive until its stdin closes,
+/// so the reap is the binary's work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .fails
+        )
+    )
+}
+
 // MARK: - The script files
 
 /// The text that stands before the unique part of a stub-agent script's name.
@@ -264,6 +377,9 @@ private let permissionRequestID = 100
 ///     before it answers anything, or `nil` to record none.
 ///   - asksPermission: Whether the agent asks for permission in the middle of
 ///     the turn, and waits for the answer before it finishes.
+///   - initialize: How the agent answers `initialize`.
+///   - availableCommands: The slash commands the agent reports right after its
+///     `session/new` answer, or `nil` to send no `available_commands_update`.
 /// - Returns: The script text.
 /// - Throws: A JSON-encoding failure.
 private func requestLoop(
@@ -272,7 +388,9 @@ private func requestLoop(
     pidFile: String? = nil,
     transcript: String? = nil,
     argumentsFile: String? = nil,
-    asksPermission: Bool = false
+    asksPermission: Bool = false,
+    initialize: StubAgentInitializeAnswer = .reports([]),
+    availableCommands: [AvailableCommand]? = nil
 ) throws -> String {
     """
     \(recordPidStatement(writingTo: pidFile))
@@ -281,10 +399,14 @@ private func requestLoop(
       \(recordRequestStatement(appendingTo: transcript))
       case "$line" in
         *'"method":"initialize"'*)
-          \(try printfLine(initializeAnswer()))
+          \(try printfLine(initializeAnswer(initialize)))
           ;;
         *'"method":"session/new"'*)
           \(try printfLine(newSessionAnswer()))
+          \(try commandUpdateStatement(reporting: availableCommands))
+          ;;
+        *'"method":"session/close"'*)
+          \(try printfLine(closeSessionAnswer()))
           ;;
         *'"method":"session/prompt"'*)
           \(try printfLine(promptAnswer()))
@@ -295,6 +417,22 @@ private func requestLoop(
       esac
     done
     """
+}
+
+/// Renders the shell statement that reports the agent's slash commands.
+///
+/// The statement stands inside the `session/new` arm, so the update follows the
+/// answer that named the session it belongs to.
+///
+/// - Parameter commands: The commands to report, or `nil` to report none at
+///   all. An EMPTY array is not `nil`: it reports a command list that holds no
+///   command, which `cli-plan.md` §6 keeps apart from an agent that never
+///   reported one.
+/// - Returns: One shell statement, or the empty string.
+/// - Throws: A JSON-encoding failure.
+private func commandUpdateStatement(reporting commands: [AvailableCommand]?) throws -> String {
+    guard let commands else { return "" }
+    return printfLine(try availableCommandsUpdate(commands))
 }
 
 /// Renders the shell statement that records the agent's own pid.
@@ -402,21 +540,119 @@ private func permissionRequest() throws -> String {
     ])
 }
 
-/// The `initialize` answer: the protocol version this client supports, the
-/// stub's own name and version, and a session capability.
+/// How a stub agent answers `initialize`.
+private enum StubAgentInitializeAnswer {
+    /// The agent answers with its capabilities and these authentication
+    /// methods. An empty list advertises none.
+    case reports([AuthMethod])
+
+    /// The agent answers with a JSON-RPC error, and the handshake fails.
+    case fails
+}
+
+/// The JSON-RPC code an agent answers with when it will not serve a request it
+/// understood.
+///
+/// It is the spec's `Internal error`, which is what an agent that cannot
+/// initialize reports. The number is spelled here because JSON-RPC fixes it and
+/// no Swift type in this package names it.
+private let jsonRPCInternalErrorCode = -32_603
+
+/// The message a refusing stub agent puts in its `initialize` error.
+private let stubAgentInitializeRefusal = "the stub agent refuses to initialize"
+
+/// The `initialize` answer the caller asked for.
+///
+/// - Parameter answer: How the agent answers.
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> String {
+    switch answer {
+    case .reports(let authMethods):
+        try initializeResult(reporting: authMethods)
+    case .fails:
+        try initializeError()
+    }
+}
+
+/// The successful `initialize` answer: the protocol version this client
+/// supports, the stub's own name and version, a session capability, and the
+/// authentication methods the caller chose.
+///
+/// - Parameter authMethods: The authentication methods to advertise. An empty
+///   list leaves the member out, which is what an agent that advertises none
+///   sends.
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func initializeResult(reporting authMethods: [AuthMethod]) throws -> String {
+    var result: [String: Any] = [
+        "capabilities": ["session": [String: String]()],
+        "info": ["name": stubAgentName, "version": stubAgentVersion],
+        "protocolVersion": ACPClient.supportedProtocolVersion.rawValue,
+    ]
+    if !authMethods.isEmpty {
+        result["authMethods"] = try jsonValue(of: authMethods)
+    }
+    return try ndjsonLine([
+        "id": initializeAnswerID,
+        "jsonrpc": jsonRPCVersion,
+        "result": result,
+    ])
+}
+
+/// The failing `initialize` answer: a JSON-RPC error, which the client reads as
+/// a protocol failure.
 ///
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func initializeAnswer() throws -> String {
+private func initializeError() throws -> String {
     try ndjsonLine([
+        "error": ["code": jsonRPCInternalErrorCode, "message": stubAgentInitializeRefusal],
         "id": initializeAnswerID,
         "jsonrpc": jsonRPCVersion,
-        "result": [
-            "capabilities": ["session": [String: String]()],
-            "info": ["name": stubAgentName, "version": stubAgentVersion],
-            "protocolVersion": ACPClient.supportedProtocolVersion.rawValue,
-        ],
     ])
+}
+
+/// The `session/close` answer, which carries nothing but its id.
+///
+/// The id is ``promptAnswerID`` because the answers of this stub are numbered by
+/// the ORDER the client sends its requests in, and `probe` sends no prompt: its
+/// third request is `session/close`. See ``initializeAnswerID``.
+///
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func closeSessionAnswer() throws -> String {
+    try ndjsonLine([
+        "id": promptAnswerID,
+        "jsonrpc": jsonRPCVersion,
+        "result": [String: String](),
+    ])
+}
+
+/// One `available_commands_update` carrying the agent's slash commands.
+///
+/// - Parameter commands: The commands to report, which may hold none.
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func availableCommandsUpdate(_ commands: [AvailableCommand]) throws -> String {
+    try sessionUpdate([
+        "availableCommands": try jsonValue(of: commands),
+        "sessionUpdate": "available_commands_update",
+    ])
+}
+
+/// Renders one wire value as the untyped JSON `JSONSerialization` writes.
+///
+/// The stub builds its messages as dictionaries, because a `/bin/sh` script
+/// carries them as text. A wire value goes through its own `Codable`
+/// conformance first, so the script says exactly what the schema says and no
+/// member is spelled again here.
+///
+/// - Parameter value: The wire value to render.
+/// - Returns: The value as arrays, dictionaries and scalars.
+/// - Throws: A JSON-encoding failure.
+private func jsonValue(of value: some Encodable) throws -> Any {
+    try JSONSerialization.jsonObject(with: try JSONEncoder().encode(value))
 }
 
 /// The `session/new` answer: the one session id this stub gives out.

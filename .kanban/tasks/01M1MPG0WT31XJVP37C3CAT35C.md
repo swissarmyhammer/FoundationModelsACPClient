@@ -65,11 +65,39 @@ comments:
     - evidence: 9 files. Production: `Sources/acp-client/RunCommand.swift`, `Sources/acp-client/AgentSession.swift`, `Sources/acp-client/TerminalOutput.swift`. Unit tests: `Tests/FoundationModelsACPClientTests/RunCommandTransportTests.swift` (new), `TerminalOutputTests.swift`, `AgentSessionTests.swift`. Integration: `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/StreamRulesTests.swift` (new), `Support/CLITestSupport.swift`, `Support/StubAgents.swift`. `timeout 420 swift test` — 187 tests in 13 suites passed, zero failures, zero warnings. `timeout 600 swift test --package-path IntegrationTests` — 25 tests in 5 suites passed, zero failures, zero warnings. Every acceptance row and every Tests row of the card has a test; none was left undone. `pgrep` after the run showed no leftover `acp-client` or stub-agent process.
     - next: `/review`
   timestamp: 2026-09-04T19:42:18.582541+00:00
+- actor: claude-code
+  id: 01m1pzk091pj6k6bcn2sgfevph
+  text: |-
+    ### review — clean
+    - evidence: `review sha f1f253a~1..f1f253a` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 9 files reviewed
+    - checks: `swift test --package-path IntegrationTests --filter StreamRules` — 8 tests, all pass
+    - judgement 1: the `let transport` in `RunCommand.runTurn` holds the tee for the full turn. Swift gives a callee a borrowed argument, so the caller keeps the value alive until `driveTurn` returns, and `driveTurn` returns only after `session.teardown()`. `FrameTeeTransport.deinit` thus cannot cancel the forwarder in the middle of the exchange.
+    - judgement 2: the four `--verbose` session event lines are in the scope of this task. The acceptance criteria ask that `--verbose` writes session event lines to stderr. No code wrote those lines before. The `.verbose` gate in `TerminalOutput.event(_:)` keeps the default run and `--quiet` at zero bytes on stderr, and two integration tests prove it from real file descriptors.
+    - judgement 3: §8 holds with `--frames`. The frames test asserts that stdout is equal to the answer bytes, and that the count of the marked lines is equal to the count of all stderr lines. Thus every stderr byte is a frame, and no frame goes to stdout.
+    - note: the description checkboxes stay unchecked. The reviewer does not mark them.
+    - next: none. The task moves to done.
+  timestamp: 2026-09-04T19:51:03.201677+00:00
+- actor: claude-code
+  id: 01m1pzkzccq0j1pcyvcknmptn7
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 9 files. `--frames` now puts `FrameTeeTransport` in the run's transport chain; `TerminalOutput.frame(_:)` writes at every verbosity, so the flag is independent of `--quiet` and `--verbose`.
+    - test: green — root 187 passed in 13 suites, integration 25 passed in 5 suites, 0 failures and 0 warnings on both
+    - commit: f1f253a feat(cli): wire --frames into run and prove the stream split
+    - review: clean — zero findings, task moved to done
+
+    Three things the review established:
+    - `--verbose` wrote ZERO bytes to stderr before this change, because the only source of event lines was the wire logger, which fires on an anomaly alone. The four new event lines (the agent started, initialize answered, the session opened, the turn ended) are required by the card's own acceptance row, not scope creep. Two integration tests hold the default run and `--quiet` at an empty stderr.
+    - §8 holds under `--frames`: stdout is the answer bytes and nothing else, and every stderr line carries a direction mark, so no frame reaches stdout and nothing unmarked reaches stderr.
+    - One comment in `RunCommand.swift` gives a reason that is not true. It says a dropped tee value would stop teeing mid-exchange; Swift passes `any ACPTransport` as a borrowed argument, so an inline temporary would live as long. The `let` binding is correct and readable, and only the stated reason is wrong.
+
+    The 12 description checkboxes stay unchecked, although the review confirmed a passing test covers every one.
+  timestamp: 2026-09-04T19:51:35.052156+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPD4MJ9KMVVQ316YSJPJHK
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9980'
 title: Wire --frames into run, and prove the two streams end to end
 ---
 ## What
