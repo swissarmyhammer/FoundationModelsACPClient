@@ -200,12 +200,33 @@ comments:
       `closure_parameter_position` reports are repo-wide and already present on
       files this change does not touch.
   timestamp: 2026-09-04T17:39:47.115448+00:00
+- actor: claude-code
+  id: 01m1prk07cvd7dhtpvsgwp0pzc
+  text: |
+    ### review — clean
+    - evidence: `review sha 797483b~1..797483b`, 7 validators attempted, 0 findings, 0 confirmed, 0 refuted. All 3 prior findings resolved and checked.
+    - finding 1 `Sources/acp-client/AgentSession.swift` — `closeSession(_:)` now catches `let error as RequestError where error.code == .methodNotFound` for the "not answered" wording, and reports every other error as `session/close failed`. The implementer's correction is correct: `RequestError` is a typealias for the `ACPError` struct (`.build/checkouts/FoundationModelsACP/Sources/FoundationModelsACP/Connection/RequestError.swift:16`) and `methodNotFound(_:)` is a static factory (same file, line 32), so the literal `catch RequestError.methodNotFound` pattern cannot compile. The `where` clause is the same test.
+    - finding 2 `Tests/FoundationModelsACPClientTests/AgentSessionTests.swift` — the source-text scan is gone. `AgentSessionSpawnTests` is a `.serialized` suite that snapshots `ProcessRegistry.global.registeredPids`, drives the seam, and expects no new member. The test can fail: any process this package starts registers its pid.
+    - finding 3 `Tests/FoundationModelsACPClientTests/AgentSessionTests.swift` — the source-text scan is gone. `aStreamedChunkLandsInTheContainerWithNoFlush` injects a `ManualClock` through the new defaulted `clock:` seam. The test can fail: `ACPSessionState.scheduleFlushIfNeeded()` sleeps for the cadence on the injected clock, and `ManualClock` resumes at once only when the deadline is not later than now, so a non-zero cadence never flushes against a clock the test never moves forward. The script holds the chunk alone, so no `state_update` gives a synchronous flush, and the disconnect flush happens only in `teardown()`, after the assertion.
+    - next: none — task moved to done.
+  timestamp: 2026-09-04T17:48:43.116992+00:00
+- actor: claude-code
+  id: 01m1prkz51pycmn965twf9paem
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files. All three findings removed at the cause: a defaulted `clock:` seam makes the `.zero` cadence provable against ManualClock; `closeSession` narrowed so only a `methodNotFound` code reads as "not answered"; both source-text scans replaced with real behavioural tests (a `.serialized` ProcessRegistry.global snapshot, and a ManualClock cadence test). Each new test proved able to fail by mutation, then reverted.
+    - test: green — 172 passed in 11 suites, 0 failures, 0 warnings
+    - commit: 797483b fix(acp-client): apply review fixes for ^4a9ax26
+    - review: clean — zero new findings, all three prior items confirmed resolved, task moved to done
+
+    One correction the implementer made to finding 1, which the review confirmed: the finding's literal text `catch RequestError.methodNotFound` cannot compile. `RequestError` is a typealias for the `ACPError` STRUCT and `methodNotFound(_:)` is a static factory, not an enum case. `catch let error as RequestError where error.code == .methodNotFound` tests the same fact and keeps the requirement whole.
+  timestamp: 2026-09-04T17:49:14.785546+00:00
 depends_on:
 - 01M1MQF486GZVCQNZCMS2KDE0R
 - 01M1MPDTZVEP8XEEWQJVP0Y75Z
 - 01M1MPCQFQFVAPFCZVVQ95AK7S
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9580'
 title: Build the shared connect-and-initialize seam that run, probe and doctor use
 ---
 ## What
