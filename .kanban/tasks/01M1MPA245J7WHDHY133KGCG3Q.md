@@ -52,8 +52,30 @@ comments:
     - evidence: `swift package clean` then `swift test` — Build complete (14.30 sec), 79 tests in 3 suites passed, 0 failures, 0 skipped, 0 warnings. `swift build --product acp-client` — Build complete (0.81 sec), 0 warnings, 0 errors.
     - next: none
   timestamp: 2026-09-04T13:01:49.613021+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1p8f3qm8w6az3gp5s59vqqj
+  text: |-
+    ### review — clean
+    - scope: `review sha b272400..af0d8fd` (commit af0d8fd, this iteration's checkpoint). `HEAD~1..HEAD` was stale: the kanban-only commit af878f2 landed after af0d8fd, so that range held only `.kanban/` files. The range was corrected to the parent of af0d8fd.
+    - evidence: zero new findings. 8 files reviewed, 7 validators attempted, 0 failed, 0 skipped. Only `.kanban/` files excluded, by `.reviewignore`.
+    - judged: `swiftSourceFiles(under:)` landed as a `static func` on `extension RepositoryFile` in Tests/FoundationModelsACPClientTests/SourceFiles.swift, because the Swift `immutability` validator forbids a top-level func. The name and the signature stay the same, and the helper is callable from every file in the unit test target. The acceptance criterion holds.
+    - judged: `forbiddenModules` in ForbiddenImportTests.swift went from `private` to internal, so ManifestTests reads the one list. This is reuse, and it prevents the duplicate list the `duplication` validator looks for.
+    - no prior `## Review Findings` section existed on this task, so nothing was carried over.
+    - next: task moved review -> done.
+  timestamp: 2026-09-04T13:06:58.420551+00:00
+- actor: claude-code
+  id: 01m1p8fp5tapgqhqrqwspvpa1g
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 8 files; Noora resolved at 0.57.0 and built against the macOS 27 / Swift 6.2 floor, so the untested-upstream risk on the card is closed
+    - test: green — `swift package clean && swift test`, 79 passed, 0 failed, 0 skipped, 0 warnings; `swift build --product acp-client` clean, `--version` prints 0.1.0
+    - commit: af0d8fd feat(acp-client): declare the acp-client executable target, product, and dependencies
+    - review: clean — zero new findings, 7 validators, task moved to done. Scoped to b272400..af0d8fd: a kanban-only commit af878f2 landed after the code commit, so HEAD~1..HEAD no longer named it.
+
+    Carried forward: `Package.resolved` is gitignored in this repo, so the ManifestTests assertion that reads it holds locally and in CI (SwiftPM writes the file during resolution) but never appears in a diff.
+  timestamp: 2026-09-04T13:07:17.306318+00:00
+position_column: done
+position_ordinal: 8c80
 title: Declare the acp-client executable target, product and dependencies
 ---
 ## What
