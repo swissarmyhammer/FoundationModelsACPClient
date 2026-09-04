@@ -189,6 +189,120 @@ comments:
     - also closed, unnamed by the finding: the old block pattern `\[([^\]]*)\]` truncated at the first `]`, so every entry after a `condition: .when(platforms: [.macOS])` was invisible.
     - next: /review
   timestamp: 2026-09-04T22:47:18.691156+00:00
+- actor: claude-code
+  id: 01m1qafn7pxc22z7se2xj07k48
+  text: |
+    ### review — findings
+    - scope: `review sha d6b206b~1..d6b206b`; engine 0 findings (1 file, 2 excluded by `.reviewignore`)
+    - evidence: 1 finding — Tests/FoundationModelsACPClientTests/ManifestTests.swift:341
+    - prior finding CLOSED: all five `Target.Dependency` forms are read end to end. Each form was added to the real `acp-client` executable target and each fails `theExecutableTargetTakesTheLibraryAlone`. An entry AFTER a `condition:` entry is read too, which the old `\[([^\]]*)\]` pattern hid.
+    - the two new tests are not vacuous: five reader mutations, all caught.
+    - a `/* */` comment is not an evasion: the `unreadable` case makes the lexer fail safely, and the one crafted form does not build.
+    - suite: `swift test` 202 tests in 14 suites, all passing. Working tree clean.
+    - next: this is the THIRD distinct defect on `ManifestTests.swift`. The finding asks for the approach and not a third patch: `swift package dump-package --scratch-path <temp>` was measured at 0.43 s from inside a `swift test` run of this package, so the doc comment that says the command "cannot run from inside this suite" is not correct.
+  timestamp: 2026-09-04T23:01:27.926554+00:00
+- actor: claude-code
+  id: 01m1qagkswhpvz3xwn3kn6v7zf
+  text: |-
+    ### finish iteration 3 — findings
+    - implement: changed — 1 file. The dependency array is split by nesting depth, string-literal and comment aware; one `DependencyEntry` enum reads every form; an entry in no known form fails the read rather than being dropped.
+    - test: green — root 202 passed in 14 suites, integration 35 passed in 7 suites, 0 warnings, 0 LSP diagnostics
+    - commit: d6b206b fix(test): split dependency entries by nesting depth in ManifestTests
+    - review: findings — Tests/FoundationModelsACPClientTests/ManifestTests.swift:341
+
+    The review verified the prior finding is genuinely closed, by putting each of the five forms into the real manifest and running the suite. All five fail, with no build error. The extra hole the implementer found is closed too: an entry after a `condition: .when(platforms: [.macOS])` is now visible. The two new tests are not vacuous — five mutations of the reader are each caught, and restoring the old truncating behaviour fails the fixture test. `/* */` is not an evasion, because an unreadable entry fails the read, and a comment crafted to hide the next entry gives a manifest that does not compile.
+
+    The new finding is the reason for the hand-written reader, not another hole in it. The claim that `swift package dump-package` deadlocks was measured with the DEFAULT scratch path, which is the `.build` directory the parent `swift test` run locks. `--scratch-path` removes the contention. The review measured it from a test inside this same target: exit 0, 0.43 seconds, 6165 bytes of manifest JSON.
+
+    The judgement, which I accept: this file needs the other approach, not a third patch. Three rounds of findings share one cause — the file reads a Swift program with regular expressions and a hand-written lexer. Round 1 was WHICH TARGET, round 2 WHICH ENTRY FORMS, round 3 WHICH LEXICAL CONTEXTS. That list has no end: `/* */`, nested comments, raw strings, multi-line strings, `#if os(macOS)` inside the array. `dump-package` deletes the class, because SwiftPM normalises every entry into one form.
+  timestamp: 2026-09-04T23:01:59.229001+00:00
+- actor: claude-code
+  id: 01m1qaz38g0hq42bbyca1993nc
+  text: |-
+    Research for the third finding, before the edit. The review is right and the earlier measurement was wrong.
+
+    **`swift package dump-package` works, measured again here.** With `--scratch-path` pointed at a fresh temporary directory: exit 0, **0.20 s**, **6165 bytes** of JSON, the same size the review reported. Six copies started together, each with a scratch path of its own: all six exit 0, 0.24 s wall for the set. So the call does not contend with itself either, and one call per rule is affordable. The old claim named a deadlock; what it measured was the DEFAULT scratch path, which is the `.build` directory the parent `swift test` run locks.
+
+    **The JSON normalises every entry form, which is the whole point.** SwiftPM reads a `Target.Dependency` into three cases and writes each as a one-key object:
+    - `{"byName": [name, condition]}` — a bare string literal AND `.byName(name:)`
+    - `{"target": [name, condition]}` — `.target(name:)`
+    - `{"product": [name, package, moduleAliases, condition]}` — `.product(...)`, whatever trailing argument follows
+
+    So the five spellings collapse to three keys and a name. `/* */`, nested comments, raw strings, multi-line strings and `#if os(macOS)` stop being reader questions.
+
+    **What the JSON carries for each rule, read from the real dump.**
+    - `.executable(name: "acp-client")` — carried: a product named `acp-client` whose `type` is `{"executable": null}`. The kind is in the KEY, not the value. So this rule moves to the JSON and gets STRONGER: the old `contains` of a literal would have failed on a line break inside the declaration and passed for a name held in a constant.
+    - The Noora `.upToNextMinor(from:)` spelling — NOT carried. The dump writes `requirement: {range: [{lowerBound: "0.57.0", upperBound: "0.58.0"}]}`. A hand-written `"0.57.0"..<"0.58.0"` gives the same range, so the JSON cannot carry the SPELLING the rule pins. That rule keeps the text read, with a comment saying so.
+    - Every dependency-list rule — carried.
+    - `Package.resolved` — unchanged, it was never a manifest read.
+
+    **The dependency lists the dump gives, checked against each rule.** `AcpClientCore`: `byName` FoundationModelsACPClient, then products FoundationModelsACP, FoundationModelsExtras, ArgumentParser, Noora. `acp-client`: `byName` AcpClientCore alone. So the §12 cap still counts 1 + 4 = 5, the required-product subset still holds, the executable still takes the library alone, and the union of both targets' names still meets no forbidden module.
+
+    **A fourth entry form must fail the read, not be dropped.** SwiftPM's enum has exactly three cases today. The decoder throws `DecodingError.dataCorrupted` for an object carrying none of the three keys, so a future SwiftPM case stops the suite rather than passing it — the same guarantee the deleted `unreadable` case gave, with the compiler and SwiftPM doing the work.
+
+    **Which name to use for the forbidden-module failure runs.** No name in `forbiddenModules` is a buildable dependency of this graph, and a manifest that does not resolve never reaches the rule. `FoundationModelsExtras` vends `Operations` and `OperationsCLI` beside its main library, and neither target names either one, so `Operations` is a buildable name that is absent from the baseline. The run is: add `"Operations"` to `forbiddenModules`, confirm the suite is still GREEN (the baseline names it nowhere), then put `.product(name: "Operations", package: "FoundationModelsExtras")` into one target and watch the rule fail. On the library target that same entry is also the sixth dependency, so one build serves two of the card's defects.
+
+    **Streams go to files, not pipes.** Reading one pipe to end-of-file while the other fills its buffer is a deadlock of its own; two capture files under the same temporary working directory have no buffer to fill, and one `removeItem` cleans the scratch path and both captures together.
+  timestamp: 2026-09-04T23:09:53.808025+00:00
+- actor: claude-code
+  id: 01m1qbjzbqgc1z8432v7sfgcmz
+  text: |-
+    The finding is fixed by the approach, not by a third patch. What the file is now, and what was proven.
+
+    **The false claim is gone, and the correct one stands in its place.** The old doc comment said `swift package dump-package` "cannot run from inside this suite" and named a deadlock. It does run. `packageDump()` now carries the measurement: the DEFAULT scratch path is `.build`, the parent `swift test` run locks that directory for the whole of its life, and that is the only reason the earlier probe hung. Pointed at a fresh temporary directory the child contends with nothing. Measured here: **exit 0, about 0.2 s, 6165 bytes of JSON**, and 6 copies started together answered the same in 0.24 s of wall clock. Inside the suite the seven rules cost **0.5 s in total**.
+
+    **The hand-written reader is deleted.** Gone: `entries(ofArrayAfter:in:)` (the depth splitter), `DependencyEntry`, `dependencyEntry(readFrom:)`, `dependencies(inEntries:)`, `dependencyEntries(ofTargetNamed:declaredBy:)`, `TargetDependencies`, `probeDependencies(in:declaredBy:)`, and the two fixture tests that only guarded them — `theReaderReadsEveryDependencyForm` and `theReaderReportsAnEntryNoFormReads`. They guarded code that no longer exists. The root suite therefore reads 200 tests where it read 202.
+
+    **In their place: `PackageDump`, `DumpedProduct`, `DumpedTarget`, `DumpedDependency`.** `DumpedDependency` decodes SwiftPM's own three keys — `byName`, `target`, `product` — so all five spellings reach a rule as a name. `DumpedTarget` exposes `targetNames`, `productNames`, `packageNames` and `allNames`, which are the same four lists the rules read before, so every rule body is unchanged in meaning and nearly unchanged in text.
+
+    **A form the reader does not know FAILS the read.** An entry object carrying none of the three keys throws `DecodingError.dataCorrupted`, naming the keys it knows. That is the same guarantee the deleted `unreadable` case gave, and now the compiler and SwiftPM carry it instead of a lexer.
+
+    **Every rule survives, and one got stronger.**
+    | rule | reads |
+    |---|---|
+    | `theManifestDeclaresTheExecutableProduct` | the JSON: a product named `acp-client` whose `type` object carries the `executable` KEY |
+    | `theTargetLinksEveryProductTheBinaryNeeds` | the JSON, library target alone (a union would WEAKEN it) |
+    | `theTargetDeclaresFiveDependencies` | the JSON, library target alone (its partner catches the executable-side evasion) |
+    | `theExecutableTargetTakesTheLibraryAlone` | the JSON, executable target |
+    | `neitherTargetNamesAForbiddenModule` | the JSON, the union of both targets |
+    | `theNooraRequirementIsUpToNextMinor` | the manifest TEXT, and the comment says why |
+    | `theResolvedFilePinsTheNewDependencies` | `Package.resolved`, unchanged |
+
+    The executable-product rule moved to the JSON and is stronger for it: the old `contains` of the literal `.executable(name: "acp-client"` would have failed on a line break inside the declaration and passed for a name held in a constant. The Noora rule keeps the text read because the dump resolves a requirement to a version RANGE and drops the spelling — `.upToNextMinor(from: "0.57.0")` and a hand-written `"0.57.0"..<"0.58.0"` both come back as `[0.57.0, 0.58.0)`, so the JSON cannot carry the fact the rule pins.
+
+    **Cleanup and stream safety.** Each call makes one temporary working directory holding the child's scratch path and two capture FILES, and one `removeItem` in a `defer` removes all three. Files rather than pipes, because draining one pipe to end-of-file while the other fills its buffer is a deadlock of its own. Measured: **0** leftover directories under `TMPDIR` after the whole 200-test run and every experiment below.
+
+    **This is still a unit test, and the file says so.** The child reads this repository's own manifest with the toolchain already running the suite: no network, no database, no spawned server, no external service, and under half a second.
+
+    **The deliberate-failure runs. `Package.swift` was restored after each one, and `git status` shows it unchanged.**
+
+    | defect put into `Package.swift` | what failed |
+    |---|---|
+    | a sixth dependency on `AcpClientCore` — `.product(name: "Operations", package: "FoundationModelsExtras")` | `theTargetDeclaresFiveDependencies` ALONE: `client.targetNames.count + client.productNames.count == Self.permittedDependencyCount` |
+    | the executable takes a bare string `"FoundationModelsACPClient"` | `theExecutableTargetTakesTheLibraryAlone`: `It takes ["AcpClientCore", "FoundationModelsACPClient"]` |
+    | the executable takes `.byName(name: "FoundationModelsACPClient")` | the same rule, the same message |
+    | the executable takes `.target(name: "FoundationModelsACPClient")` | the same rule, the same message |
+    | the executable takes `.product(name: "Noora", package: "Noora")` | `theExecutableTargetTakesTheLibraryAlone`: `It names ["Noora"]` |
+    | the executable takes `.product(name:package:condition:)` with `.when(platforms: [.macOS])`, written FIRST in the list | `theExecutableTargetTakesTheLibraryAlone`: `It names ["Noora"]`, ONE issue only — so `targetNames == ["AcpClientCore"]` still held, and the entry standing after the bracket-carrying one was read |
+    | a forbidden module on the LIBRARY target: `Operations` on `AcpClientCore`, with `"Operations"` added to `forbiddenModules` | `neitherTargetNamesAForbiddenModule`: `They name ["Operations"]`, beside the sixth-dependency failure |
+    | a forbidden module on the EXECUTABLE target: `Operations` on `acp-client`, same list | `neitherTargetNamesAForbiddenModule`: `They name ["Operations"]`, beside `It names ["Operations"]` |
+
+    **The baseline for the two forbidden-module runs was measured first.** With `"Operations"` in `forbiddenModules` and a CLEAN manifest, all 7 rules pass — so the baseline names it nowhere and each failure above comes from the entry that was added.
+
+    **Why `Operations` and not a real forbidden module.** No name in `forbiddenModules` is a buildable dependency of this graph, and a manifest SwiftPM cannot resolve never reaches the rule at all. `FoundationModelsExtras` vends `Operations` beside its main library and neither target names it, so it is the buildable stand-in. The REAL case was measured separately, without the suite: with `.byName(name: "SwiftUI")` on the `acp-client` target, `dump-package` — which parses and does not resolve — writes `[{"byName": ["AcpClientCore", null]}, {"byName": ["SwiftUI", null]}]`, so the reader sees the forbidden module; `swift build` on that same manifest fails with `product 'SwiftUI' required by package 'foundationmodelsacpclient' target 'acp-client' not found`, which is why no `swift test` run can be made against it.
+
+    **Rules read before the edit.** `dump validators` returned 60 rules across code-hygiene, code-security, completeness, duplication, reuse, swift and test-integrity. The load-bearing ones here: `test-integrity/test-partitioning` names the unit/integration split, and the reason this stays a unit test is written into `packageDump()` rather than only on this card; `swift/optionals` forbids `guard` in a test, so the decoder branches with `if`/`else if`/`else` and the target lookups unwrap with `try #require`; `swift/immutability` ("Build a collection with `map`/`compactMap`, not a `var` accumulator") is why the child environment is built with `filter` and the four name lists with `compactMap`; `code-hygiene/dead-code` is why the splitter, the entry enum and their fixture tests were deleted rather than left standing; `code-hygiene/magic-numbers-swift` permits `0`, `1`, `-1` and `100`, and the file's one numeric literal is `permittedDependencyCount`, which is named; `test-integrity/no-test-cheating` bans a weakened assertion, and no assertion here got looser — the executable-product rule got stricter.
+  timestamp: 2026-09-04T23:20:45.175065+00:00
+- actor: claude-code
+  id: 01m1qbkbxagsa21kpmgngy3tfr
+  text: |
+    ### implement — changed
+    - evidence: 1 file — `Tests/FoundationModelsACPClientTests/ManifestTests.swift`. `Package.swift` and `ForbiddenImportTests.swift` were each edited for the deliberate-failure runs and restored with `git checkout`; `git status` shows neither. Tests: `timeout 420 swift test` — 200 tests in 14 suites passed (202 minus the two fixture reader tests the card ordered deleted with the reader they guarded). `timeout 600 swift test --package-path IntegrationTests` — 35 tests in 7 suites passed, unchanged. `swift build --build-tests` on both packages — 0 warnings, 0 errors. LSP diagnostics on the changed file at severity `hint` — 0 errors, 0 warnings. 0 leftover temporary directories after every run.
+    - the approach, not a third patch: the hand-written depth splitter, `DependencyEntry`, the entry reader and their two fixture tests are DELETED. `swift package dump-package --scratch-path <fresh temporary directory>` runs from inside the suite in about 0.2 s and its JSON gives every dependency in one normal form. The false deadlock claim is corrected in `packageDump()`, which now records that the default scratch path is the `.build` directory the parent run locks.
+    - rules kept: all seven, unchanged in meaning. Six read the JSON; `theNooraRequirementIsUpToNextMinor` keeps the text read, because the dump resolves a requirement to a version RANGE and drops the `.upToNextMinor(from:)` spelling the rule pins — the comment says so at the head of the test.
+    - deliberate-failure results, each reverted: sixth dependency on `AcpClientCore` → `theTargetDeclaresFiveDependencies` alone; the executable taking a bare string, `.byName(name:)` and `.target(name:)` → `theExecutableTargetTakesTheLibraryAlone` with `It takes ["AcpClientCore", "FoundationModelsACPClient"]`; `.product(name:package:)` and `.product(name:package:condition:)` → the same rule with `It names ["Noora"]`, the conditional form written FIRST and still leaving `targetNames == ["AcpClientCore"]`, so the entry after the brackets was read; a forbidden module on the library target and on the executable target → `neitherTargetNamesAForbiddenModule` with `They name ["Operations"]` on each, over a baseline measured GREEN first.
+    - next: /review
+  timestamp: 2026-09-04T23:20:58.026600+00:00
 position_column: doing
 position_ordinal: '8180'
 title: Split acp-client into a library target and a thin executable
@@ -284,3 +398,78 @@ This is a move, not a rewrite. No behaviour changes.
 - **`theTargetLinksEveryProductTheBinaryNeeds` is right to stay one-sided.** It asserts `requiredProductNames` is a subset of the LIBRARY's products. One-sided is the strict reading: moving a required link down to the executable makes the library set incomplete and the rule fails. A union would accept that move and weaken the rule. Reading the library alone is what the comment claims, and the claim holds.
 - **`theTargetDeclaresFiveDependencies` is right to stay one-sided, and its partner covers the gap.** The cap counts where the dependencies stand. The evasion it cannot see on its own — a sixth dependency hung on the thin executable — is what `theExecutableTargetTakesTheLibraryAlone` exists to catch, and that rule permits exactly one target name and zero products there. The pairing is complete for every entry form the splitter reads, so the finding above is the whole of what is left open.
 - **The prior checklist item is checked.** The `## Review Findings (2026-09-04 16:55)` item on `ManifestTests.swift:161` carries `- [x]`, and the commit message records it as fixed.
+
+## Review Findings (2026-09-04 17:59)
+
+> Scope: `review sha d6b206b~1..d6b206b` — the diffs only.
+> The review engine reported 0 findings across 1 file (2 files excluded by
+> `.reviewignore`). The item below comes from the scope checks the review
+> asked for.
+> The prior finding on `ManifestTests.swift:269` IS closed. The item below is a
+> different defect in the same file. It is the third one on this file.
+
+- [x] `Tests/FoundationModelsACPClientTests/ManifestTests.swift:341` `scope-coverage/justification-not-measured` — The doc comment says that `swift package dump-package` "cannot run from inside this suite". The claim is not correct, and it is the only stated reason why this file reads the manifest as text. The measurement behind the claim used the DEFAULT scratch path. The default scratch path is the `.build` directory, and the parent `swift test` run holds the lock on that directory. The `--scratch-path` option gives the child process a directory of its own, and the lock conflict stops. Measured on 2026-09-04 from a temporary test in this same test target: `swift package dump-package --package-path <root> --scratch-path <new temporary directory>` exited 0 after 0.43 seconds and wrote 6165 bytes of manifest JSON, and that JSON names `"acp-client"`. Correct the claim. Then read the dependency lists from that JSON, where SwiftPM writes every entry in one normal form, and delete the hand-written splitter and entry reader.
+
+### The approach, not another patch
+
+The card asks for a plain judgement when a third distinct defect comes to this
+file. Here is that judgement: **the file needs the different approach, and not
+a third patch.**
+
+- The three defects are all one cause. The file reads Swift source text with
+  regular expressions and a hand-written lexer. Each round closes the holes a
+  person listed, and each round the next reader question is open again: first
+  WHICH TARGET the pattern reads, then WHICH ENTRY FORMS the splitter reads,
+  and now WHICH LEXICAL CONTEXTS the splitter must step over. The lexer
+  presently knows string literals and `//` comments. It does not know `/* */`
+  comments, nested `/* /* */ */` comments, raw string literals (`#"..."#`),
+  multi-line string literals, or `#if os(macOS)` inside the array. That list
+  has no end, because the input is a Swift program.
+- `dump-package` removes the whole class. SwiftPM parses the manifest and
+  writes every dependency in one normal form, so no rule of this suite has to
+  know how a person spelled an entry.
+- The measurement is now available: 0.43 seconds, from inside a `swift test`
+  run of this package, with `--scratch-path`.
+
+### What the scope checks confirmed
+
+- **All five entry forms are read, end to end, by execution.** Each form was
+  added to the real `acp-client` executable target of `Package.swift`, and
+  `swift test --filter ManifestTests` was run against it. Every one fails
+  `theExecutableTargetTakesTheLibraryAlone`: a bare string literal
+  (`targetNames` expectation), `.byName(name:)` (`targetNames`),
+  `.target(name:)` (`targetNames`), and
+  `.product(name:package:condition:)` (`productNames.isEmpty`). No build
+  errors. `Package.swift` was restored after each run.
+- **The hole the finding did not name is closed too.** A `.product(...)` entry
+  that carries `condition: .when(platforms: [.macOS])`, FOLLOWED BY a
+  `.byName(name:)` entry, fails the rule with TWO issues — both the entry
+  before the brackets and the entry after them are read. The old
+  `\[([^\]]*)\]` pattern stopped at the first `]`, so the second entry was
+  invisible. The implementer's claim about this holds.
+- **The two new tests are not vacuous.** Five mutations were put into the
+  reader, and each one is caught: read a `.product` entry as a module (fails
+  `theReaderReadsEveryDependencyForm` and two manifest rules); keep an unknown
+  entry instead of reporting it (fails `theReaderReportsAnEntryNoFormReads`);
+  stop the splitter at the first `]`, which is the old behaviour (fails
+  `theReaderReadsEveryDependencyForm`); drop the bare-string-literal branch
+  (fails five tests); fold `//` comment text into the entry (fails
+  `theReaderReadsEveryDependencyForm`). The mutations were put into the
+  CLASSIFICATION and not into the name patterns, because the first quoted
+  substring of every SwiftPM form is the name and the two name patterns agree
+  today.
+- **A `/* */` comment is not an evasion, although the lexer does not know it.**
+  Three block comments that hold an unbalanced `]`, an unbalanced `(`, and one
+  `"` were each put into the executable target. All three FAIL the suite,
+  because the text the splitter then makes is an entry that no form reads, and
+  `dependencies(ofTargetNamed:declaredBy:)` requires that list to be empty. A
+  block comment written to look like a readable entry AND to carry the closing
+  `]` does hide the entry after it, but that manifest does not build: the
+  executable then has no `AcpClientCore` dependency and `AcpClientMain.swift`
+  cannot compile. So the `unreadable` case makes the lexer fail safely. This
+  is a strength of the new code, and it is why the item above asks for the
+  approach and does not report the block comment as a hole.
+- **The suite is green.** `swift test` reports 202 tests in 14 suites, all
+  passing. The working tree is clean after every mutation run.
+- **Both prior checklist items are checked.** The 16:55 item on line 161 and
+  the 17:16 item on line 269 both carry `- [x]`.

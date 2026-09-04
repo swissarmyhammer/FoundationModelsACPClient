@@ -11,8 +11,19 @@ import Testing
 /// the five that plan permits; a dependency hung on the thin `acp-client`
 /// executable target, which reaches around the count the library target
 /// carries; and a `from:` requirement on a 0.x package, which accepts every
-/// future breaking minor. This suite reads the manifest as text and pins
-/// exactly those.
+/// future breaking minor. This suite pins exactly those.
+///
+/// Every rule but one reads the manifest through `swift package dump-package`,
+/// which parses `Package.swift` and writes each declaration in one normal
+/// form. SwiftPM accepts five spellings for a `Target.Dependency` — a bare
+/// string literal, `.byName(name:)`, `.target(name:)`,
+/// `.product(name:package:)`, and the last three with a trailing
+/// `moduleAliases:` or `condition:` — and the dump reduces all five to a name
+/// under one of three keys. So no rule here has to know which spelling a
+/// person wrote, and none of them has to step over a `/* */` comment, a raw
+/// string or an `#if os(macOS)` block either. The one rule that still reads
+/// the manifest as text is ``theNooraRequirementIsUpToNextMinor``, and it says
+/// at its head why the dump cannot answer it.
 ///
 /// The command-line client is two targets, so every rule here says which of
 /// them it reads, and why that one and not the other.
@@ -49,13 +60,23 @@ struct ManifestTests {
 
     @Test("the manifest declares acp-client as an executable product")
     func theManifestDeclaresTheExecutableProduct() throws {
-        let manifest = try RepositoryFile.read(relativePath: "Package.swift")
-        #expect(
-            manifest.contains(#".executable(name: "acp-client""#),
+        let dump = try Self.packageDump()
+        let product = try #require(
+            dump.products.first { $0.name == Self.executableTargetName },
             """
             Package.swift must declare `.executable(name: "acp-client", ...)`. \
             A target on its own is not enough: FoundationModelsACPAgent depends \
-            on this package and spawns this binary from its own tests.
+            on this package and spawns this binary from its own tests. \
+            It declares the products \(dump.products.map(\.name).sorted()).
+            """
+        )
+        #expect(
+            product.isExecutable,
+            """
+            The \(Self.executableTargetName) product must be an executable \
+            product, and SwiftPM read it as a library. A library product \
+            publishes a module to import; it is not a binary another package \
+            can spawn.
             """
         )
     }
@@ -65,13 +86,13 @@ struct ManifestTests {
         // The library target alone, and not a union with the executable:
         // cli-plan.md §3 gives every one of these links to AcpClientCore, so
         // moving one down to the executable must fail this rule.
-        let dependencies = try Self.clientTargetDependencies()
+        let client = try Self.clientTarget()
         #expect(
-            Self.requiredProductNames.isSubset(of: Set(dependencies.productNames)),
+            Self.requiredProductNames.isSubset(of: Set(client.productNames)),
             """
             The \(Self.clientTargetName) target must name each of \
             \(Self.requiredProductNames.sorted()) as a product dependency. \
-            It names \(dependencies.productNames.sorted()).
+            It names \(client.productNames.sorted()).
             """
         )
     }
@@ -81,46 +102,46 @@ struct ManifestTests {
         // The library target alone. The cap counts where the dependencies
         // stand, and `theExecutableTargetTakesTheLibraryAlone` is what stops a
         // sixth one hiding in the executable instead.
-        let dependencies = try Self.clientTargetDependencies()
+        let client = try Self.clientTarget()
         #expect(
-            dependencies.targetNames == ["FoundationModelsACPClient"],
+            client.targetNames == ["FoundationModelsACPClient"],
             """
             The \(Self.clientTargetName) target must take this package's own \
             library target, and no other target. \
-            It takes \(dependencies.targetNames).
+            It takes \(client.targetNames).
             """
         )
         #expect(
-            dependencies.targetNames.count + dependencies.productNames.count
+            client.targetNames.count + client.productNames.count
                 == Self.permittedDependencyCount,
             """
             cli-plan.md section 12 permits the command-line client five \
             dependencies. \(Self.clientTargetName) declares \
-            \(dependencies.targetNames) and \(dependencies.productNames).
+            \(client.targetNames) and \(client.productNames).
             """
         )
     }
 
     @Test("the acp-client executable target takes the library and nothing else")
     func theExecutableTargetTakesTheLibraryAlone() throws {
-        let dependencies = try Self.executableTargetDependencies()
+        let executable = try Self.executableTarget()
         #expect(
-            dependencies.targetNames == [Self.clientTargetName],
+            executable.targetNames == [Self.clientTargetName],
             """
             The \(Self.executableTargetName) executable target holds the @main \
             type alone, so cli-plan.md section 3 gives it \
             \(Self.clientTargetName) as its one dependency and no other target. \
-            It takes \(dependencies.targetNames).
+            It takes \(executable.targetNames).
             """
         )
         #expect(
-            dependencies.productNames.isEmpty,
+            executable.productNames.isEmpty,
             """
             The \(Self.executableTargetName) executable target must name no \
             package product. Every product the binary needs reaches it through \
             \(Self.clientTargetName), which is where the five that cli-plan.md \
             section 12 permits are counted. It names \
-            \(dependencies.productNames.sorted()).
+            \(executable.productNames.sorted()).
             """
         )
     }
@@ -130,8 +151,8 @@ struct ManifestTests {
         // Both targets. Section 12 bans these modules from the BINARY, and the
         // binary is the library and the executable together, so reading one of
         // them would leave the other free to name one.
-        let named = try Self.clientTargetDependencies().allNames
-            .union(Self.executableTargetDependencies().allNames)
+        let named = try Self.clientTarget().allNames
+            .union(Self.executableTarget().allNames)
         #expect(
             named.isDisjoint(with: forbiddenModules),
             """
@@ -145,6 +166,12 @@ struct ManifestTests {
 
     @Test("the Noora requirement is upToNextMinor, not from")
     func theNooraRequirementIsUpToNextMinor() throws {
+        // The one rule of this suite that reads the manifest as text, because
+        // `swift package dump-package` cannot carry the fact it pins. The dump
+        // resolves a requirement to a version RANGE and drops the spelling
+        // that wrote it: `.upToNextMinor(from: "0.57.0")` comes back as
+        // `[0.57.0, 0.58.0)`, and so would a hand-written half-open range. The
+        // rule asks for the spelling, and only the text holds it.
         let manifest = try RepositoryFile.read(relativePath: "Package.swift")
         // `Regex` is not `Sendable`, so the pattern is local rather than a
         // stored constant, matching how `ForbiddenImportTests` writes its own.
@@ -173,413 +200,282 @@ struct ManifestTests {
         )
     }
 
-    @Test("the reader reads every form SwiftPM accepts for a dependency entry")
-    func theReaderReadsEveryDependencyForm() throws {
-        // Every rule above stands on this reader, so a form the reader cannot
-        // see is a form no rule holds against. The manifest itself writes two
-        // of the forms, so the other three are pinned here instead.
-        let manifest = """
-            .executableTarget(
-                name: "probe",
-                dependencies: [
-                    "BareString",
-                    .byName(name: "ByName"),
-                    .target(name: "Target"),
-                    .product(name: "Product", package: "ProductPackage"),
-                    .product(
-                        name: "Conditional",
-                        package: "ConditionalPackage",
-                        condition: .when(platforms: [.macOS])
-                    ),
-                    // The comment names "AfterTheCondition" and splits nothing.
-                    "AfterTheCondition",
-                ]
-            ),
-            """
-        let dependencies = try Self.probeDependencies(in: manifest)
-        #expect(
-            dependencies.targetNames
-                == ["BareString", "ByName", "Target", "AfterTheCondition"],
-            """
-            A bare string literal, `.byName(name:)` and `.target(name:)` each \
-            name a module directly, and the entry after a bracket-carrying one \
-            still stands in the list. The reader read \
-            \(dependencies.targetNames).
-            """
-        )
-        #expect(
-            dependencies.productNames == ["Product", "Conditional"],
-            """
-            A `.product(...)` entry reads whatever trailing `condition:` \
-            argument follows the package. The reader read \
-            \(dependencies.productNames).
-            """
-        )
-        #expect(
-            dependencies.packageNames == ["ProductPackage", "ConditionalPackage"],
-            "The reader read the packages \(dependencies.packageNames)."
-        )
-        #expect(
-            dependencies.unreadableEntries.isEmpty,
-            "The reader could not read \(dependencies.unreadableEntries)."
-        )
-    }
-
-    @Test("the reader reports an entry no form reads, and drops none")
-    func theReaderReportsAnEntryNoFormReads() throws {
-        // A dropped entry would be an invisible dependency, so the reader
-        // reports what it cannot read and `dependencies(ofTargetNamed:
-        // declaredBy:)` fails on it.
-        let manifest = """
-            .target(
-                name: "probe",
-                dependencies: [
-                    "Named",
-                    dependencyHeldInAConstant,
-                ]
-            ),
-            """
-        let dependencies = try Self.probeDependencies(
-            in: manifest,
-            declaredBy: "target"
-        )
-        #expect(
-            dependencies.unreadableEntries == ["dependencyHeldInAConstant"],
-            """
-            An entry in no form the reader knows must be reported, so that a \
-            rule cannot pass over it. The reader reported \
-            \(dependencies.unreadableEntries).
-            """
-        )
-        #expect(
-            dependencies.targetNames == ["Named"],
-            """
-            An unreadable entry must not take the entries beside it out of the \
-            list. The reader read \(dependencies.targetNames).
-            """
-        )
-    }
-
-    /// Reads the dependency entries of the `probe` target of a manifest written
-    /// for one test.
+    /// The ``clientTargetName`` library target, as SwiftPM parsed it.
     ///
-    /// - Parameters:
-    ///   - manifest: the manifest text to read.
-    ///   - declaration: the manifest function that declares the target, without
-    ///     its leading dot.
-    /// - Returns: the entries, split by form.
-    /// - Throws: an error when the text declares no such target block.
-    private static func probeDependencies(
-        in manifest: String,
-        declaredBy declaration: String = "executableTarget"
-    ) throws -> TargetDependencies {
-        let entries = try dependencyEntries(
-            ofTargetNamed: "probe",
-            declaredBy: declaration,
-            in: manifest
-        )
-        return dependencies(inEntries: entries)
-    }
-
-    /// The dependency entries one target of the manifest declares, split by the
-    /// form the manifest writes each one in.
-    private struct TargetDependencies {
-        /// The name in each entry that names a module directly: a bare string
-        /// literal, `.byName(name:)`, or `.target(name:)`.
-        let targetNames: [String]
-
-        /// The product name in each `.product(...)` entry, whatever trailing
-        /// `moduleAliases:` or `condition:` argument follows it.
-        let productNames: [String]
-
-        /// The package name in each `.product(...)` entry that names one.
-        let packageNames: [String]
-
-        /// The text of each entry no form this reader knows can read.
-        ///
-        /// A reader that dropped an entry it did not recognise would be blind
-        /// to that form, and every rule that reads a dependency list would be
-        /// evadable by writing one entry in it.
-        /// ``dependencies(ofTargetNamed:declaredBy:)`` fails on this instead,
-        /// so an unread entry stops the suite rather than passing it.
-        let unreadableEntries: [String]
-
-        /// Every name the list holds, whichever form the entry is written in.
-        var allNames: Set<String> {
-            Set(targetNames + productNames + packageNames)
-        }
-    }
-
-    /// The dependency entries the ``clientTargetName`` library target declares.
-    ///
-    /// - Returns: the entries, split by form.
+    /// - Returns: that target, with its dependency entries.
     /// - Throws: an error when the manifest cannot be read, or when it declares
-    ///   no such library target.
-    private static func clientTargetDependencies() throws -> TargetDependencies {
-        try dependencies(ofTargetNamed: clientTargetName, declaredBy: "target")
+    ///   no such target.
+    private static func clientTarget() throws -> DumpedTarget {
+        try target(named: clientTargetName)
     }
 
-    /// The dependency entries the ``executableTargetName`` executable target
-    /// declares.
+    /// The ``executableTargetName`` executable target, as SwiftPM parsed it.
     ///
-    /// - Returns: the entries, split by form.
+    /// - Returns: that target, with its dependency entries.
     /// - Throws: an error when the manifest cannot be read, or when it declares
-    ///   no such executable target.
-    private static func executableTargetDependencies() throws -> TargetDependencies {
-        try dependencies(ofTargetNamed: executableTargetName, declaredBy: "executableTarget")
+    ///   no such target.
+    private static func executableTarget() throws -> DumpedTarget {
+        try target(named: executableTargetName)
     }
 
-    /// Reads `Package.swift` and returns the dependency entries one target
-    /// block declares.
+    /// One target of the manifest, by name.
     ///
     /// One reader serves both targets of the command-line client, so a rule
     /// that must hold on each of them is written once and cannot read one side
     /// only.
     ///
-    /// The manifest is read as text, and not through `swift package
-    /// dump-package`, which would give every entry in one normal form. That
-    /// command cannot run from inside this suite: SwiftPM holds a lock on
-    /// `.build` for the whole of a `swift test` run, so the child waits for the
-    /// parent, and the parent waits for the child. Measured on 2026-09-04, a
-    /// `dump-package` call from inside a test of this package printed `Another
-    /// instance of SwiftPM (PID: 4712) is already running using '.build',
-    /// waiting until that process has finished execution...`, gave no output,
-    /// and was killed at 45 seconds. So this reader reads the text, and reads
-    /// every entry form SwiftPM accepts.
+    /// - Parameter name: the target name the manifest declares.
+    /// - Returns: that target, with its dependency entries.
+    /// - Throws: an error when the manifest cannot be read, or when it declares
+    ///   no target of that name.
+    private static func target(named name: String) throws -> DumpedTarget {
+        let dump = try packageDump()
+        return try #require(
+            dump.targets.first { $0.name == name },
+            """
+            Package.swift must declare a target named "\(name)". \
+            It declares \(dump.targets.map(\.name).sorted()).
+            """
+        )
+    }
+
+    /// Reads this repository's manifest through `swift package dump-package`.
+    ///
+    /// SwiftPM parses `Package.swift` and writes every dependency entry in one
+    /// normal form, which is why this suite runs the command instead of
+    /// reading Swift source text. A reader written by hand has to know string
+    /// literals, `//` comments, `/* */` comments, nested block comments, raw
+    /// strings, multi-line strings and `#if` blocks before it can find the
+    /// entries at all, and SwiftPM already knows every one of them.
+    ///
+    /// `--scratch-path` is what lets the command run from inside a `swift test`
+    /// run of this same package. The DEFAULT scratch path is `.build`, and the
+    /// parent run holds a lock on that directory for the whole of its life, so
+    /// a child that took the default would wait for a parent that is waiting
+    /// for it. Pointed at a fresh temporary directory the child contends with
+    /// nothing. Measured on 2026-09-04 from inside this suite: exit 0 in about
+    /// 0.2 seconds, over 6165 bytes of manifest JSON, and six copies started
+    /// together each answered the same in 0.24 seconds of wall clock.
+    ///
+    /// This is still a unit test. The child reads this repository's own
+    /// manifest with the toolchain that is already running the suite: no
+    /// network, no database, no spawned server and no external service.
+    ///
+    /// - Returns: the manifest SwiftPM parsed.
+    /// - Throws: an error when the command cannot run, when it exits nonzero,
+    ///   or when the JSON it wrote does not decode.
+    private static func packageDump() throws -> PackageDump {
+        let root = try RepositoryFile.url(relativePath: "Package.swift")
+            .deletingLastPathComponent()
+        let workingDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("acp-client-dump-package-\(UUID().uuidString)")
+        // The child writes a scratch directory of its own under here, and the
+        // two captured streams stand beside it, so one removal cleans up all
+        // three.
+        defer { try? FileManager.default.removeItem(at: workingDirectory) }
+        let manifestJSON = try dumpPackage(at: root, workingIn: workingDirectory)
+        return try JSONDecoder().decode(PackageDump.self, from: manifestJSON)
+    }
+
+    /// Runs `swift package dump-package` over one package.
+    ///
+    /// The two output streams are captured into files rather than into pipes.
+    /// A pipe holds a bounded buffer, so a reader that drains one stream to
+    /// end-of-file while the other fills its buffer waits for a child that is
+    /// waiting for the reader. A file has no such buffer.
+    ///
+    /// Every `SWIFTPM`-prefixed variable comes out of the child's environment.
+    /// The parent `swift test` run exports the paths it is working in, and an
+    /// inherited one would put the child back on `.build` — the very lock
+    /// `--scratch-path` is passed to avoid.
     ///
     /// - Parameters:
-    ///   - name: the target name the block declares.
-    ///   - declaration: the manifest function that declares it, without its
-    ///     leading dot — `target` or `executableTarget`.
-    /// - Returns: the entries of that block, split by form.
-    /// - Throws: an error when the manifest cannot be read, when it declares no
-    ///   such target block, or when that block holds an entry in a form this
-    ///   reader does not know.
-    private static func dependencies(
-        ofTargetNamed name: String,
-        declaredBy declaration: String
-    ) throws -> TargetDependencies {
-        let manifest = try RepositoryFile.read(relativePath: "Package.swift")
-        let entries = try dependencyEntries(
-            ofTargetNamed: name,
-            declaredBy: declaration,
-            in: manifest
-        )
-        let declared = dependencies(inEntries: entries)
+    ///   - root: the directory holding the `Package.swift` to read.
+    ///   - workingDirectory: a directory this call owns. It is created here and
+    ///     removed by the caller.
+    /// - Returns: the manifest JSON the command wrote to standard output.
+    /// - Throws: an error when the directory cannot be made, when the command
+    ///   cannot run, when it exits nonzero, or when its output cannot be read.
+    private static func dumpPackage(at root: URL, workingIn workingDirectory: URL) throws -> Data {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+        let manifestJSON = workingDirectory.appendingPathComponent("manifest.json")
+        let diagnostics = workingDirectory.appendingPathComponent("diagnostics.txt")
+        fileManager.createFile(atPath: manifestJSON.path, contents: nil)
+        fileManager.createFile(atPath: diagnostics.path, contents: nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "swift", "package", "dump-package",
+            "--package-path", root.path,
+            "--scratch-path", workingDirectory.appendingPathComponent("scratch").path,
+        ]
+        process.environment = ProcessInfo.processInfo.environment
+            .filter { !$0.key.hasPrefix("SWIFTPM") }
+        let output = try FileHandle(forWritingTo: manifestJSON)
+        let errors = try FileHandle(forWritingTo: diagnostics)
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        try output.close()
+        try errors.close()
+        let said = (try? String(contentsOf: diagnostics, encoding: .utf8)) ?? ""
         try #require(
-            declared.unreadableEntries.isEmpty,
+            process.terminationStatus == 0,
             """
-            No form this reader knows reads \(declared.unreadableEntries) of \
-            the \(name) target. Teach `dependencies(inEntries:)` that form \
-            rather than leave it out: a rule cannot hold against an entry the \
-            reader cannot see.
+            `swift package dump-package` must read the manifest at \(root.path). \
+            It exited \(process.terminationStatus) and said: \(said)
             """
         )
-        return declared
+        return try Data(contentsOf: manifestJSON)
     }
 
-    /// Reads the text of each entry of the `dependencies:` array of one target
-    /// block.
-    ///
-    /// - Parameters:
-    ///   - name: the target name the block declares.
-    ///   - declaration: the manifest function that declares it, without its
-    ///     leading dot — `target` or `executableTarget`.
-    ///   - manifest: the text of `Package.swift`.
-    /// - Returns: the text of each entry, in the order the array writes them.
-    /// - Throws: an error when the manifest declares no such target block.
-    private static func dependencyEntries(
-        ofTargetNamed name: String,
-        declaredBy declaration: String,
-        in manifest: String
-    ) throws -> [String] {
-        // `\.target\(` cannot match `.executableTarget(`, because that name
-        // carries no dot before its capital `T`, so the two blocks never read
-        // each other.
-        //
-        // `Regex` is not `Sendable`, so the pattern is built here rather than
-        // stored, matching how `theNooraRequirementIsUpToNextMinor` writes its
-        // own.
-        let header = try Regex(
-            #"\.\#(declaration)\(\s*name:\s*"\#(name)"\s*,\s*dependencies:\s*\["#
-        )
-        let match = try #require(
-            manifest.firstMatch(of: header),
-            """
-            Package.swift must declare \
-            `.\(declaration)(name: "\(name)", dependencies: [...])`.
-            """
-        )
-        return entries(ofArrayAfter: match.range.upperBound, in: manifest)
+    /// The manifest as `swift package dump-package` writes it.
+    private struct PackageDump: Decodable {
+        /// One entry for each product the manifest declares.
+        let products: [DumpedProduct]
+
+        /// One entry for each target the manifest declares.
+        let targets: [DumpedTarget]
     }
 
-    /// Splits the `dependencies:` array whose opening bracket ends at `start`
-    /// into the entries it holds.
-    ///
-    /// The array is read by nesting depth, and not by a pattern that stops at
-    /// the first `]`. An entry may carry brackets of its own — `condition:
-    /// .when(platforms: [.macOS])` is one — and a pattern that stopped there
-    /// would drop every entry that stands after such an entry. Text inside a
-    /// string literal and text after `//` change no depth, so a bracket or a
-    /// comma written in either one splits nothing.
-    ///
-    /// - Parameters:
-    ///   - start: the index of the first character after the opening `[`.
-    ///   - manifest: the text of `Package.swift`.
-    /// - Returns: the trimmed text of each entry, in the order the array writes
-    ///   them.
-    private static func entries(
-        ofArrayAfter start: String.Index,
-        in manifest: String
-    ) -> [String] {
-        let characters = Array(manifest[start...])
-        var entries: [String] = []
-        var entry = ""
-        var depth = 0
-        var isInStringLiteral = false
-        var index = characters.startIndex
-        while index < characters.endIndex {
-            let character = characters[index]
-            index += 1
-            if isInStringLiteral {
-                entry.append(character)
-                if character == #"\"#, index < characters.endIndex {
-                    entry.append(characters[index])
-                    index += 1
-                } else if character == "\"" {
-                    isInStringLiteral = false
-                }
-                continue
-            }
-            if character == "/", index < characters.endIndex, characters[index] == "/" {
-                while index < characters.endIndex, characters[index] != "\n" {
-                    index += 1
-                }
-                continue
-            }
-            if depth == 0, character == "]" {
-                break
-            }
-            if depth == 0, character == "," {
-                entries.append(entry)
-                entry = ""
-                continue
-            }
-            if character == "[" || character == "(" {
-                depth += 1
-            }
-            if character == "]" || character == ")" {
-                depth -= 1
-            }
-            if character == "\"" {
-                isInStringLiteral = true
-            }
-            entry.append(character)
-        }
-        entries.append(entry)
-        return entries
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
+    /// One product of the manifest, as SwiftPM parsed it.
+    private struct DumpedProduct: Decodable {
+        /// The product name a depending package writes.
+        let name: String
 
-    /// One entry of a `dependencies:` array, read into the form it is written
-    /// in.
-    ///
-    /// SwiftPM accepts a `Target.Dependency` as a bare string literal, as
-    /// `.byName(name:)`, as `.target(name:)`, and as `.product(name:package:)`,
-    /// the last three with or without a trailing `moduleAliases:` or
-    /// `condition:` argument. The first three name a module directly, so they
-    /// fold into one case here: every rule of this suite reads the name, and
-    /// none of them reads the spelling.
-    private enum DependencyEntry {
-        /// An entry that names a module directly, by that name.
-        case module(String)
+        /// The kind SwiftPM read this product as.
+        let type: Kind
 
-        /// A `.product(...)` entry, by its product name and by the package it
-        /// names, where it names one.
-        case product(name: String, package: String?)
-
-        /// An entry no form this reader knows can read, by its text.
-        case unreadable(String)
-
-        /// The module this entry names directly, or `nil` in every other form.
-        var moduleName: String? {
-            switch self {
-            case .module(let name): name
-            case .product, .unreadable: nil
-            }
+        /// Whether this is an executable product, which another package can
+        /// spawn as a binary, rather than a library product, which it can only
+        /// import.
+        var isExecutable: Bool {
+            type.isExecutable
         }
 
-        /// The product this entry names, or `nil` in every other form.
-        var productName: String? {
-            switch self {
-            case .product(let name, _): name
-            case .module, .unreadable: nil
-            }
-        }
+        /// The `type` object of a product.
+        ///
+        /// SwiftPM names the kind in the KEY and never in the value: an
+        /// executable product is written `{"executable": null}` and a library
+        /// `{"library": ["automatic"]}`. So the read asks which key stands
+        /// there, and decodes no value at all.
+        struct Kind: Decodable {
+            /// Whether the object carries the `executable` key.
+            let isExecutable: Bool
 
-        /// The package this entry names, or `nil` where it names none.
-        var packageName: String? {
-            switch self {
-            case .product(_, let package): package
-            case .module, .unreadable: nil
+            private enum CodingKeys: String, CodingKey {
+                case executable
             }
-        }
 
-        /// The text of this entry where no known form reads it, or `nil` where
-        /// one does.
-        var unreadableText: String? {
-            switch self {
-            case .unreadable(let text): text
-            case .module, .product: nil
+            init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                isExecutable = container.contains(.executable)
             }
         }
     }
 
-    /// Splits the entries of one dependency list by the form each is written
-    /// in.
-    ///
-    /// - Parameter entries: the text of each entry of a `dependencies:` array.
-    /// - Returns: the entries, split by form.
-    private static func dependencies(inEntries entries: [String]) -> TargetDependencies {
-        let read = entries.map { dependencyEntry(readFrom: $0) }
-        return TargetDependencies(
-            targetNames: read.compactMap(\.moduleName),
-            productNames: read.compactMap(\.productName),
-            packageNames: read.compactMap(\.packageName),
-            unreadableEntries: read.compactMap(\.unreadableText)
-        )
+    /// One target of the manifest, as SwiftPM parsed it.
+    private struct DumpedTarget: Decodable {
+        /// The target name the manifest declares.
+        let name: String
+
+        /// One entry for each dependency the target declares, each already in
+        /// the one normal form SwiftPM writes.
+        let dependencies: [DumpedDependency]
+
+        /// The name in each entry that names a module directly: a bare string
+        /// literal, `.byName(name:)`, or `.target(name:)`.
+        var targetNames: [String] {
+            dependencies.compactMap(\.moduleName)
+        }
+
+        /// The product name in each `.product(...)` entry, whatever trailing
+        /// `moduleAliases:` or `condition:` argument follows it.
+        var productNames: [String] {
+            dependencies.compactMap(\.productName)
+        }
+
+        /// The package name in each `.product(...)` entry that names one.
+        var packageNames: [String] {
+            dependencies.compactMap(\.packageName)
+        }
+
+        /// Every name the dependency list holds, whichever form the entry is
+        /// written in.
+        var allNames: Set<String> {
+            Set(targetNames + productNames + packageNames)
+        }
     }
 
-    /// Reads one entry of a dependency list into the form it is written in.
+    /// One dependency entry of a target, as SwiftPM normalises it.
     ///
-    /// Every form SwiftPM accepts names a module the binary links, so this
-    /// reader reads them all: a form it cannot read is a form no rule can hold
-    /// against, and a person could write the dependency that way and pass. An
-    /// entry in a form it does not know comes back as
-    /// ``DependencyEntry/unreadable(_:)``, never dropped.
+    /// SwiftPM reads every `Target.Dependency` into one of three cases and
+    /// writes each as an object of one key holding that case's arguments:
     ///
-    /// - Parameter text: the text of one entry.
-    /// - Returns: that entry, in the form it is written in.
-    private static func dependencyEntry(readFrom text: String) -> DependencyEntry {
-        // `Regex` is not `Sendable`, so the patterns are local rather than
-        // stored constants, matching how `theNooraRequirementIsUpToNextMinor`
-        // writes its own.
-        let quotedLiteral = /"([^"]+)"/
-        let quotedName = /name:\s*"([^"]+)"/
-        let quotedPackage = /package:\s*"([^"]+)"/
-        // A bare string literal carries the name on its own; every other form
-        // carries it as the `name:` argument.
-        let namePattern = text.hasPrefix("\"") ? quotedLiteral : quotedName
-        let name = text.firstMatch(of: namePattern).map { String($0.1) }
-        let package = text.firstMatch(of: quotedPackage).map { String($0.1) }
-        if let name, text.contains(".product") {
-            return .product(name: name, package: package)
+    /// - `{"byName": [name, condition]}` — a bare string literal, and
+    ///   `.byName(name:)`.
+    /// - `{"target": [name, condition]}` — `.target(name:)`.
+    /// - `{"product": [name, package, moduleAliases, condition]}` —
+    ///   `.product(name:package:)`, whatever trailing argument follows it.
+    ///
+    /// The first two name a module directly, so they fold into one name here:
+    /// every rule of this suite reads the name, and none of them reads the
+    /// spelling.
+    private struct DumpedDependency: Decodable {
+        /// The module this entry names directly, or `nil` where it names a
+        /// product.
+        let moduleName: String?
+
+        /// The product this entry names, or `nil` where it names a module.
+        let productName: String?
+
+        /// The package the product stands in, or `nil` where the entry names
+        /// none.
+        let packageName: String?
+
+        /// The keys SwiftPM writes a dependency entry under, one for each case
+        /// of its own `Target.Dependency`.
+        private enum CodingKeys: String, CodingKey {
+            case byName
+            case target
+            case product
         }
-        if let name {
-            return .module(name)
+
+        /// The keys whose entry names a module directly.
+        private static let moduleKeys: [CodingKeys] = [.byName, .target]
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if container.contains(.product) {
+                var entry = try container.nestedUnkeyedContainer(forKey: .product)
+                moduleName = nil
+                productName = try entry.decode(String.self)
+                packageName = try entry.decodeIfPresent(String.self)
+            } else if let key = Self.moduleKeys.first(where: container.contains) {
+                var entry = try container.nestedUnkeyedContainer(forKey: key)
+                moduleName = try entry.decode(String.self)
+                productName = nil
+                packageName = nil
+            } else {
+                // A key outside those three is a dependency form no rule of
+                // this suite could hold against, so the read FAILS on it. A
+                // reader that dropped it would be blind to that form, and
+                // every rule that reads a dependency list would be evadable by
+                // writing one entry in it.
+                throw DecodingError.dataCorrupted(
+                    DecodingError.Context(
+                        codingPath: container.codingPath,
+                        debugDescription: """
+                            SwiftPM wrote a target dependency under no key this reader knows. \
+                            It knows \(Self.moduleKeys.map(\.stringValue)) and \
+                            \(CodingKeys.product.stringValue).
+                            """
+                    )
+                )
+            }
         }
-        return .unreadable(text)
     }
 
     /// Reads `Package.resolved` and returns the identity of each pinned package.
