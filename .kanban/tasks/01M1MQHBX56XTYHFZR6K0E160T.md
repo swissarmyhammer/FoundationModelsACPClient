@@ -47,6 +47,107 @@ comments:
     - evidence: 7 files — Sources/acp-client/RunCommand.swift, Sources/acp-client/ExitCode.swift, Sources/acp-client/AgentInvocation.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift (new), IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/CLITestSupport.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TemporaryFiles.swift. `timeout 420 swift test` — 180 tests in 12 suites passed, 0 failures, 0 warnings. `timeout 600 swift test --package-path IntegrationTests` — 17 tests in 4 suites passed, 0 failures, 0 warnings. TDD order kept: the new suite was watched fail first with 21 issues over all 7 tests. Every acceptance row and every Tests row of the card is checked. No stray test or stub-agent process, and no leftover temporary file, after the runs.
     - next: /review
   timestamp: 2026-09-04T19:11:15.661803+00:00
+- actor: claude-code
+  id: 01m1pxp29ht2qsf2bk9cgbzvh1
+  text: |
+    ### review — findings
+    - scope: `review sha 93fc57e~1..93fc57e`, the diffs only
+    - counts: 2 findings, 2 confirmed, 0 refuted, 7 files attempted
+    - evidence: IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift:293, RunCommandExitTests.swift:309
+
+    Judgement of the three points the implementer sent:
+
+    1. The teardown holds on every path. `run()` resolves the prompt and the
+       command BEFORE `runTurn`, so a throw from either one starts no process.
+       In `runTurn`, the resolver and the `AgentProcess` initializer both throw
+       before the `defer` is set, and there is no process to leave alive at that
+       time. After the initializer gives a process, the `defer` is set with no
+       await between the two, so every later path reaps. `AgentProcess.shutdown()`
+       goes to `terminateCurrent()`, which does `killpg(SIGKILL)` and then a
+       blocking `waitpid`, so the pid is reaped before `shutdown()` returns.
+       In `driveTurn`, `await AgentSession(...)` is not a `try`, so the
+       initializer cannot throw. The `do` block puts every error into the
+       `Result`, and `await session.teardown()` is not a `try` either. No path
+       leaves the session open. The point is correct.
+
+    2. The exit is 2 and not 64. `@main` is on `AcpClient`, and `AcpClient`
+       declares its own `static func main() async`, which hides the default of
+       `AsyncParsableCommand`. That `main()` catches the `ValidationError` the
+       `run()` body throws, reads `exitCode(for:)` as `.validationFailure`,
+       writes `fullMessage(for:)` to stderr, and exits with
+       `processExitCode(for:)`, which maps `.validationFailure` to
+       `AcpClientExitCode.usage`, that is 2. stdout stays empty. The integration
+       test `noPromptWithATerminalIsAUsageError` asserts the same three things.
+       The point is correct.
+
+    3. The acceptance row is met. The row asks for stub agents that end with
+       `refusal`, with `cancelled`, and with an `idle` that carries no
+       `stopReason`. `makeWellBehavedAgent(stopReason:)` writes a different
+       script for each stop reason, so the `refusal` agent and the `cancelled`
+       agent are real, separate agents on the wire. `idleState(nil)` leaves the
+       `stopReason` member OUT rather than writing `null`, which is the case the
+       schema needs. All three endings run through the exit-code tests, and all
+       four endings run through the pid test. A parameter is a correct way to
+       give the two stop-reason agents; three copied scripts would give no more
+       proof. The point is correct.
+
+    - next: correct the two access-control findings. Make `TurnEnding` and
+      `PromptRow` internal, then remove `private` from
+      `noAgentProcessOutlivesTheRun` and `eachPromptRowDeliversItsPrompt` and
+      remove the comment that explains the `private`. The two types are types,
+      not properties or functions, so the rule does not ask them to stay private.
+  timestamp: 2026-09-04T19:17:46.417203+00:00
+- actor: claude-code
+  id: 01m1pxpvps508ays15d87gey5j
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 7 files; RunCommand now resolves the prompt and the command, starts the AgentProcess, builds the AgentSession, runs the TurnRunner into stdout, and exits through AcpClientExitCode
+    - test: green — root 180 passed in 12 suites, integration 17 passed in 4 suites, 0 failures and 0 warnings on both
+    - commit: 93fc57e feat(acp-client): wire RunCommand to spawn the agent and run the turn
+    - review: findings — IntegrationTests/.../RunCommandExitTests.swift:293 and :309, both `code-hygiene/idioms-swift` testSuiteAccessControl
+
+    The review confirmed the three points the implementer raised, so none of them is open work:
+    - No path leaves the agent or the session alive. The prompt and the command resolve before any process starts; `AgentProcess.shutdown()` does `killpg` then a blocking `waitpid`, so the pid is reaped before it returns; the `do` block routes every error into the `Result` and one `await session.teardown()` runs after it.
+    - `noPromptAndStdinIsATerminal` reaches exit 2, not 64. `AcpClient` declares its own `main()`, which maps `.validationFailure` through `processExitCode(for:)` to `AcpClientExitCode.usage`.
+    - The stub-agent acceptance row is met. `makeWellBehavedAgent(stopReason:)` writes a different script per stop reason, so `refusal` and `cancelled` are distinct agents on the wire, and `idleState(nil)` omits the member instead of writing `null`.
+  timestamp: 2026-09-04T19:18:12.441569+00:00
+- actor: claude-code
+  id: 01m1pxv2mxpa25e6t3wp5vm4xv
+  text: |-
+    Both `testSuiteAccessControl` findings are corrected, and the cause is removed from the WHOLE file and not only from the two reported lines.
+
+    What the rule asks, word for word: "Test methods should have the configured access control (default internal), and other properties / functions in a test suite should be private."
+
+    The block that held the cause:
+
+    - `TurnEnding` and `PromptRow` were `private` at file scope. Each is the parameter type of one `@Test` method, and Swift lets no method be more visible than its parameters, so both methods had to be `private` as well. The rule reads a `private` `@Test` method as a finding.
+    - The rule speaks of PROPERTIES and FUNCTIONS in a test suite. `TurnEnding` and `PromptRow` are neither: they are types, and they stand at file scope and not in the suite. So nothing holds them at `private`, and making them internal releases the two methods.
+
+    The change:
+
+    - `TurnEnding` and `PromptRow` are internal.
+    - `noAgentProcessOutlivesTheRun(ending:)` and `eachPromptRowDeliversItsPrompt(row:)` are internal, in the same way as the five other `@Test` methods.
+    - The four-line comment that explained the old `private` is removed. It described a constraint that no longer stands.
+
+    The sweep of the rest of the file, so no second finding waits behind these two:
+
+    - Every one of the seven `@Test` methods in `RunCommandExitTests` is now internal.
+    - Every property in the suite stays `private`: `prompt`, `answer`, `pidFileNamePrefix`, `transcriptFileNamePrefix`.
+    - Every function in the suite stays `private`: `runArguments(prompt:script:)` and `recordedPid(in:)`.
+    - The suite holds no other declaration.
+    - `runSuiteTimeLimitMinutes`, `SectionNineExitCode` and `standardInputPromptArgument` stay `private`. They stand at file scope, outside the suite, so the rule does not reach them, and no signature in the file needs them to be more visible.
+
+    Checked for a name collision before making the two types internal: `TurnEnding` and `PromptRow` are named in this file only, in the whole repository.
+
+    `swift build --package-path IntegrationTests --build-tests` reports zero warnings and zero errors, and no test process is left after the runs.
+  timestamp: 2026-09-04T19:20:30.621190+00:00
+- actor: claude-code
+  id: 01m1pxv7df8kky99wbgkg7mx6h
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift. `timeout 420 swift test` — 180 tests in 12 suites passed, 0 failures. `timeout 600 swift test --package-path IntegrationTests` — 17 tests in 4 suites passed, 0 failures. `swift build --package-path IntegrationTests --build-tests` — 0 warnings, 0 errors. Both `code-hygiene/idioms-swift` testSuiteAccessControl findings are checked in the description.
+    - next: /review
+  timestamp: 2026-09-04T19:20:35.503702+00:00
 depends_on:
 - 01M1MPFEP97Z6J3R0MRC6XXKAJ
 - 01M1MPARCGY1FHKNED47MDBWG8
@@ -108,3 +209,13 @@ numeric exit literal; this is the task that makes that true, and
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 14:12)
+
+> Scope: `review sha 93fc57e~1..93fc57e` — reviewed the diffs only — lines this change added or modified. 7 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift:293` `code-hygiene/idioms-swift` — testSuiteAccessControl: Test methods should have the configured access control (default internal), and other properties / functions in a test suite should be private.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift:309` `code-hygiene/idioms-swift` — testSuiteAccessControl: Test methods should have the configured access control (default internal), and other properties / functions in a test suite should be private.

@@ -58,7 +58,7 @@ private let standardInputPromptArgument = "-"
 /// assertion runs over every one of them: `cli-plan.md` §11 lets no agent
 /// outlive the run, and a teardown that reaps after one ending and not after
 /// another is exactly the leak that section forbids.
-private enum TurnEnding: CaseIterable, Sendable {
+enum TurnEnding: CaseIterable, Sendable {
     /// The agent reported `end_turn`.
     case endTurn
 
@@ -103,7 +103,7 @@ private enum TurnEnding: CaseIterable, Sendable {
 ///
 /// The fourth row — no argument, with standard input a terminal — yields no
 /// prompt at all, so it is the usage test below and not a case here.
-private enum PromptRow: CaseIterable, Sendable {
+enum PromptRow: CaseIterable, Sendable {
     /// Row 1: a prompt argument that is not `-`.
     case argument
 
@@ -285,12 +285,8 @@ struct RunCommandExitTests {
         #expect(!result.standardError.isEmpty)
     }
 
-    // The two tests below are `private` because their parameter types are, and
-    // Swift requires a method to be no more visible than its parameters. The
-    // access level changes nothing about discovery: swift-testing finds a test
-    // by its `@Test` attribute and never by its visibility.
     @Test("no agent process outlives the run", arguments: TurnEnding.allCases)
-    private func noAgentProcessOutlivesTheRun(ending: TurnEnding) async throws {
+    func noAgentProcessOutlivesTheRun(ending: TurnEnding) async throws {
         let pidFile = temporaryFileURL(prefix: Self.pidFileNamePrefix)
         defer { try? FileManager.default.removeItem(at: pidFile) }
         let script = try ending.makeAgent(pidFile: pidFile.path)
@@ -306,7 +302,7 @@ struct RunCommandExitTests {
         "each section 7 prompt row delivers its prompt to the agent",
         arguments: PromptRow.allCases
     )
-    private func eachPromptRowDeliversItsPrompt(row: PromptRow) async throws {
+    func eachPromptRowDeliversItsPrompt(row: PromptRow) async throws {
         let transcript = temporaryFileURL(prefix: Self.transcriptFileNamePrefix)
         defer { try? FileManager.default.removeItem(at: transcript) }
         let script = try makeWellBehavedAgent(answer: Self.answer, transcript: transcript.path)
