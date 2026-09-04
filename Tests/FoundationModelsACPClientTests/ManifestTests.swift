@@ -5,12 +5,17 @@ import Testing
 /// `acp-client` executable stands on.
 ///
 /// A build catches most manifest mistakes on its own. It cannot catch these
-/// four, because each one still builds: an executable declared as a target and
+/// five, because each one still builds: an executable declared as a target and
 /// not as a product, which no other package can depend on; a dependency the
 /// binary must not link, which `cli-plan.md` §12 bans; a sixth dependency past
-/// the five that plan permits; and a `from:` requirement on a 0.x package,
-/// which accepts every future breaking minor. This suite reads the manifest as
-/// text and pins exactly those.
+/// the five that plan permits; a dependency hung on the thin `acp-client`
+/// executable target, which reaches around the count the library target
+/// carries; and a `from:` requirement on a 0.x package, which accepts every
+/// future breaking minor. This suite reads the manifest as text and pins
+/// exactly those.
+///
+/// The command-line client is two targets, so every rule here says which of
+/// them it reads, and why that one and not the other.
 @Suite("Package manifest")
 struct ManifestTests {
     /// The number of dependencies `cli-plan.md` §12 permits the command-line
@@ -21,9 +26,18 @@ struct ManifestTests {
     /// one of them through the library.
     private static let permittedDependencyCount = 5
 
-    /// The target of the manifest that carries the dependencies of the
+    /// The library target of the manifest that carries the dependencies of the
     /// command-line client.
     private static let clientTargetName = "AcpClientCore"
+
+    /// The executable target of the manifest, which holds the `@main` type
+    /// alone and takes ``clientTargetName`` as its one dependency
+    /// (`cli-plan.md` §3).
+    private static let executableTargetName = "acp-client"
+
+    /// The index of the one capture group of the target-block pattern, which
+    /// holds the text of the `dependencies:` array.
+    private static let dependencyListCapture = 1
 
     /// The product name of each dependency the binary must link.
     ///
@@ -52,7 +66,10 @@ struct ManifestTests {
 
     @Test("the client target links the wire, the parser, the terminal package and the family leaf")
     func theTargetLinksEveryProductTheBinaryNeeds() throws {
-        let dependencies = try Self.acpClientDependencies()
+        // The library target alone, and not a union with the executable:
+        // cli-plan.md §3 gives every one of these links to AcpClientCore, so
+        // moving one down to the executable must fail this rule.
+        let dependencies = try Self.clientTargetDependencies()
         #expect(
             Self.requiredProductNames.isSubset(of: Set(dependencies.productNames)),
             """
@@ -65,7 +82,10 @@ struct ManifestTests {
 
     @Test("the client target declares exactly the five dependencies section 12 permits")
     func theTargetDeclaresFiveDependencies() throws {
-        let dependencies = try Self.acpClientDependencies()
+        // The library target alone. The cap counts where the dependencies
+        // stand, and `theExecutableTargetTakesTheLibraryAlone` is what stops a
+        // sixth one hiding in the executable instead.
+        let dependencies = try Self.clientTargetDependencies()
         #expect(
             dependencies.targetNames == ["FoundationModelsACPClient"],
             """
@@ -85,18 +105,44 @@ struct ManifestTests {
         )
     }
 
-    @Test("the client target names no forbidden module")
-    func theTargetNamesNoForbiddenModule() throws {
-        let dependencies = try Self.acpClientDependencies()
-        let named = Set(
-            dependencies.targetNames + dependencies.productNames + dependencies.packageNames
+    @Test("the acp-client executable target takes the library and nothing else")
+    func theExecutableTargetTakesTheLibraryAlone() throws {
+        let dependencies = try Self.executableTargetDependencies()
+        #expect(
+            dependencies.targetNames == [Self.clientTargetName],
+            """
+            The \(Self.executableTargetName) executable target holds the @main \
+            type alone, so cli-plan.md section 3 gives it \
+            \(Self.clientTargetName) as its one dependency and no other target. \
+            It takes \(dependencies.targetNames).
+            """
         )
+        #expect(
+            dependencies.productNames.isEmpty,
+            """
+            The \(Self.executableTargetName) executable target must name no \
+            package product. Every product the binary needs reaches it through \
+            \(Self.clientTargetName), which is where the five that cli-plan.md \
+            section 12 permits are counted. It names \
+            \(dependencies.productNames.sorted()).
+            """
+        )
+    }
+
+    @Test("neither target of the command-line client names a forbidden module")
+    func neitherTargetNamesAForbiddenModule() throws {
+        // Both targets. Section 12 bans these modules from the BINARY, and the
+        // binary is the library and the executable together, so reading one of
+        // them would leave the other free to name one.
+        let named = try Self.clientTargetDependencies().allNames
+            .union(Self.executableTargetDependencies().allNames)
         #expect(
             named.isDisjoint(with: forbiddenModules),
             """
-            The \(Self.clientTargetName) target must name none of \
+            Neither the \(Self.clientTargetName) target nor the \
+            \(Self.executableTargetName) target may name any of \
             \(forbiddenModules.sorted()). \
-            It names \(named.intersection(forbiddenModules).sorted()).
+            They name \(named.intersection(forbiddenModules).sorted()).
             """
         )
     }
@@ -143,35 +189,88 @@ struct ManifestTests {
 
         /// The package name in each `.product(name:package:)` entry.
         let packageNames: [String]
+
+        /// Every name the list holds, whichever form the entry is written in.
+        var allNames: Set<String> {
+            Set(targetNames + productNames + packageNames)
+        }
     }
 
-    /// Reads `Package.swift` and returns the dependency entries the
-    /// ``clientTargetName`` library target declares.
+    /// The dependency entries the ``clientTargetName`` library target declares.
     ///
     /// - Returns: the entries, split by form.
     /// - Throws: an error when the manifest cannot be read, or when it declares
     ///   no such library target.
-    private static func acpClientDependencies() throws -> TargetDependencies {
+    private static func clientTargetDependencies() throws -> TargetDependencies {
+        try dependencies(ofTargetNamed: clientTargetName, declaredBy: "target")
+    }
+
+    /// The dependency entries the ``executableTargetName`` executable target
+    /// declares.
+    ///
+    /// - Returns: the entries, split by form.
+    /// - Throws: an error when the manifest cannot be read, or when it declares
+    ///   no such executable target.
+    private static func executableTargetDependencies() throws -> TargetDependencies {
+        try dependencies(ofTargetNamed: executableTargetName, declaredBy: "executableTarget")
+    }
+
+    /// Reads `Package.swift` and returns the dependency entries one target
+    /// block declares.
+    ///
+    /// One reader serves both targets of the command-line client, so a rule
+    /// that must hold on each of them is written once and cannot read one side
+    /// only.
+    ///
+    /// - Parameters:
+    ///   - name: the target name the block declares.
+    ///   - declaration: the manifest function that declares it, without its
+    ///     leading dot — `target` or `executableTarget`.
+    /// - Returns: the entries of that block, split by form.
+    /// - Throws: an error when the manifest cannot be read, or when it declares
+    ///   no such target block.
+    private static func dependencies(
+        ofTargetNamed name: String,
+        declaredBy declaration: String
+    ) throws -> TargetDependencies {
         let manifest = try RepositoryFile.read(relativePath: "Package.swift")
         // The dependency array holds no `]` of its own, so everything up to the
-        // first closing bracket is the whole list. `.target(` cannot match
+        // first closing bracket is the whole list. `\.target\(` cannot match
         // `.executableTarget(`, because that name carries no dot before its
-        // capital `T`.
-        let dependencyList =
-            /\.target\(\s*name:\s*"AcpClientCore",\s*dependencies:\s*\[(?<entries>[^\]]*)\]/
+        // capital `T`, so the two blocks never read each other.
+        //
+        // `Regex` is not `Sendable`, so the pattern is built here rather than
+        // stored, matching how `theNooraRequirementIsUpToNextMinor` writes its
+        // own.
+        let block = try Regex(
+            #"\.\#(declaration)\(\s*name:\s*"\#(name)",\s*dependencies:\s*\[([^\]]*)\]"#
+        )
         let match = try #require(
-            manifest.firstMatch(of: dependencyList),
+            manifest.firstMatch(of: block),
             """
             Package.swift must declare \
-            `.target(name: "\(Self.clientTargetName)", dependencies: [...])`.
+            `.\(declaration)(name: "\(name)", dependencies: [...])`.
             """
         )
-        let entries = String(match.entries)
-        let products = entries.matches(of: /\.product\(\s*name:\s*"([^"]+)",\s*package:\s*"([^"]+)"\s*\)/)
+        let entries = try #require(
+            match.output[dependencyListCapture].substring,
+            "The dependency list of the \(name) target did not capture."
+        )
+        return dependencies(inList: String(entries))
+    }
+
+    /// Splits one dependency list into the entries it holds, by the form the
+    /// manifest writes each one in.
+    ///
+    /// - Parameter list: the text between the brackets of a `dependencies:`
+    ///   array.
+    /// - Returns: the entries, split by form.
+    private static func dependencies(inList list: String) -> TargetDependencies {
+        let products = list.matches(of: /\.product\(\s*name:\s*"([^"]+)",\s*package:\s*"([^"]+)"\s*\)/)
         // A bare-string entry stands at the head of the list or straight after
         // a comma, which is what separates it from the quoted argument of a
         // `.product(...)` entry.
-        let targets = entries.matches(of: /(?:^|,)\s*"([^"]+)"/)
+        let targets = list.matches(of: /(?:^|,)\s*"([^"]+)"/)
         return TargetDependencies(
             targetNames: targets.map { String($0.1) },
             productNames: products.map { String($0.1) },
