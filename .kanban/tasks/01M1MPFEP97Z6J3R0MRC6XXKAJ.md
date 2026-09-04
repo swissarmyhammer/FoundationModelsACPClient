@@ -73,11 +73,55 @@ comments:
     - evidence: 3 files — Sources/acp-client/TurnRunner.swift (new), Tests/FoundationModelsACPClientTests/TurnRunnerTests.swift (new), Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift (gated deferred script, `UpdateGate`, `GatedUpdates`). `swift test`: 180 tests in 12 suites passed, 0 failures, 0 warnings. Every acceptance row and every test row of the card has a test.
     - next: /review
   timestamp: 2026-09-04T18:07:05.064579+00:00
+- actor: claude-code
+  id: 01m1pt0gt4g4pedqk1xgp1ft1s
+  text: |-
+    ### review — clean
+    - evidence: `review sha bf6f175~1..bf6f175` — 7 validators attempted, 0 findings, 0 confirmed, 0 refuted, 0 failed. 3 files reviewed (TurnRunner.swift, ScriptedStubAgent.swift, TurnRunnerTests.swift); 4 .kanban files excluded by .reviewignore.
+    - judged: the three points the implementer recorded.
+    - 1. Concurrency is sound, not only compiling. Nothing mutable crosses an isolation boundary. `toolNames` has exactly one consumer (the spinner child); `toolNameFeed` is a Sendable continuation yielded to from the main actor; `AsyncStream.Continuation.finish()` is idempotent, so the `defer` and the `.answerWritten` case cannot conflict. The spinner child captures only `output` and the stream, so its body stays a plain Sendable loop, which is what the shared-iterator error was pointing at.
+    - 2. The gated deferred script does discriminate. In `theTurnEndsOnIdleAndNotOnThePromptAnswer` the stub answers `prompt` with an empty script, so the acknowledgement is on the wire first. A runner that ended on the acknowledgement would return before `answerGate.open()`, its reader child would be cancelled, `harness.answer` would stay empty, and `#expect(await eventually { !harness.answer.isEmpty })` would fail. The second assertion, `outcomes.elements.isEmpty`, fails on the same violation. The test cannot pass a runner that breaks the rule.
+    - 3. The deferrals are acceptable, and one of the two stated risks does not exist. `AgentSession.closeSession(_:)` is unused in production, but this card builds `TurnRunner`, which holds no process and owns no exit path; ^0e160t (Wire RunCommand) owns that. The claimed hang at group exit does NOT occur: `run()` calls `group.cancelAll()` before it returns, and the wire's `Connection.request(...)` wraps its continuation in `withTaskCancellationHandler` whose `onCancel` runs `cancelOutbound(id:)`, which resumes the pending continuation with `CancellationError` and sends `$/cancel_request`. `close()`/`shutDown()` rejects every pending request with `ConnectionError.closed`, and `requestTimeout` is a further backstop. So the prompt child unblocks and the group drains. What remains for the --timeout card is only the agent that stays connected and sends nothing at all.
+    - next: no rework. Task moved to done.
+  timestamp: 2026-09-04T18:13:34.660564+00:00
+- actor: claude-code
+  id: 01m1pt1rcb2sd89b5hzzd224pj
+  text: |-
+    ### review — correction to the previous comment
+
+    One statement in the previous comment is wrong, and two facts belong to the downstream cards. The verdict does not change.
+
+    **Wrong:** I wrote that `requestTimeout` is "a further backstop". It is not. `ClientSideConnection.init` defaults `requestTimeout` to `nil`, and `Sources/FoundationModelsACPClient/SwiftUIACPClient+Connect.swift` builds the connection without passing one, so `makeTimeoutTask` returns `nil`. An in-flight `prompt` has exactly three exits: a peer response, task cancellation, or disconnect. There is no timer.
+
+    **Still correct, and the reason the verdict stands:** the group-exit hang the implementer described does not occur. `run()` calls `group.cancelAll()` before it returns; `Connection.request(...)` wraps its continuation in `withTaskCancellationHandler`, whose `onCancel` runs `cancelOutbound(id:)`, which resumes the pending continuation with `CancellationError` and then sends `$/cancel_request`. `shutDown()` resumes every pending continuation with `ConnectionError.closed`. The wire package has a test for this in `DisconnectTests.swift`: it cancels a Task around an in-flight `request(method: "hang")`, asserts `error is CancellationError`, and asserts the peer receives `$/cancel_request` with the matching id.
+
+    **For ^cx9a5xsfa / ^0jrcz (Ctrl-C, exit 4):** cancelling the Swift Task sends the JSON-RPC `$/cancel_request`, NOT the ACP `session/cancel`. The library never sends `session/cancel` on your behalf — `ClientSideConnection.sessionCancel(_:)` is an explicit call, and nothing in `Sources/` calls it. An agent that honors only `session/cancel` will keep generating after the local `await` unblocks. That card must call `sessionCancel` itself.
+
+    **For ^czcz (--timeout, exit 124):** because there is no `requestTimeout`, an agent that stays connected and sends nothing leaves `run()` waiting with no time limit at all. That card owns the only limit there will be.
+
+    **Note on the trace:** `FoundationModelsACP` resolves as a remote checkout pinned at `9ab9f649d7557e6d9315814d3e5f3d113b52de8f`, not the sibling working copy. `Connection.swift` is identical in both, so the sibling directory is safe to read for this code.
+  timestamp: 2026-09-04T18:14:15.179212+00:00
+- actor: claude-code
+  id: 01m1pt306ad40yg7hqfqxzyb1x
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (TurnRunner.swift new, TurnRunnerTests.swift new, ScriptedStubAgent.swift gains a gated deferred script)
+    - test: green — 180 passed in 12 suites, 0 failures, 0 warnings
+    - commit: bf6f175 feat(acp-client): stream the turn and detect end-of-turn on idle
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    The review verified the concurrency is sound rather than merely compiling, and that the gated test genuinely discriminates: a runner ending on the prompt acknowledgement would return before the answer gate opens, leaving the sink empty and failing two assertions.
+
+    TWO FACTS FOR THE DOWNSTREAM CARDS, corrected by the review:
+    - The claimed group-exit hang is NOT real. `run()` calls `group.cancelAll()`, and the wire package wraps each request continuation in `withTaskCancellationHandler` whose `onCancel` resumes it with `CancellationError()`. An agent that reports idle but never answers the prompt does not hang.
+    - **There is no timeout backstop anywhere.** `ClientSideConnection.init` defaults `requestTimeout` to nil and `SwiftUIACPClient+Connect.swift` passes none. `--timeout` (^tdx6edk) owns the only limit there will ever be.
+    - **Task cancellation sends `$/cancel_request`, NOT ACP `session/cancel`.** Nothing in Sources/ calls `ClientSideConnection.sessionCancel(_:)`. The Ctrl-C card (^ja5xsfa) must call it explicitly, or an agent honouring only the ACP-level cancel keeps generating after the local await unblocks.
+  timestamp: 2026-09-04T18:14:55.946997+00:00
 depends_on:
 - 01M1MQG0S4YXS3CKAE34A9AX26
 - 01M1MPBN1SK31BWC0FW1R0X01Y
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9680'
 title: Stream the answer to stdout and detect the end of the turn
 ---
 ## What

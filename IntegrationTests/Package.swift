@@ -61,6 +61,19 @@ let package = Package(
             dependencies: [
                 .product(name: "FoundationModelsACPClient", package: "FoundationModelsACPClient"),
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                // The `acp-client` executable of the root package
+                // (`cli-plan.md` §3). A test target that depends on an
+                // EXECUTABLE product makes SwiftPM build that binary into the
+                // same products directory as this test bundle, which is where
+                // `acpClientBinaryURL()` looks for it. The sibling package
+                // FoundationModelsACPAgent declares its own `acp-agent`
+                // example this way, for this reason.
+                //
+                // It brings no new root dependency with it. `acp-client` is a
+                // product of the package the list above already reaches by
+                // path, so the restatement rule of this manifest's header has
+                // nothing to add for it.
+                .product(name: "acp-client", package: "FoundationModelsACPClient"),
             ],
             path: "Tests/FoundationModelsACPClientIntegrationTests"
         )
