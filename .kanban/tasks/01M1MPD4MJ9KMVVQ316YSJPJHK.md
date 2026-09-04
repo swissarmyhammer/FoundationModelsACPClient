@@ -58,10 +58,30 @@ comments:
     - evidence: swift package clean && swift test — 119 passed, 0 failed, 0 skipped, 0 warnings; swift build --product acp-client — clean, 0 warnings
     - next: proceed to review
   timestamp: 2026-09-04T14:14:10.908324+00:00
+- actor: claude-code
+  id: 01m1pcfyccvn8d6289fxbsyv3s
+  text: |
+    ### review — clean
+    - scope: `review sha 8628783~1..8628783` — the diffs only. 2 files reviewed: `Sources/acp-client/FrameTeeTransport.swift`, `Tests/FoundationModelsACPClientTests/FrameTeeTransportTests.swift`. 6 `.kanban/` files skipped by `.reviewignore`.
+    - evidence: zero new findings. counts: findings 0, confirmed 0, refuted 0, attempted 7, failed 0.
+    - prior findings: none. All acceptance and test items were already checked.
+    - next: task moved to `done`. The `--frames` wiring on RunCommand stays with ^3cat35c.
+  timestamp: 2026-09-04T14:17:20.012121+00:00
+- actor: claude-code
+  id: 01m1pcgds84aqcty49m95rgffp
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (Sources/acp-client/FrameTeeTransport.swift, Tests/FoundationModelsACPClientTests/FrameTeeTransportTests.swift); all 10 rows met
+    - test: green — `swift package clean && swift test`, 119 passed, 0 failed, 0 skipped, 0 warnings; `swift build --product acp-client` clean
+    - commit: 8628783 feat(acp-client): tee ndJSON frames to a sink for --frames
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    Carried forward for ^3cat35c: the tee is built and unit-tested but not wired. That task wraps the AgentProcess transport in FrameTeeTransport when --frames is given, with the sink pointed at stderr. The direction marks are pinned as `<< ` inbound and `>> ` outbound, with `[incomplete] ` for an unterminated tail.
+  timestamp: 2026-09-04T14:17:35.784996+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9080'
 title: Tee every ndJSON message to stderr for --frames
 ---
 ## What

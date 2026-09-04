@@ -1,10 +1,60 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m1pcwm09z9xpbs4m7jgmydrc
+  text: |-
+    Research done against the resolved Noora 0.57.0 checkout at `.build/checkouts/Noora/cli/Sources/Noora/`. All three notes on the card hold.
+
+    1. **Noora writes to stdout by default — HOLDS.** `Utilities/StandardPipelines.swift`: `StandardOutputPipeline.write(content:)` is `print(content, terminator: "")`, and `StandardPipelines.init` defaults `output` to it. `Noora.init(theme:content:terminal:standardPipelines:keyStrokeListener:logger:)` defaults `standardPipelines` to `StandardPipelines()`. `ProgressStep` sends both the interactive render and the success line to `standardPipelines.output`, and the error line to `standardPipelines.error`.
+
+    2. **No free-standing spinner and no free-standing in-place line — HOLDS.** `Utilities/Spinner.swift` declares `protocol Spinning` and `class Spinner` with no `public`, so both are internal to Noora. The public surface is `progressStep(message:successMessage:errorMessage:showSpinner:renderer:task:)`, whose `task` is `@escaping (@escaping @Sendable (String) -> Void) async throws -> V`. The card's reading of the closure type is exact.
+
+    3. **Noora's terminal gate reads the wrong descriptor — HOLDS.** `Utilities/Terminal.swift`: `Terminal.isInteractive()` returns `isatty(STDIN_FILENO) != 0` (after a `NO_TTY` check), and `Terminal.isColored()` returns `isatty(fileno(stdout)) == 0` negated. Neither reads stderr.
+
+    **A fourth hazard the card does not name, found in the same file.** `Terminal.init` defaults `signalBehavior` to `.restoreAndExit`, which installs handlers for SIGINT, SIGTERM, SIGQUIT and SIGHUP that `print("\u{1B}[?25h")` to **stdout** and then `exit(0)`. That breaks the absolute stdout rule of §8, and it would also take Ctrl-C away from the task that must cancel the turn and exit 4 (^KCCB56C). `Terminal` is built with `signalBehavior: .none`.
+
+    **A signature problem in note 2.** The card asks for `withSpinner ... async rethrows -> T`. `Noora.progressStep` is declared `async throws`, not `async rethrows`, and Swift forbids an unconditionally-throwing call inside a `rethrows` function. To be confirmed against the compiler before any deviation.
+  timestamp: 2026-09-04T14:24:15.369752+00:00
+- actor: claude-code
+  id: 01m1pdj1s12bebrpp5r1d4rmdz
+  text: |-
+    Implementation landed, TDD order kept: the tests were written first and watched fail with "cannot find type 'TerminalVerbosity' in scope", then the layer was written to make them pass.
+
+    **Two deliberate mutations, to prove the terminal tests can fail.** A test that cannot fail is not a test.
+
+    1. `Terminal(signalBehavior: .none)` in place of the injected `Terminal(isInteractive:isColored:signalBehavior:)`. Result: "the progress step draws in place while Noora's own gate says otherwise" failed. That also proves `ProcessInfo.processInfo.environment` is not cached, so the `NO_TTY` the test sets really does reach Noora's own gate.
+    2. `StandardPipelines()` in place of `StandardPipelines(output: pipeline, error: pipeline)`. Result: both "the progress step's success line reaches the injected sink" and "the progress step's error line reaches the injected sink" failed, and Noora's bytes went to the real descriptors. That is note 1 shown, not argued.
+
+    Both mutations were reverted, and the suite is green again.
+
+    **Three deviations, each forced by the resolved code.**
+
+    1. **`withSpinner` is `async throws`, not `async rethrows`.** The card's note 2 asks for `rethrows`. The compiler refuses it: `error: call can throw, but the error is not handled; a function declared 'rethrows' may only throw if its parameter does`, on the `try await noora.progressStep(...)` call. `progressStep` is declared `async throws`, not `rethrows`, and Swift lets a `rethrows` function propagate only what its own closure parameter threw. Typed throws (`async throws(E)`) would keep rethrows semantics, but it forces an unreachable `catch` arm with no `E` to throw, so it trades a real gap for a fake one. `throws` is total and costs the caller nothing, because every real caller's body throws. The reason is written into the doc comment of `withSpinner`, so the next reader does not try `rethrows` again.
+    2. **`Terminal` is built with `signalBehavior: .none`.** This is the fourth Noora hazard, and the card names only three. The default `.restoreAndExit` installs SIGINT, SIGTERM, SIGQUIT and SIGHUP handlers that `print` a cursor escape to **stdout** and then `exit(0)`. It breaks §8 and it would take Ctrl-C away from ^KCCB56C, which owes exit code 4.
+    3. **The type name collides with the wire.** `FoundationModelsACP` exports a `public struct TerminalOutput` — the ACP model of an agent-owned terminal's output. Inside `acp-client` the local type wins the lookup, so a later file that wants the wire model must write `FoundationModelsACP.TerminalOutput` in full. That is recorded in the file header. The test file drops its `FoundationModelsACP` import for the same reason; without that the name is ambiguous and the target does not compile.
+
+    **Two smaller notes for the reviewer.**
+
+    - `SwiftImports.modules(in:)` is new shared test support. The import regex lived inside `ForbiddenImportTests.swift` as a private function; a second copy in the new test would be a duplication finding, so the reader moved and both tests now call it. `ForbiddenImportTests` keeps its own forbidden-module filter and its behaviour is unchanged.
+    - `swiftformat`'s `swiftTestingTestCaseNames` rule wants every `@Test("a display name") func camelCaseName()` rewritten as `@Test` plus a backtick-quoted sentence function name. It fires the same way on every test file already in this repository, `FrameTeeTransportTests.swift` and `ForbiddenImportTests.swift` included. The new test follows the prevailing style rather than becoming the one file written the other way. Changing the style is a decision for the whole suite, not for one card. Every other swiftformat rule and every swiftlint rule of the dump passes clean on the four changed files.
+
+    **For the pull request, per the card:** the family takes Noora directly, so the agent package's C1 spike is cancelled. `FoundationModelsACPAgent/cli-plan.md` §5.2 and its milestone C1 need an update to say so. The sibling repository was not touched.
+
+    **For ^MJHRBP5 (record the CLI decisions in cli-plan.md):** this repository's own §5 still names `Sources/acp-client/Terminal/TerminalRenderer.swift`. The card ordered `Sources/acp-client/TerminalOutput.swift`, and that is what exists. §5 needs the new path.
+  timestamp: 2026-09-04T14:35:57.601538+00:00
+- actor: claude-code
+  id: 01m1pdj8m7506jf35c3gsyphk6
+  text: |-
+    ### implement — changed
+    - evidence: 4 files. New `Sources/acp-client/TerminalOutput.swift`, new `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift` (16 tests), new `Tests/FoundationModelsACPClientTests/SwiftImports.swift` (shared import reader), and `Tests/FoundationModelsACPClientTests/ForbiddenImportTests.swift` edited to call the shared reader. `swift build --build-tests`: 0 errors, 0 warnings. `swift test`: 135 tests in 8 suites, all pass, 0 failures, 0 warnings, 0 skipped. All three Noora notes on the card were checked against `.build/checkouts/Noora` and all three hold. Every acceptance row and every test row is done. Three deviations are recorded above, each forced by the resolved code: `withSpinner` is `async throws` because `rethrows` does not compile over `progressStep`; `Terminal` takes `signalBehavior: .none` because the default writes to stdout and steals Ctrl-C; the type name shadows `FoundationModelsACP.TerminalOutput`, which the file header records.
+    - next: `/review`
+  timestamp: 2026-09-04T14:36:04.615723+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: todo
-position_ordinal: '8580'
+position_column: doing
+position_ordinal: '80'
 title: Build the stderr terminal layer on Noora
 ---
 ## What
@@ -67,36 +117,36 @@ target that imports Noora**, so a later swap costs one file (§5):
 
 ## Acceptance Criteria
 
-- [ ] `TerminalOutput.swift` is the only file under `Sources/acp-client/` that
+- [x] `TerminalOutput.swift` is the only file under `Sources/acp-client/` that
       imports Noora.
-- [ ] The `Noora` instance is built with both pipelines pointed at stderr.
-- [ ] The `Terminal` value is built from the injected
+- [x] The `Noora` instance is built with both pipelines pointed at stderr.
+- [x] The `Terminal` value is built from the injected
       `isStandardErrorATerminal`, and not from Noora's own defaults, so a
       piped stdin does not turn the drawing off on a real terminal.
-- [ ] With `isStandardErrorATerminal` false, `withSpinner` emits zero bytes,
+- [x] With `isStandardErrorATerminal` false, `withSpinner` emits zero bytes,
       and `body` still runs, receives a working no-op line closure, and
       returns its value.
-- [ ] At `.quiet`, `event(_:)` emits zero bytes in a terminal too, and
+- [x] At `.quiet`, `event(_:)` emits zero bytes in a terminal too, and
       `error(_:)` still emits. At `.normal`, `event(_:)` emits zero bytes.
-- [ ] `--quiet` together with `--verbose` resolves to `.quiet`.
+- [x] `--quiet` together with `--verbose` resolves to `.quiet`.
 
 ## Tests
 
-- [ ] New `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift`.
+- [x] New `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift`.
       Each test builds `TerminalOutput` over a buffer sink and a chosen
       `isStandardErrorATerminal` value, and asserts the exact bytes the buffer
       holds. One test per acceptance row above.
-- [ ] One test walks `Sources/acp-client/` with the shared
+- [x] One test walks `Sources/acp-client/` with the shared
       `swiftSourceFiles(under:)` helper and asserts exactly one file imports
       `Noora`. This is §5's single-import test.
-- [ ] One test asserts `withSpinner` returns the body's value and rethrows the
+- [x] One test asserts `withSpinner` returns the body's value and rethrows the
       body's error, under both terminal states.
-- [ ] The real proof that stdout stays clean is a file-descriptor test, and it
+- [x] The real proof that stdout stays clean is a file-descriptor test, and it
       belongs in the integration suite, not in a grep here: the `--frames`
       task asserts stdout holds the answer bytes only while a spinner runs.
       Note that dependency in this task, and do not write a grep that a
       Noora default would slip past.
-- [ ] Run `swift test`. Every assertion passes.
+- [x] Run `swift test`. Every assertion passes.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.

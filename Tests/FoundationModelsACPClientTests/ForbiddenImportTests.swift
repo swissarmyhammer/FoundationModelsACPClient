@@ -20,23 +20,9 @@ let forbiddenModules: Set<String> = [
 
 /// Returns each forbidden import in one file, as `file: import Module` lines.
 private func forbiddenImports(in file: URL) throws -> [String] {
-    // Matches an import statement at the start of a line and captures the
-    // module name. The pattern accepts the forms Swift permits before the
-    // name: attributes such as `@_exported`, an access level such as
-    // `public`, and an import kind such as `struct`. The regex is local
-    // because `Regex` is not `Sendable`, so it cannot be a global constant.
-    let importStatement =
-        /^\s*(?:@\w+\s+)*(?:(?:public|package|internal|fileprivate|private)\s+)?import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(\w+)/
-    let content = try String(contentsOf: file, encoding: .utf8)
-    var violations: [String] = []
-    for line in content.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let match = line.firstMatch(of: importStatement) else { continue }
-        let module = String(match.1)
-        if forbiddenModules.contains(module) {
-            violations.append("\(file.lastPathComponent): import \(module)")
-        }
-    }
-    return violations
+    try SwiftImports.modules(in: file)
+        .filter { forbiddenModules.contains($0) }
+        .map { "\(file.lastPathComponent): import \($0)" }
 }
 
 /// The dependency-boundary test. The library must know only the ACP wire and
