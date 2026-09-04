@@ -191,18 +191,6 @@ struct RunCommandExitTests {
         ["run"] + (prompt.map { [$0] } ?? []) + ["--", stubAgentShellCommand, script]
     }
 
-    /// Reads the pid a stub agent recorded.
-    ///
-    /// - Parameter file: The pid file the agent wrote.
-    /// - Returns: The pid.
-    /// - Throws: The read failure of the file, or an expectation failure when
-    ///   the file holds no pid.
-    private static func recordedPid(in file: URL) throws -> pid_t {
-        let recorded = try String(contentsOf: file, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return try #require(pid_t(recorded), "the pid file held \"\(recorded)\"")
-    }
-
     @Test("a well behaved agent writes the answer to stdout, and the run exits 0")
     func aWellBehavedAgentWritesTheAnswerAndTheRunSucceeds() async throws {
         let script = try makeWellBehavedAgent(answer: Self.answer, stopReason: .endTurn)
@@ -294,7 +282,7 @@ struct RunCommandExitTests {
 
         _ = try await runAcpClient(Self.runArguments(prompt: Self.prompt, script: script))
 
-        let pid = try Self.recordedPid(in: pidFile)
+        let pid = try recordedAgentPid(in: pidFile)
         #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
     }
 

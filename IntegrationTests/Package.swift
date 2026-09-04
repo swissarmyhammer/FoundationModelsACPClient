@@ -50,6 +50,14 @@ let package = Package(
             url: "git@github.com:swissarmyhammer/FoundationModelsACP.git",
             branch: "main"
         ),
+        // Restated verbatim from `../Package.swift`. The doctor vocabulary —
+        // `Doctorable`, `HealthCheck` and `HealthStatus` — lives here, and the
+        // suite asserts on it directly, so it names where those types come
+        // from rather than resting on a transitive import.
+        .package(
+            url: "git@github.com:swissarmyhammer/FoundationModelsExtras.git",
+            branch: "main"
+        ),
     ],
     targets: [
         // The integration suite. Each test spawns a real foreign-agent
@@ -61,6 +69,10 @@ let package = Package(
             dependencies: [
                 .product(name: "FoundationModelsACPClient", package: "FoundationModelsACPClient"),
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                // The family leaf that owns the doctor vocabulary. The doctor
+                // suite asserts on `HealthCheck` and `HealthStatus` values
+                // that `AgentCommandDoctor` builds.
+                .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
                 // Everything the `acp-client` binary does, as a library. A
                 // test here can `import AcpClientCore` and drive the client
                 // directly, rather than only through the spawned binary.

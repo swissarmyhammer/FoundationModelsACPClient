@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Testing
 
 @testable import FoundationModelsACPClient
 
@@ -239,6 +240,27 @@ func makeSilentAgent() throws -> String {
     )
 }
 
+/// The status ``makeExitingAtOnceAgent()`` ends with.
+///
+/// A shell reports 127 for a command it could not find, which is the mistake
+/// the second row of the check table of `cli-plan.md` §10 names: the agent's
+/// own runtime is missing, so the wrapper dies before it says anything on the
+/// wire.
+private let commandNotFoundStatus = 127
+
+/// Writes a stub agent that ends the moment it starts.
+///
+/// The second row of the check table of `cli-plan.md` §10 — "the process
+/// starts, and it does not exit at once" — is what this one is for. It writes
+/// nothing to stdout and returns, so the client's read of that stdout reaches
+/// EOF at once and ``AgentProcess`` reaps the child on its own.
+///
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: The write failure of the script file.
+func makeExitingAtOnceAgent() throws -> String {
+    try writeAgentScript("exit \(commandNotFoundStatus)")
+}
+
 /// Writes a stub agent that `acp-client probe` can read a whole report off.
 ///
 /// It answers `initialize` with ``stubAgentAuthMethods``, it answers
@@ -331,6 +353,22 @@ func writeAgentScript(_ content: String) throws -> String {
 /// - Parameter path: The absolute path a builder returned.
 func removeAgentScript(_ path: String) {
     try? FileManager.default.removeItem(atPath: path)
+}
+
+/// Reads the pid a stub agent recorded through ``recordPidStatement(writingTo:)``.
+///
+/// It is the one reader every suite here shares, because every suite asks the
+/// same question of it: `cli-plan.md` §11 lets no agent outlive the command,
+/// and a pid read back from a file is what ``processExists(_:)`` probes.
+///
+/// - Parameter file: The pid file the agent wrote.
+/// - Returns: The pid.
+/// - Throws: The read failure of the file, or a requirement failure when the
+///   file holds no pid.
+func recordedAgentPid(in file: URL) throws -> pid_t {
+    let recorded = try String(contentsOf: file, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    return try #require(pid_t(recorded), "the pid file held \"\(recorded)\"")
 }
 
 // MARK: - The script text

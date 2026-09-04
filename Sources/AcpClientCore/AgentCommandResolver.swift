@@ -139,8 +139,12 @@ struct AgentCommandResolver: Sendable {
     /// - Parameter command: The agent command as the command line gave it.
     /// - Returns: An absolute path, which is what
     ///   ``AgentProcess/init(command:arguments:)`` accepts.
-    /// - Throws: ``AgentCommandResolutionFailure``.
-    func resolve(_ command: String) throws -> String {
+    /// - Throws: ``AgentCommandResolutionFailure``. The type is spelled on the
+    ///   signature, and not left to `any Error`, because the first check of
+    ///   the `doctor` table of `cli-plan.md` §10 gives each case its own fix
+    ///   text: a caller that switches over the cases must be able to switch
+    ///   over all of them and no more.
+    func resolve(_ command: String) throws(AgentCommandResolutionFailure) -> String {
         guard command.contains(Self.pathSeparator) else {
             return try searchPath(for: command)
         }
@@ -154,7 +158,9 @@ struct AgentCommandResolver: Sendable {
     /// - Throws: ``AgentCommandResolutionFailure/noSuchFile(_:)``,
     ///   ``AgentCommandResolutionFailure/notARegularFile(_:)`` or
     ///   ``AgentCommandResolutionFailure/notExecutable(_:)``.
-    private func resolveGivenPath(_ command: String) throws -> String {
+    private func resolveGivenPath(
+        _ command: String
+    ) throws(AgentCommandResolutionFailure) -> String {
         let path = absolutePath(for: command)
         if let reason = failure(at: path) { throw reason }
         return path
@@ -167,7 +173,9 @@ struct AgentCommandResolver: Sendable {
     ///   that name.
     /// - Throws: ``AgentCommandResolutionFailure/notFoundOnPath(_:searchedDirectories:)``
     ///   when no directory holds one.
-    private func searchPath(for name: String) throws -> String {
+    private func searchPath(
+        for name: String
+    ) throws(AgentCommandResolutionFailure) -> String {
         for directory in searchDirectories {
             let candidate = absolutePath(for: "\(directory)\(Self.pathSeparator)\(name)")
             guard failure(at: candidate) == nil else { continue }

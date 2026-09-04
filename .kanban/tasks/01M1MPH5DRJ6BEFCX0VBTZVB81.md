@@ -55,6 +55,48 @@ comments:
     - evidence: no files changed; the working tree is back to HEAD. `timeout 420 swift test` — 199 tests in 14 suites passed. `timeout 600 swift test --package-path IntegrationTests` — 34 tests in 6 suites passed. The card's Tests section cannot compile: a test target in the nested `IntegrationTests` package cannot import the root package's EXECUTABLE target, so `import acp_client` fails with `unable to resolve module dependency: 'acp_client'` and no `acp_client.swiftmodule` is ever emitted under the default `swiftbuild` build system. See the BLOCKER comment above for the measurements and the four options.
     - next: a person picks where the checks live (library target, split executable, test through the binary, or accept spawns in the unit target), then this card is re-run with that decision written into it.
   timestamp: 2026-09-04T20:39:02.244363+00:00
+- actor: claude-code
+  id: 01m1qcaxw1nw7w54fhrg9wgym2
+  text: |-
+    Picked up again, now that the blocker is answered. Option B landed before this run: `Sources/acp-client/` holds `AcpClientMain.swift` alone, and `Sources/AcpClientCore/` holds the seventeen files the CLI is made of, as a library TARGET and PRODUCT. `IntegrationTests/Package.swift` already names `.product(name: "AcpClientCore", ...)`, and `AcpClientCoreImportTests.swift` proves the boundary compiles under the default build system.
+
+    So the card's file paths change from `Sources/acp-client/AgentCommandDoctor.swift` to `Sources/AcpClientCore/AgentCommandDoctor.swift`. I updated the description to say so.
+
+    Fresh research, on top of what the earlier comment still holds:
+
+    - The unit suite already reaches the library with `@testable import AcpClientCore` in ten files, and the integration suite already reaches the OTHER library with `@testable import FoundationModelsACPClient` in `StubAgents.swift` and `TransportTestSupport.swift`. A cross-package `@testable` import therefore works in this graph today. The new integration test uses `@testable import AcpClientCore`, so the doctor stays `internal` and the library grows no new public API.
+    - `ExitCodeTests.ExitCodeLiteralScan` reads `SourceFiles.commandLineClientDirectories`, which is now `["Sources/AcpClientCore", "Sources/acp-client"]`. The new file must put no decimal number on a line of CODE that also spells "exit". Comments and string literals are stripped first, so only code lines matter.
+    - `AgentCommandResolver.resolve(_:)` is declared `throws` without a type, and it throws `AgentCommandResolutionFailure` alone. A doctor that gives each case its own `fix` must switch over the cases exhaustively, and an untyped `catch` forces an unreachable second branch. The two call sites (`RunCommand`, `ProbeCommand`) both catch untyped inside a `do`, so narrowing the signature to `throws(AgentCommandResolutionFailure)` costs them nothing.
+    - `AgentProcess` reaps on stdout EOF, so `processIdentifier` going `nil` is exactly "the agent is gone". `makeSilentAgent()` and `makeWellBehavedAgent()` both block on stdin and keep their pid.
+  timestamp: 2026-09-04T23:33:50.081496+00:00
+- actor: claude-code
+  id: 01m1qcz04n5khnxsd545j7jk6g
+  text: |-
+    Implementation landed. What is worth knowing next time:
+
+    **Check 2 works as the card wrote it.** Nothing had to change. A conformant ACP agent blocks reading its stdin while it waits for `initialize`, so its stdout stays open and `AgentProcess.processIdentifier` stays set. An agent whose runtime is missing closes stdout at once, the reader thread reaches EOF, `AgentProcessState.terminateCurrent()` clears the pid, and the row reports the failure. Both halves are measured against real `/bin/sh` agents, and both pass.
+
+    **The watch, not a sleep.** `startedAgentCheck` polls `processIdentifier` every 20 ms until it goes away or `min(settleInterval, timeLimit)` ends. So the failing case answers in about 20 ms rather than spending the whole interval, and only the passing case pays the 500 ms. That is why the six new integration tests add about two seconds in total and not six.
+
+    **The time limit.** `AgentCommandDoctor` holds `timeLimit`, its own, defaulting to ten seconds, and check 2 spends `min(Self.settleInterval, timeLimit)` of it. `settleInterval` is 500 ms. The two are separate because checks 3 to 7 will want the whole limit for one `initialize`, and a settle window that grew with the limit would make a patient doctor a slow one. Neither is `--timeout`: that option bounds the turn a person asked for.
+
+    **One signature change outside this file.** `AgentCommandResolver.resolve(_:)` is now `throws(AgentCommandResolutionFailure)` rather than untyped `throws`, and the two private helpers it calls with it. The doctor gives each failure case its own `fix`, so it must switch over the cases exhaustively; an untyped `catch` would have forced an unreachable second branch, which is dead code by another name. The two call sites, `RunCommand.runTurn` and `ProbeCommand.probeAgent`, both `try` inside a `do` with an untyped `catch`, so narrowing the signature cost them nothing and neither file changed.
+
+    **A unit suite was added beyond the card's list**, `Tests/FoundationModelsACPClientTests/AgentCommandDoctorTests.swift`, one test. Two reasons. First, the half of row 1 that fails to resolve starts no process, so by the repository's own split it belongs in the unit target, and the four `AgentCommandResolutionFailure` cases are cheap to drive there and expensive to drive through a spawn. Second, the `dead-code-swift` scan reads the ROOT package alone: it never sees the nested `IntegrationTests` package, so a type only that package names looks unused. The unit test is what keeps `AgentCommandDoctor` reachable until the `doctor` subcommand of ^39xrxnp calls it.
+
+    **`IntegrationTests/Package.swift` gained one dependency**, `FoundationModelsExtras`, restated verbatim from `../Package.swift` as that manifest's header requires. The doctor suite asserts on `HealthCheck` and `HealthStatus` directly, and a test target should name where its types come from rather than rest on a transitive import. It costs no new checkout: the root package already resolves that package. `ManifestTests` reads the ROOT manifest only, and its pin of five `AcpClientCore` dependencies still passes — this task needed no sixth.
+
+    **Two private pid readers folded into one.** `recordedAgentPid(in:)` now stands in `Support/StubAgents.swift`, beside the statement that writes the file, and `ProbeCommandTests` and `RunCommandExitTests` call it instead of each keeping a copy. Adding a third copy would have been a duplication finding; this removes the two that stood.
+
+    **Pre-checks run before reporting.** swiftlint over the changed Swift files with `no_magic_numbers`, `missing_docs`, `function_body_length`, `closure_body_length` and the five force-construct rules: clean. `periphery scan` could NOT run here — it wants an index store at `.build/debug/index/store`, and the default `swiftbuild` build system writes `.build/out/` instead, so it reports `index store path does not exist`. Producing one needs `--build-system native`, which this repository does not use. So the dead-code check rests on the unit test above rather than on a measurement.
+  timestamp: 2026-09-04T23:44:47.765424+00:00
+- actor: claude-code
+  id: 01m1qczg3rfwwkzd1hge6k7vvm
+  text: |-
+    ### implement — changed
+    - evidence: 8 files — Sources/AcpClientCore/AgentCommandDoctor.swift (new), Sources/AcpClientCore/AgentCommandResolver.swift, Tests/FoundationModelsACPClientTests/AgentCommandDoctorTests.swift (new), IntegrationTests/Package.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift (new), .../Support/StubAgents.swift, .../ProbeCommandTests.swift, .../RunCommandExitTests.swift. `timeout 420 swift test` — 201 tests in 15 suites passed, zero warnings. `timeout 600 swift test --package-path IntegrationTests` — 41 tests in 8 suites passed, zero warnings. RED was measured first: `swift build --package-path IntegrationTests --build-tests` reported `cannot find type 'AgentCommandDoctor' in scope` before the source file was written. Every acceptance row and every test row of the description is ticked; no row was left undone.
+    - next: /review. The `doctor` subcommand that renders these checks is ^39xrxnp and was out of scope here, so `DoctorCommand.run()` still throws `SubcommandNotImplementedError`.
+  timestamp: 2026-09-04T23:45:04.120622+00:00
 depends_on:
 - 01M1Q5ZSJXM50HEWDVXW83ZSHZ
 position_column: doing
@@ -69,7 +111,7 @@ check table. The protocol, the runner and the plain renderer come from
 `Sources/FoundationModelsExtras/Doctor/`. This package writes one conformance
 over an agent command; it writes no doctor framework.
 
-Create `Sources/acp-client/AgentCommandDoctor.swift`:
+Create `Sources/AcpClientCore/AgentCommandDoctor.swift`:
 
 - `struct AgentCommandDoctor: Doctorable`. It holds the raw agent command, its
   arguments, an `AgentCommandResolver`, and a time limit that belongs to the
@@ -98,31 +140,43 @@ The two checks of this task:
 Checks 3 to 7 all need a live ACP connection, so they belong to the two
 following tasks.
 
+The path above says `Sources/AcpClientCore/` and no longer
+`Sources/acp-client/`. Card ^83zshz split the client into the `AcpClientCore`
+library and a thin `acp-client` executable holding the `@main` type alone,
+which is what lets the nested `IntegrationTests` package drive this type
+directly. The `Tests` section below carries the same change.
+
 ## Acceptance Criteria
 
-- [ ] `AgentCommandDoctor` conforms to `Doctorable`, with `doctorName`,
+- [x] `AgentCommandDoctor` conforms to `Doctorable`, with `doctorName`,
       `doctorCategory` and a non-throwing `runHealthChecks()`.
-- [ ] Every returned value is built with the Extras `ok`, `warning` and
+- [x] Every returned value is built with the Extras `ok`, `warning` and
       `error` factories.
-- [ ] A command that is not on `PATH` gives one `error` check, and the later
+- [x] A command that is not on `PATH` gives one `error` check, and the later
       checks are reported as skipped rather than dropped.
-- [ ] An agent that exits at once gives an `error` check on row 2.
-- [ ] `wellBehavedAgent` gives `ok` on both rows.
-- [ ] No agent process outlives `runHealthChecks()`, whatever the outcome.
+- [x] An agent that exits at once gives an `error` check on row 2.
+- [x] `wellBehavedAgent` gives `ok` on both rows.
+- [x] No agent process outlives `runHealthChecks()`, whatever the outcome.
 
 ## Tests
 
-- [ ] New
+- [x] New
       `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift`.
       It drives `AgentCommandDoctor` directly, not through the binary, so each
       check is asserted on its own. Use the `StubAgents` helpers.
-- [ ] One test per acceptance row above, asserting the check `name`, `status`
+- [x] One test per acceptance row above, asserting the check `name`, `status`
       and that `fix` is not empty for each `error`.
-- [ ] Extend `StubAgents` with an agent that exits at once.
-- [ ] One test records the spawned pid and asserts `kill(pid, 0)` reports the
+- [x] Extend `StubAgents` with an agent that exits at once.
+- [x] One test records the spawned pid and asserts `kill(pid, 0)` reports the
       process is gone after `runHealthChecks()`.
-- [ ] Run `swift test --package-path IntegrationTests`. Every assertion
+- [x] Run `swift test --package-path IntegrationTests`. Every assertion
       passes.
+- [x] New `Tests/FoundationModelsACPClientTests/AgentCommandDoctorTests.swift`,
+      added beyond the list above. It drives the four
+      `AgentCommandResolutionFailure` cases and asserts that each names a
+      repair of its own. That half of row 1 starts no process, so it belongs
+      in the unit target; it is also what keeps the type reachable from the
+      root package, which the dead-code scan reads.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.

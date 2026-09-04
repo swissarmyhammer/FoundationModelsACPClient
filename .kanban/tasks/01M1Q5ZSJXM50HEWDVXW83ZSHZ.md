@@ -303,8 +303,45 @@ comments:
     - deliberate-failure results, each reverted: sixth dependency on `AcpClientCore` → `theTargetDeclaresFiveDependencies` alone; the executable taking a bare string, `.byName(name:)` and `.target(name:)` → `theExecutableTargetTakesTheLibraryAlone` with `It takes ["AcpClientCore", "FoundationModelsACPClient"]`; `.product(name:package:)` and `.product(name:package:condition:)` → the same rule with `It names ["Noora"]`, the conditional form written FIRST and still leaving `targetNames == ["AcpClientCore"]`, so the entry after the brackets was read; a forbidden module on the library target and on the executable target → `neitherTargetNamesAForbiddenModule` with `They name ["Operations"]` on each, over a baseline measured GREEN first.
     - next: /review
   timestamp: 2026-09-04T23:20:58.026600+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m1qc35gvqn4b6s4y54jxy7bk
+  text: |-
+    ### review — clean
+
+    - scope: `review sha 9bb6d9d~1..9bb6d9d` — the diffs only. The engine reported 0 findings over 1 file (2 files excluded by `.reviewignore`).
+    - evidence: zero new findings. All three prior checklist items carry `- [x]`.
+    - The four scope checks the card asked for all pass:
+      1. **Every rule survives, and one is stronger.** The five rules that only changed their source of names keep the same expectations. `theManifestDeclaresTheExecutableProduct` IS stronger: the old `manifest.contains(#".executable(name: "acp-client""#)` matches that text inside a `//` or `/* */` comment, so a commented-out product passes the old rule with no product declared. The new rule reads SwiftPM's own parse, where a commented-out declaration makes no product, and asks that `type` carries the `executable` key, so `.library(name: "acp-client", ...)` fails. Confirmed against the real dump: `{"name": "acp-client", "type": {"executable": null}}`. Two tests were deleted; both tested only the hand-written reader that is gone, so 202 to 200 is right.
+      2. **The temporary directory is removed on every path.** The `defer` stands before the directory is made and before both throwing calls, and the only earlier throw comes before any directory exists. Measured: zero `acp-client-dump-package-*` directories in TMPDIR after a full run that starts six children together.
+      3. **The Noora exception is genuine.** The dump writes `"requirement": {"range": [{"lowerBound": "0.57.0", "upperBound": "0.58.0"}]}`. A hand-written half-open range dumps the same, so the JSON cannot tell apart the two spellings the rule must tell apart.
+      4. **The `Operations` substitution does not prove the forbidden-module rule, but the rule holds.** `Operations` is not in `forbiddenModules`, so that run cannot make `neitherTargetNamesAForbiddenModule` fail; it proves only that the reader reaches the executable target's list. The rule was proved directly instead, against `dump-package` on a probe manifest: `"SwiftUI"` and `.byName(name: "FoundationModelsRouter")` come back as `byName` entries and `.product(name: "FoundationModelsMCP", package: "FoundationModelsExtras", condition:)` as a `product` entry, and all three land in `allNames`, which `isDisjoint(with: forbiddenModules)` rejects.
+    - The corrected deadlock claim is now measured, not assumed. Two dumps on the DEFAULT scratch path made SwiftPM print `Another instance of SwiftPM (PID: 13658) is already running using '.../.build', waiting until that process has finished execution...`, and `.build/.lock` exists. So a child on the default path waits on a lock the parent `swift test` holds while the parent blocks in `waitUntilExit()`. The comment states this correctly.
+    - No fourth defect. The untested `else` branch that throws on an unknown dependency key guards a SwiftPM case that does not exist today; the six dump children cost 0.73s for the whole suite; the file handles left open on a `run()` throw close at scope exit and do not stop the removal. Each is a refinement, not a defect in the delivered code.
+    - suite: `swift test` — 200 tests in 14 suites, all passing. Working tree clean.
+    - next: none. Task moved to `done`.
+  timestamp: 2026-09-04T23:29:35.771144+00:00
+- actor: claude-code
+  id: 01m1qc46j0rc9ymyb7x6rt0e34
+  text: |-
+    ### finish iteration 4 — clean
+    - implement: changed — 1 file. The hand-written manifest reader is deleted. `packageDump()` runs `swift package dump-package` with `--scratch-path` at a fresh temporary directory and every `SWIFTPM`-prefixed variable stripped from the child environment, and four `Decodable` types read the JSON.
+    - test: green — root 200 passed in 14 suites (202 minus the two deleted fixture tests), integration 35 passed in 7 suites, 0 warnings, 0 LSP diagnostics
+    - commit: 9bb6d9d test(manifest): read Package.swift via dump-package instead of a hand-written parser
+    - review: clean — zero new findings, task moved to done
+
+    What the fourth review established:
+    - Every rule survives with the same meaning, and `theManifestDeclaresTheExecutableProduct` is genuinely stronger — but not for the reason the implementer gave. The old raw substring matched that text inside a comment and passed with no product declared. It would NOT have passed for a name held in a constant; it would have failed spuriously.
+    - The temporary directory is cleaned on every path. The `defer` is registered before the directory is created and before both throwing calls, and a run with six children together left zero directories behind.
+    - The Noora text read is forced, not convenient. The dump writes `.upToNextMinor(from: "0.57.0")` and a hand-written half-open range identically, so the JSON cannot tell apart the two spellings the rule exists to tell apart.
+    - The `Operations` substitution in the forbidden-module proof does not prove what it claimed, because `Operations` is not in `forbiddenModules` at all. The review closed the gap itself on a probe manifest: `"SwiftUI"`, `.byName(name: "FoundationModelsRouter")` and `.product(name: "FoundationModelsMCP", ..., condition:)` all land in `allNames` and are rejected. A gap in the proof, not in the code.
+    - The corrected deadlock comment is now measured, not assumed. Two dumps on the DEFAULT scratch path do produce SwiftPM's own "Another instance of SwiftPM is already running using '.build'" message.
+
+    The review weighed three fourth-defect candidates and rejected each.
+
+    This card took four rounds. The lesson for the board: a test that reads a program with regular expressions has no end of holes, and the first round of findings on such a file is a signal to change the approach, not to patch it.
+  timestamp: 2026-09-04T23:30:09.600736+00:00
+position_column: done
+position_ordinal: 9b80
 title: Split acp-client into a library target and a thin executable
 ---
 ## What

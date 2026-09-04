@@ -99,18 +99,6 @@ struct ProbeCommandTests {
         return (result, String(decoding: result.standardOutput, as: UTF8.self))
     }
 
-    /// Reads the pid a stub agent recorded.
-    ///
-    /// - Parameter file: The pid file the agent wrote.
-    /// - Returns: The pid.
-    /// - Throws: The read failure of the file, or a requirement failure when
-    ///   the file holds no pid.
-    private static func recordedPid(in file: URL) throws -> pid_t {
-        let recorded = try String(contentsOf: file, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return try #require(pid_t(recorded), "the pid file held \"\(recorded)\"")
-    }
-
     @Test("the report names the protocol version, the capabilities, the auth methods and the commands")
     func theReportNamesEveryPartTheAgentReported() async throws {
         let (result, report) = try await Self.probe()
@@ -249,7 +237,7 @@ struct ProbeCommandTests {
 
         _ = try await runAcpClient(Self.probeArguments(script: script))
 
-        let pid = try Self.recordedPid(in: pidFile)
+        let pid = try recordedAgentPid(in: pidFile)
         #expect(!processExists(pid), "the agent with pid \(pid) outlived the probe")
     }
 }
