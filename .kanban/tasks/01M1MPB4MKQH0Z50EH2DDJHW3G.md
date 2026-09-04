@@ -131,10 +131,29 @@ comments:
     - evidence: 2 files — Sources/acp-client/AgentCommandResolver.swift (new), Tests/FoundationModelsACPClientTests/AgentCommandResolverTests.swift (new). `swift test`: 111 tests in 6 suites passed, 0 failures, 0 warnings. `swift build --product acp-client`: clean. Every acceptance row and every test row of the card is complete; none was left undone.
     - next: /review
   timestamp: 2026-09-04T13:57:36.787017+00:00
+- actor: claude-code
+  id: 01m1pbm6r3p23gm9shspx5xmjd
+  text: |-
+    ### review — clean
+    - scope: `review sha ce845ec~1..ce845ec` (diffs only; 2 files reviewed, 6 `.kanban/` files excluded by `.reviewignore`)
+    - evidence: zero new findings — counts { findings: 0, confirmed: 0, refuted: 0, attempted: 7, failed: 0 }
+    - prior acceptance and test rows: all checked; no earlier `## Review Findings` section to clear
+    - the three recorded decisions are correct: `nonisolated(unsafe)` matches a read-only `FileManager` use with no delegate; `isRegularFile(at:)` must resolve links first because `attributesOfItem(atPath:)` reports the link; the shape assertion mirrors the real `guard command.hasPrefix("/")` in `AgentProcess.init`
+    - next: none. Task moves to done.
+  timestamp: 2026-09-04T14:02:11.075775+00:00
+- actor: claude-code
+  id: 01m1pbmsfxvy953mafgt6y7tz1
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (Sources/acp-client/AgentCommandResolver.swift, Tests/FoundationModelsACPClientTests/AgentCommandResolverTests.swift); all 12 rows met
+    - test: green — `swift package clean && swift test`, 111 passed, 0 failed, 0 skipped, 0 warnings; `swift build --product acp-client` clean
+    - commit: ce845ec feat(acp-client): resolve the agent command to an absolute executable path
+    - review: clean — zero new findings, 7 validators, task moved to done
+  timestamp: 2026-09-04T14:02:30.269653+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8f80
 title: Resolve the agent command to an absolute executable path
 ---
 ## What

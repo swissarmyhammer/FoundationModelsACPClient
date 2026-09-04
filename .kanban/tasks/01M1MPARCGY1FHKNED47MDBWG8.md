@@ -97,6 +97,43 @@ comments:
 
     Carried forward for ^9h4m0ev (exit code table): this task added `AcpClient.usageExitCode` and `AcpClient.processExitCode(for:)` in Sources/acp-client/AcpClient.swift, because ArgumentParser's own `exitCode(for:)` answers 64 (EX_USAGE) where §9 pins 2. That is the seam ^9h4m0ev extends. Its acceptance row "no file outside ExitCode.swift holds a bare numeric exit literal" must account for `usageExitCode`, either by moving the constant into ExitCode.swift or by naming the exception.
   timestamp: 2026-09-04T13:42:54.216827+00:00
+- actor: claude-code
+  id: 01m1pby54r64q8vmcb33p5p6ms
+  text: |-
+    Post-hoc rule audit, after the card reached `done`.
+
+    The full validator dump (11,729 lines, all seven validators) was read and
+    checked against the committed diff of 27e5c56. Every rule that touches
+    this change holds:
+
+    - disallowed-constructs-swift: no `print`/`debugPrint`/`dump`, no `!`
+      force unwrap, no `try!`, no `as!`, no `#file`. The binary writes to
+      stderr through `FileHandle.standardError`, not `print`.
+    - immutability: every `static` member is a `let`; no top-level `func`.
+    - optionals: no `guard` in a test — `#require` throughout. `cwd`,
+      `timeout` and `prompt` are each genuine absence, and each says so in
+      its doc comment.
+    - duplication: the one real copy — an eight-word option-argument array
+      pasted into three tests — was extracted to `sharedOptionArguments`
+      plus `expectEverySharedOption(_:)` before the commit. The three
+      near-identical `run()` bodies fall under the Swift carve-out for
+      trivial conformance stubs whose bodies carry no logic that can drift.
+    - test-partitioning: unit target only, no environment switch.
+
+    One candidate was considered and NOT changed: `subcommands.count == 3`
+    in `theRootNamesEverySubcommand`. `magic-numbers-swift` ran over that
+    file in the clean review and reported nothing, so there is no finding,
+    and the card was already done, committed and reviewed. Naming it would
+    be an unrequested edit to a closed card. Recorded here so the next
+    agent does not re-derive the question. `AcpClientVersionTests` has the
+    sibling precedent (`semanticVersionComponentCount`) if a later reviewer
+    does raise it.
+
+    Concurrency note: `Sources/acp-client/AgentCommandResolver.swift` landed
+    in the same target from ^DJHW3G (commit ce845ec) while this card was
+    finishing. The suite is 111 tests in 6 suites, all passing, with both
+    changes present.
+  timestamp: 2026-09-04T14:07:37.112531+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 position_column: done
