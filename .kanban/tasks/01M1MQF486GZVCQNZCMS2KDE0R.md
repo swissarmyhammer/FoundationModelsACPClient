@@ -29,8 +29,24 @@ comments:
     - evidence: 3 files, 264 insertions, 2 deletions — Sources/FoundationModelsACPClient/SwiftUIACPClient+Connect.swift, Tests/FoundationModelsACPClientTests/InProcessConnectionTests.swift, Tests/FoundationModelsACPClientTests/PermissionRequestTests.swift. `swift test`: 72 tests, 0 failures, 0 warnings. `sourcesHoldNoForbiddenImport` green; the file gained no import.
     - next: /review
   timestamp: 2026-09-04T12:33:53.966381+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1p7031mnsv2x8xf24jh69mw
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (b272400) — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. Reviewed `Sources/FoundationModelsACPClient/SwiftUIACPClient+Connect.swift`, `Tests/FoundationModelsACPClientTests/InProcessConnectionTests.swift`, `Tests/FoundationModelsACPClientTests/PermissionRequestTests.swift`. `.kanban/` excluded by `.reviewignore`; `cli-plan.md` matched no validator.
+    - next: task moves to done.
+  timestamp: 2026-09-04T12:41:17.620372+00:00
+- actor: claude-code
+  id: 01m1p70gxaa4dynb94q3wh931d
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (SwiftUIACPClient+Connect.swift, InProcessConnectionTests.swift, PermissionRequestTests.swift)
+    - test: green — `swift package clean && swift test`, 72 passed, 0 failed, 0 skipped, 0 warnings
+    - commit: b272400 feat(acp): add connect(over:logger:client:) overload for a wrapping Client
+    - review: clean — zero new findings, 7 validators, task moved to done
+  timestamp: 2026-09-04T12:41:31.818159+00:00
+position_column: done
+position_ordinal: 8b80
 title: Give SwiftUIACPClient.connect a seam for a wrapping Client
 ---
 ## What
