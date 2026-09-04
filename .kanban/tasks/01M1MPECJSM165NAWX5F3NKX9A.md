@@ -43,6 +43,100 @@ comments:
     - acceptance rows I could not complete as written: the `--version` row asserts the version SHAPE and not `AcpClientVersion.current`, because SwiftPM publishes no importable module for an executable product across a package boundary (`unable to resolve module dependency: 'acp_client'`). The unit suite pins the constant itself.
     - next: `/review`.
   timestamp: 2026-09-04T18:29:52.676825+00:00
+- actor: claude-code
+  id: 01m1pvdd7d0an4bb3pbtapqj21
+  text: |
+    ### review — findings
+    - scope: `review sha 0288688~1..0288688` (the delta only)
+    - evidence: 4 findings, 4 confirmed, 1 refuted — CLITestSupportTests.swift:28, StubAgents.swift:63, StubAgents.swift:76, StubAgents.swift:111
+    - next: correct the four findings, then review again.
+
+    Two points the implementer raised, and the judgement on each.
+
+    **1. The `--version` acceptance row — the substitution is adequate. It is not a finding.**
+    The row on this card asks for exit 0, the version on stdout, and an empty
+    stderr. It does not ask for a comparison against `AcpClientVersion.current`.
+    The assertion on the semantic-version shape meets the row as written.
+    The chain that pins the value is complete and it is in the unit suite:
+    `AcpClientVersionTests` asserts `AcpClient.configuration.version ==
+    AcpClientVersion.current`, and ArgumentParser prints `configuration.version`
+    for `--version`. SwiftPM publishes no importable module for an executable
+    product across a package boundary, so the integration suite cannot read the
+    constant. Keep the comment in `CLITestSupportTests.swift` that names this
+    limit.
+
+    **2. The near-copy in `AgentProcessTests.swift` — the reading is right, and it
+    does not release the changed side.**
+    The duplication validator, section "Where the Fix Goes", says an index-backed
+    row puts the fix in the changed code, and says not to edit the counterpart.
+    `AgentProcessTests.swift` is outside this commit, so do not edit it. Raise a
+    separate task if the copy there is to go.
+    But the same section gives case 2: when no shared function exists yet, extract
+    one FROM THE CHANGED CODE. So the new copy in `StubAgents.swift` still needs
+    the extraction.
+    The engine did not raise that row. It raised the changed-set row
+    `reuse/reuse` at `StubAgents.swift:111`, where both halves are new. The
+    extraction that answers it — one shared temporary-file writer in `Support/`,
+    called by `writeAgentScript` and `writeStandardInputFile` — also removes the
+    changed-side half of the `AgentProcessTests.swift` near-copy. One fix answers
+    both. No second finding is added.
+  timestamp: 2026-09-04T18:38:05.549257+00:00
+- actor: claude-code
+  id: 01m1pvqydqevara00mvfkefaes
+  text: |
+    Corrected the four review findings. What each one took, and what else went with it.
+
+    **Finding 1 — magic number, `CLITestSupportTests.swift`.** The literal was the
+    `2` inside `.seconds(2)`. swiftlint reads a number bound straight to a `let` as
+    named, and a number inside a call as magic, which is why
+    `processSuiteTimeLimitMinutes = 5` beside it never reported. So the file now
+    carries `private let stubAgentSilenceLimitSeconds = 2`, and
+    `stubAgentSilenceLimit` reads `.seconds(stubAgentSilenceLimitSeconds)` — the
+    shape the minutes constant already used. I read every other literal in the file:
+    `processSuiteTimeLimitMinutes`, `semanticVersionComponentCount` and the `1`
+    inside the raw `initialize` JSON string are each already named or not a numeric
+    literal, so the one correction removes the cause from the whole file.
+
+    **Findings 2 and 3 — the `make` prefix, `StubAgents.swift`.** The finding named
+    two functions; the cause is the naming of every script builder in the file, so
+    all three took the correction: `makeWellBehavedAgent(answer:stopReason:)`,
+    `makeBannerOnStdoutAgent()` and `makeSilentAgent()`. `silentAgent()` was not in
+    a finding and is renamed anyway. `writeAgentScript` and `removeAgentScript`
+    keep their names: each begins with the verb of the side effect it has, which is
+    what the rule asks for. The two doc links that named the old symbols are
+    updated.
+
+    **Finding 4 — the duplicated temporary-file writer.** New file
+    `Support/TemporaryFiles.swift` holds `writeTemporaryFile(_:prefix:suffix:)`: the
+    temporary directory, the UUID name, and one atomic write. `writeAgentScript`
+    calls it with the `acp-stub-agent-` prefix and the `.sh` suffix;
+    `writeStandardInputFile` calls it with the `acp-client-stdin-` prefix and no
+    suffix. Neither holds path logic of its own any more.
+
+    **`AgentProcessTests.swift` is untouched, as the review directed.** Its private
+    `writeScript` stands outside this change. I raised `^pxhvwd6` for it, and put
+    one more thing on that card: measured after a full integration run, the
+    temporary directory holds many `acp-agent-*.sh` and several
+    `acp-agent-child-*.pid` files, because no test there removes what it wrote. The
+    stub-agent tests do remove theirs — after this run, `$TMPDIR` holds no
+    `acp-stub-agent-*` and no `acp-client-stdin-*` file.
+
+    **The `--version` shape assertion stands, with its comment.** The review judged
+    the substitution adequate, and the comment that names the limit — SwiftPM
+    publishes no importable module for an executable product across a package
+    boundary — is still in `CLITestSupportTests.swift`.
+
+    Housekeeping proved after the runs: `pgrep` finds no `swift-test`,
+    `swiftpm-testing-helper`, `xctest`, `acp-client` or stub agent.
+  timestamp: 2026-09-04T18:43:50.839864+00:00
+- actor: claude-code
+  id: 01m1pvr4xdcyqs7zqd0gbcdgqd
+  text: |
+    ### implement — changed
+    - evidence: 4 files. New `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TemporaryFiles.swift` (the shared `writeTemporaryFile(_:prefix:suffix:)` — finding 4). Edited `.../Support/StubAgents.swift` (`makeWellBehavedAgent`, `makeBannerOnStdoutAgent`, `makeSilentAgent`; `writeAgentScript` now calls the shared writer — findings 2, 3, 4), `.../Support/CLITestSupport.swift` (`writeStandardInputFile` now calls the shared writer — finding 4) and `.../CLITestSupportTests.swift` (`stubAgentSilenceLimitSeconds` named constant, and the renamed call sites — finding 1). `AgentProcessTests.swift` untouched. Tests: `timeout 600 swift test --package-path IntegrationTests` — 10 tests in 3 suites passed, 0 failures; `timeout 420 swift test` — 180 tests in 12 suites passed, 0 failures. `swift build --build-tests` on both packages reports 0 warnings.
+    - new work raised: `^pxhvwd6` — fold `AgentProcessTests` onto the shared writer and remove the `acp-agent-*` scripts it leaves in the temporary directory.
+    - next: `/review`.
+  timestamp: 2026-09-04T18:43:57.485858+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPARCGY1FHKNED47MDBWG8
@@ -88,13 +182,14 @@ Create
 Create
 `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift`:
 
-- `wellBehavedAgent(answer:stopReason:)` — answers `initialize`, answers
+- `makeWellBehavedAgent(answer:stopReason:)` — answers `initialize`, answers
   `session/new`, and on `session/prompt` sends the given text as
   `agent_message_chunk` updates and then a `state_update` carrying `idle` with
   the chosen stop reason. It writes ndJSON to stdout and nothing else.
-- `bannerOnStdoutAgent()` — writes one non-JSON banner line to stdout before
-  its first ndJSON message. This is the most common ACP defect (§10).
-- `silentAgent()` — starts, reads its stdin, and never answers `initialize`.
+- `makeBannerOnStdoutAgent()` — writes one non-JSON banner line to stdout
+  before its first ndJSON message. This is the most common ACP defect (§10).
+- `makeSilentAgent()` — starts, reads its stdin, and never answers
+  `initialize`.
 
 Each helper returns the absolute path of a script it wrote into a temporary
 directory, and the caller removes it. Later tasks extend this file; keep the
@@ -109,9 +204,9 @@ This task proves the plumbing only. It asserts nothing about `run`, `probe` or
       the suite finds the binary.
 - [ ] `runAcpClient(["--version"])` gives exit 0, the version on stdout, and
       an empty stderr.
-- [ ] `wellBehavedAgent`, `bannerOnStdoutAgent` and `silentAgent` each spawn
-      and behave as described, checked directly with `AgentProcess` rather
-      than through `acp-client`.
+- [ ] `makeWellBehavedAgent`, `makeBannerOnStdoutAgent` and `makeSilentAgent`
+      each spawn and behave as described, checked directly with `AgentProcess`
+      rather than through `acp-client`.
 - [ ] A hung agent fails the test inside `TransportTestDeadline.limit` rather
       than hanging the suite.
 - [ ] No stub process outlives its test.
@@ -122,15 +217,27 @@ This task proves the plumbing only. It asserts nothing about `run`, `probe` or
       `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/CLITestSupportTests.swift`.
       It asserts `acpClientBinaryURL()` gives an existing executable file, and
       that `runAcpClient(["--version"])` matches the acceptance row above.
-- [ ] A test spawns `wellBehavedAgent` with `AgentProcess`, sends an
+- [ ] A test spawns `makeWellBehavedAgent` with `AgentProcess`, sends an
       `initialize` frame and a `session/new` frame, and asserts a well formed
       ndJSON answer comes back for each.
-- [ ] A test spawns `bannerOnStdoutAgent` and asserts the first stdout line is
-      not valid JSON, which is the condition the `doctor` check will find.
-- [ ] A test spawns `silentAgent`, asserts no answer arrives inside a short
+- [ ] A test spawns `makeBannerOnStdoutAgent` and asserts the first stdout line
+      is not valid JSON, which is the condition the `doctor` check will find.
+- [ ] A test spawns `makeSilentAgent`, asserts no answer arrives inside a short
       limit, and asserts the pid is gone after teardown.
 - [ ] Run `swift test --package-path IntegrationTests`. Every assertion
       passes.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 13:31)
+
+> Scope: `review sha 0288688~1..0288688` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/CLITestSupportTests.swift:28` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:63` `swift/fluent-usage` — Factory methods that create/construct objects should begin with `make`. This function creates an agent script but is named `wellBehavedAgent()` instead of `makeWellBehavedAgent()`. Rename to `makeWellBehavedAgent(answer:stopReason:)`.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:76` `swift/fluent-usage` — Factory methods that create/construct objects should begin with `make`. This function creates an agent script but is named `bannerOnStdoutAgent()` instead of `makeBannerOnStdoutAgent()`. Rename to `makeBannerOnStdoutAgent()`.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:111` `reuse/reuse` — The `writeAgentScript` function duplicates the temporary file writing pattern from `writeStandardInputFile` in CLITestSupport.swift—both new code in the same change. Both write content to a temporary file with a UUID-based filename using nearly identical logic: create temp directory path, append component with UUID, write content, return path. A shared helper should be extracted to avoid this duplication. Extract a shared temporary file writing function parameterized over content type and file extension, then have both `writeStandardInputFile` and `writeAgentScript` call it. For example: `func writeTempFile(_ content: String, suffix: String) throws -> URL` or similar, allowing both to reuse the UUID+path logic.

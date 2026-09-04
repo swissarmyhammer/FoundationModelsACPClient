@@ -20,12 +20,15 @@ import Testing
 /// that a wedged run ends rather than holding the whole package open.
 private let processSuiteTimeLimitMinutes = 5
 
+/// How many seconds ``stubAgentSilenceLimit`` runs for.
+private let stubAgentSilenceLimitSeconds = 2
+
 /// The longest a stub agent gets to answer before a test calls it silent.
 ///
 /// Shorter than ``TransportTestDeadline/limit``, because the silent-agent test
 /// waits out the whole window on purpose and a suite must not pay ten seconds
 /// for one negative assertion.
-private let stubAgentSilenceLimit: Duration = .seconds(2)
+private let stubAgentSilenceLimit: Duration = .seconds(stubAgentSilenceLimitSeconds)
 
 /// One `initialize` request as raw ndJSON, newline included.
 ///
@@ -150,7 +153,7 @@ struct StubAgentTests {
     /// ndJSON the wire decodes, and it leaves no process behind.
     @MainActor
     @Test func theWellBehavedAgentAnswersInitializeAndNewSession() async throws {
-        let script = try wellBehavedAgent(answer: Self.chosenAnswer, stopReason: .endTurn)
+        let script = try makeWellBehavedAgent(answer: Self.chosenAnswer, stopReason: .endTurn)
         defer { removeAgentScript(script) }
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
@@ -174,7 +177,7 @@ struct StubAgentTests {
     /// reason.
     @MainActor
     @Test func theWellBehavedAgentStreamsTheChosenAnswerAndStopReason() async throws {
-        let script = try wellBehavedAgent(answer: Self.chosenAnswer, stopReason: .maxTokens)
+        let script = try makeWellBehavedAgent(answer: Self.chosenAnswer, stopReason: .maxTokens)
         defer { removeAgentScript(script) }
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
@@ -201,7 +204,7 @@ struct StubAgentTests {
     /// The banner agent writes a first stdout line that is not JSON, which is
     /// the condition the `doctor` stdout-purity check will find.
     @Test func theBannerAgentWritesANonJSONFirstLine() async throws {
-        let script = try bannerOnStdoutAgent()
+        let script = try makeBannerOnStdoutAgent()
         defer { removeAgentScript(script) }
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
@@ -218,7 +221,7 @@ struct StubAgentTests {
     /// The silent agent reads its stdin and never answers `initialize`, and it
     /// is gone after teardown.
     @Test func theSilentAgentNeverAnswersAndLeavesNoProcess() async throws {
-        let script = try silentAgent()
+        let script = try makeSilentAgent()
         defer { removeAgentScript(script) }
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)

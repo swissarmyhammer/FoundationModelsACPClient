@@ -38,8 +38,8 @@ let stubAgentMessageID = MessageId(rawValue: "stub-agent-msg-1")
 /// The reply text a stub agent streams when the caller chose none.
 let stubAgentDefaultAnswer = "Hello from the stub agent."
 
-/// The non-JSON line ``bannerOnStdoutAgent()`` writes to stdout before it says
-/// anything on the wire.
+/// The non-JSON line ``makeBannerOnStdoutAgent()`` writes to stdout before it
+/// says anything on the wire.
 ///
 /// `cli-plan.md` §10 calls a banner on stdout the most common ACP defect: the
 /// agent protocol makes "no non-ACP content on stdout" a MUST, and an agent
@@ -60,7 +60,7 @@ let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 ///   - stopReason: The stop reason to end the turn with.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
-func wellBehavedAgent(
+func makeWellBehavedAgent(
     answer: String = stubAgentDefaultAnswer,
     stopReason: StopReason = .endTurn
 ) throws -> String {
@@ -68,12 +68,12 @@ func wellBehavedAgent(
 }
 
 /// Writes a stub agent that puts one non-JSON banner line on stdout before its
-/// first ndJSON message, and behaves as ``wellBehavedAgent(answer:stopReason:)``
-/// after that.
+/// first ndJSON message, and behaves as
+/// ``makeWellBehavedAgent(answer:stopReason:)`` after that.
 ///
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
-func bannerOnStdoutAgent() throws -> String {
+func makeBannerOnStdoutAgent() throws -> String {
     try writeAgentScript(
         """
         \(printfLine(stubAgentBannerLine))
@@ -91,7 +91,7 @@ func bannerOnStdoutAgent() throws -> String {
 ///
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: The write failure of the script file.
-func silentAgent() throws -> String {
+func makeSilentAgent() throws -> String {
     try writeAgentScript(
         """
         while IFS= read -r line; do
@@ -103,16 +103,26 @@ func silentAgent() throws -> String {
 
 // MARK: - The script files
 
+/// The text that stands before the unique part of a stub-agent script's name.
+private let agentScriptNamePrefix = "acp-stub-agent-"
+
+/// The extension a stub-agent script's name carries.
+///
+/// The scripts run as an argument of ``stubAgentShellCommand`` and not on their
+/// own, so the extension says what the file holds and nothing more.
+private let agentScriptNameSuffix = ".sh"
+
 /// Writes one agent script into a fresh temporary file.
 ///
 /// - Parameter content: The script text.
 /// - Returns: The absolute path of the script file.
 /// - Throws: The write failure of the script file.
 func writeAgentScript(_ content: String) throws -> String {
-    let path = FileManager.default.temporaryDirectory
-        .appendingPathComponent("acp-stub-agent-\(UUID().uuidString).sh").path
-    try content.write(toFile: path, atomically: true, encoding: .utf8)
-    return path
+    try writeTemporaryFile(
+        Data(content.utf8),
+        prefix: agentScriptNamePrefix,
+        suffix: agentScriptNameSuffix
+    ).path
 }
 
 /// Removes a script a builder in this file wrote.

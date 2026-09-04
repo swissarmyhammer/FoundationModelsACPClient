@@ -265,16 +265,16 @@ private func productsDirectory(
 
 // MARK: - Running the process
 
+/// The text that stands before the unique part of a standard-input file's name.
+private let standardInputFileNamePrefix = "acp-client-stdin-"
+
 /// Writes the bytes a run gets on its standard input into a temporary file.
 ///
 /// - Parameter data: The bytes to give the run.
 /// - Returns: The file URL of the temporary file; the caller removes it.
 /// - Throws: The write failure of the temporary file.
 private func writeStandardInputFile(_ data: Data) throws -> URL {
-    let file = FileManager.default.temporaryDirectory
-        .appendingPathComponent("acp-client-stdin-\(UUID().uuidString)")
-    try data.write(to: file, options: .atomic)
-    return file
+    try writeTemporaryFile(data, prefix: standardInputFileNamePrefix)
 }
 
 /// Reads one file handle to its end.
