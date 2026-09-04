@@ -78,6 +78,128 @@ comments:
       raw `String?` until `openSession()`, which is the `throws` member that can
       report a path that is not absolute.
   timestamp: 2026-09-04T17:13:40.136284+00:00
+- actor: claude-code
+  id: 01m1ppz3ezchf526d6gj0zeq1p
+  text: |-
+    ### review — findings
+    - scope: `review sha b0c412e~1..b0c412e` (the diffs only)
+    - engine: 7 validators attempted, 0 findings
+    - evidence: 3 directed findings — Sources/acp-client/AgentSession.swift:174, Tests/FoundationModelsACPClientTests/AgentSessionTests.swift:178, Tests/FoundationModelsACPClientTests/AgentSessionTests.swift:192
+    - judgement: both source-asserted acceptance rows are testable by behaviour. The cadence row needs an injected clock on `connect`. The spawn row can read `ProcessRegistry.global`. `closeSession(_:)` hides no failure from the exit code, but its `catch` is wider than its comment and it misreports every error that is not `methodNotFound`.
+    - next: fix the three items, then re-run the review on the new commit.
+  timestamp: 2026-09-04T17:20:22.495647+00:00
+- actor: claude-code
+  id: 01m1ppzz12zvfjxfzfebx2pksj
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 4 files (AgentSession.swift new, AcpClient.swift, AgentSessionTests.swift new, ScriptedStubAgent.swift)
+    - test: green — `timeout 420 swift test`, 171 passed in 10 suites, 0 failures, 0 warnings
+    - commit: b0c412e feat(acp-client): add AgentSession connect-and-initialize seam
+    - review: findings — AgentSession.swift:174, AgentSessionTests.swift:178, AgentSessionTests.swift:192
+
+    The review refuted BOTH "cannot be tested behaviourally" claims:
+    - the cadence CAN be tested — this repo already has `ManualClock` in CoalescingTests.swift, which resumes at once when the deadline is not later than now. Against it, `.zero` flushes and the 33ms default does not. It needs a defaulted `clock:` seam on `AgentSession.connect`.
+    - the no-spawn claim CAN be tested — every spawn registers its pid in the shared `ProcessRegistry.global`, so a `.serialized` test can snapshot the registry and expect no new member. The string scan is fragile both ways: it breaks if a doc comment writes `AgentProcess`, and it misses a spawn under another name.
+  timestamp: 2026-09-04T17:20:50.722262+00:00
+- actor: claude-code
+  id: 01m1pq630edcdnnbbya656rxd0
+  text: |
+    ### Research for the three review findings
+
+    Read before writing code:
+
+    - `ManualClock` in `Tests/FoundationModelsACPClientTests/CoalescingTests.swift`
+      is internal, not `private`, so `AgentSessionTests.swift` can use it in the
+      same test target.
+    - `ACPSessionState.scheduleFlushIfNeeded()` calls
+      `clock.sleep(for: cadence, tolerance: nil)`. The default `Clock` method turns
+      that into `sleep(until: now.advanced(by: cadence))`. With a `.zero` cadence
+      the deadline equals `now`, and `ManualClock` resumes at once. With the 33 ms
+      default the deadline is later, and a manual clock that never advances never
+      resumes. So the cadence IS behavioural, exactly as the review says.
+    - The behavioural cadence test must send the chunk ALONE. `replyThenIdle` ends
+      with `idleState`, and a `state_update` flushes the buffer synchronously, so a
+      script with the idle update would pass under either cadence.
+    - `ProcessRegistry.global.registeredPids` gives a `Set<pid_t>` snapshot.
+      `FoundationModelsExtras` is already a dependency of the unit test target, so
+      the registry test needs only an import.
+    - No unit test in this package spawns a process: `AgentProcessTests.swift` and
+      `AgentCommandResolverTests.swift` both state that the spawning suite lives in
+      the nested `IntegrationTests` package. The `ProcessRegistryTests.swift` the
+      review named is in the `FoundationModelsExtras` checkout, not in this repo.
+    - **`RequestError` is NOT an enum.** It is `typealias RequestError = ACPError`,
+      a struct with a `code: ErrorCode` field, and `methodNotFound(_:)` is a static
+      factory function. So `catch RequestError.methodNotFound` cannot be a catch
+      pattern. The refusal must be recognized as
+      `catch let error as RequestError where error.code == .methodNotFound`.
+      `ErrorCode` is `Hashable`, so the comparison is available.
+    - To reach the "every other error" branch from a test, `ScriptedStubAgent` must
+      be able to answer `session/close` with an error other than `methodNotFound`.
+  timestamp: 2026-09-04T17:24:11.406481+00:00
+- actor: claude-code
+  id: 01m1pr2msb4bcc81nczx3abd95
+  text: |
+    ### implement — changed
+
+    - evidence: 3 files.
+      - `Sources/acp-client/AgentSession.swift` — a defaulted
+        `clock: any Clock<Duration> = ContinuousClock()` on `connect(over:terminal:)`
+        and on `init(over:terminal:cwd:)`, given to
+        `SwiftUIACPClient(coalescingCadence:clock:)`; and `closeSession(_:)` now
+        catches the `methodNotFound` refusal on its own and reports every other
+        error as `session/close failed: \(error)`.
+      - `Tests/FoundationModelsACPClientTests/AgentSessionTests.swift` — both
+        source scans of the two acceptance rows are gone, replaced by behavioural
+        tests; one more test for the second `closeSession(_:)` branch.
+      - `Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift` — a
+        `closeSessionError: RequestError = .methodNotFound("session/close")`
+        parameter, so a test can make the stub answer with an other code.
+    - `timeout 420 swift test`: 172 tests in 11 suites passed, 0 failures, 0
+      skipped. `swift build --build-tests`: 0 warnings.
+    - next: `/review`.
+
+    How each finding was removed:
+
+    1. **`AgentSession.swift:174`** — `closeSession(_:)` now reads
+       `catch let error as RequestError where error.code == .methodNotFound` for
+       the refusal, and a plain `catch` for the rest. **`RequestError` is a
+       struct, not an enum** (`typealias RequestError = ACPError`, with
+       `methodNotFound(_:)` a static factory), so `catch RequestError.methodNotFound`
+       is not a legal catch pattern; the code field is what carries the identity.
+       The doc comment now states both branches and names what each one means.
+    2. **`AgentSessionTests.swift:178`** — the `AgentProcess` / `Process(` /
+       `posix_spawn` / `SubprocessTransport` string scan is deleted. In its place
+       a `@Suite(.serialized) struct AgentSessionSpawnTests` snapshots
+       `ProcessRegistry.global.registeredPids`, builds the seam, runs
+       `initialize()` and `openSession()`, and expects `subtracting(before)` to be
+       empty. The test target already depends on `FoundationModelsExtras`, so only
+       an import was needed.
+    3. **`AgentSessionTests.swift:192`** — the `coalescingCadence: .zero` string
+       scan is deleted. In its place the harness takes the injected clock, and
+       `aStreamedChunkLandsInTheContainerWithNoFlush` drives one
+       `agent_message_chunk` (the script holds NO idle update, because a
+       `state_update` flushes synchronously and would pass under any cadence) and
+       expects the text on `container.session(for:)` with no `flushPendingChunks()`.
+
+    Proof each new test can fail (the red step, run one at a time and reverted):
+
+    - `coalescingCadence: .zero` changed to the 33 ms default →
+      `aStreamedChunkLandsInTheContainerWithNoFlush` failed after 10.013 s.
+    - the two `catch` clauses folded back into one →
+      `anyOtherCloseErrorIsReportedAsAFailure` failed with 2 issues, and
+      `aMethodNotFoundCloseIsReportedAsUnanswered` still passed.
+
+    Notes for the next agent:
+
+    - The stdout scan inside
+      `theLoggerWritesToTheTerminalLayerAndNeverToStandardOutput` stays. The review
+      did not raise it, and finding 3 names the same scan in `DecliningClientTests`
+      as the accepted pattern for that assertion.
+    - `swiftformat --lint` and `swiftlint` report nothing new for these three
+      files. The `sortImports`, `blankLinesBetweenImports`, `unusedArguments` and
+      `closure_parameter_position` reports are repo-wide and already present on
+      files this change does not touch.
+  timestamp: 2026-09-04T17:39:47.115448+00:00
 depends_on:
 - 01M1MQF486GZVCQNZCMS2KDE0R
 - 01M1MPDTZVEP8XEEWQJVP0Y75Z
@@ -148,3 +270,18 @@ as a comment, and note that `probe` uses it too.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 12:14)
+
+> Scope: `review sha b0c412e~1..b0c412e` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+> Engine fleet: 7 validators attempted, 0 findings. The items below come from
+> the directed review of the two acceptance rows that assert against the source,
+> and of `closeSession(_:)`.
+
+- [x] `Sources/acp-client/AgentSession.swift:174` `directed/correctness` — The `catch` clause is wider than the contract that the comment above it gives. The comment permits only a `methodNotFound` refusal. The clause catches every error, and writes `session/close was not answered` for each one. An agent that answers `invalidParams` or `internalError` did answer. A `ConnectionError` means the agent went away. A `CancellationError` on the Ctrl-C path also reads as `not answered`. This does not hide a real failure from the exit code: `closeSession(_:)` returns nothing, no caller reads a result, and a dead agent stays visible on `container.connectionState`. But the event line misreports every error that is not `methodNotFound`. Catch `RequestError.methodNotFound` and keep the present wording for it. Report every other error as `session/close failed: \(error)`.
+- [x] `Tests/FoundationModelsACPClientTests/AgentSessionTests.swift:178` `directed/tests` — The reason for the source assertion is too strong. Every process this package starts registers its pid in the shared `ProcessRegistry.global` (`Sources/FoundationModelsACPClient/AgentProcess.swift:11-14`). Thus a test can record the registry members, build the seam, run `initialize()` and `openSession()`, and expect no new member. Put that test in a `.serialized` suite, because a parallel suite can add a pid to the same global registry. The text scan is also fragile in two directions: it fails when a comment writes the word `AgentProcess`, although no behaviour changed; it passes when a new spawn uses a name that the list does not hold. Add the registry test, because the registry test is the assertion that the acceptance row makes.
+- [x] `Tests/FoundationModelsACPClientTests/AgentSessionTests.swift:192` `directed/tests` — The reason for the source assertion is not correct. `ManualClock.sleep(until:tolerance:)` continues immediately when the deadline is not later than the current time (`Tests/FoundationModelsACPClientTests/CoalescingTests.swift:129`). Thus a `.zero` cadence flushes against a manual clock that the test never moves forward, and the 33 ms default does not flush. Such a test has no time limit and cannot be flaky. The test is not possible today only because `AgentSession.connect(over:terminal:)` builds the container with the default `ContinuousClock`. Add a `clock: any Clock<Duration> = ContinuousClock()` parameter to `connect(over:terminal:)` and to `init(over:terminal:cwd:)`, and give it to `SwiftUIACPClient(coalescingCadence:clock:)`. Then replace the source scan with a test that sends one `agent_message_chunk` through the in-memory pair and expects the text on `container.session(for:)` with no call to `flushPendingChunks()`.

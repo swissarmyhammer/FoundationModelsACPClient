@@ -77,12 +77,19 @@ struct AgentSession {
     ///     answer text.
     ///   - cwd: The `--cwd` value, or `nil` for the process working
     ///     directory.
+    ///   - clock: The clock that schedules the container's coalesced flushes.
+    ///     A test injects a manual clock, so it reads no wall clock.
     init(
         over transport: any ACPTransport,
         terminal: TerminalOutput,
-        cwd: String?
+        cwd: String?,
+        clock: any Clock<Duration> = ContinuousClock()
     ) async {
-        let (container, connection) = await Self.connect(over: transport, terminal: terminal)
+        let (container, connection) = await Self.connect(
+            over: transport,
+            terminal: terminal,
+            clock: clock
+        )
         self.container = container
         self.connection = connection
         output = terminal
@@ -104,13 +111,16 @@ struct AgentSession {
     ///   - transport: The bidirectional transport to run over.
     ///   - terminal: The layer that receives the diagnostics and the
     ///     refusals.
+    ///   - clock: The clock that schedules the container's coalesced flushes.
+    ///     A test injects a manual clock, so it reads no wall clock.
     /// - Returns: The container and the connection that drives the agent.
     static func connect(
         over transport: any ACPTransport,
-        terminal: TerminalOutput
+        terminal: TerminalOutput,
+        clock: any Clock<Duration> = ContinuousClock()
     ) async -> (SwiftUIACPClient, ClientSideConnection) {
         // A zero cadence, because §8 writes each chunk as it arrives.
-        let container = SwiftUIACPClient(coalescingCadence: .zero)
+        let container = SwiftUIACPClient(coalescingCadence: .zero, clock: clock)
         let connection = await container.connect(over: transport, logger: terminal.logger) {
             served in
             DecliningClient(container: served, output: terminal)
@@ -159,20 +169,31 @@ struct AgentSession {
         return (response.sessionId, connection.updates(for: response.sessionId))
     }
 
-    /// Asks the agent to close one session, and reports a refusal rather than
-    /// raising it.
+    /// Asks the agent to close one session, and reports what came back rather
+    /// than raising it.
     ///
-    /// `session/close` is optional on the wire, and an agent that does not
-    /// implement it answers `methodNotFound`. The binary already has the
-    /// answer it ran for by the time it closes, so a refusal here changes no
-    /// exit code. It is written as one event line, which `--verbose` shows.
+    /// The binary already has the answer it ran for by the time it closes, so
+    /// nothing that happens here changes an exit code, and a dead agent stays
+    /// visible on ``SwiftUIACPClient/connectionState``. What happens here is
+    /// one event line, which `--verbose` shows.
+    ///
+    /// The two lines are not one line. `session/close` is optional on the
+    /// wire, and an agent that does not implement it answers `methodNotFound`:
+    /// that agent gave the call no answer of its own, and the line says so.
+    /// Every other error is a different fact — an `invalidParams` or
+    /// `internalError` answer IS an answer, a `ConnectionError` means the
+    /// agent went away, and a `CancellationError` means this binary is on its
+    /// way out — so each of those is reported as a failed call that names the
+    /// error.
     ///
     /// - Parameter sessionId: The session to close.
     func closeSession(_ sessionId: SessionId) async {
         do {
             _ = try await connection.closeSession(CloseSessionRequest(sessionId: sessionId))
-        } catch {
+        } catch let error as RequestError where error.code == .methodNotFound {
             output.event("session/close was not answered: \(error)")
+        } catch {
+            output.event("session/close failed: \(error)")
         }
     }
 

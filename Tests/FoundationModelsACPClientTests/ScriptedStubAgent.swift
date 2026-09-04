@@ -14,6 +14,11 @@ import FoundationModelsACP
 /// prompts. Every other session method stays unanswered: no test needs one,
 /// and a stub that answers a method it does not model would hide a mistake.
 ///
+/// `session/close` refuses with the error the test chose. The default is the
+/// `methodNotFound` refusal an agent that does not implement the optional
+/// method sends, and a test that drives the other branch of
+/// `AgentSession.closeSession(_:)` asks for an error with an other code.
+///
 /// A stub built with an elicitation asks the client for that elicitation
 /// before it sends the script. The prompt turn then ends only after the
 /// client answered, which is how a test proves that a headless client
@@ -50,6 +55,9 @@ final class ScriptedStubAgent: Agent {
     /// for none.
     private let elicitation: CreateElicitationRequest?
 
+    /// The error this stub answers `session/close` with.
+    private let closeSessionError: RequestError
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -58,16 +66,19 @@ final class ScriptedStubAgent: Agent {
     ///   - script: The updates to send during the prompt turn.
     ///   - elicitation: The elicitation to ask for at the start of the
     ///     prompt turn, or `nil` to ask for none.
+    ///   - closeSessionError: The error to answer `session/close` with.
     init(
         connection: AgentSideConnection,
         session: SessionId,
         script: [SessionUpdate],
-        elicitation: CreateElicitationRequest? = nil
+        elicitation: CreateElicitationRequest? = nil,
+        closeSessionError: RequestError = .methodNotFound("session/close")
     ) {
         self.connection = connection
         self.session = session
         self.script = script
         self.elicitation = elicitation
+        self.closeSessionError = closeSessionError
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -91,7 +102,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
-        throw RequestError.methodNotFound("session/close")
+        throw closeSessionError
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {

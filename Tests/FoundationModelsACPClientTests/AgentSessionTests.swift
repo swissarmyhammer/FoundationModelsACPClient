@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import FoundationModelsExtras
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -39,12 +40,19 @@ private let relativeCwd = "Sources"
 /// The absolute `--cwd` value the tests pass through unchanged.
 private let absoluteCwd = "/usr/share"
 
+/// The one reply chunk the stub agent streams during a prompt turn.
+private let stubReplyChunk = agentChunk(text: stubReplyText, message: stubMessageID.rawValue)
+
 /// The update script the stub agent sends during one prompt turn: one reply
 /// chunk, then the idle state that ends the turn.
-private let replyThenIdle: [SessionUpdate] = [
-    agentChunk(text: stubReplyText, message: stubMessageID.rawValue),
-    idleState(stopReason: .endTurn)
-]
+private let replyThenIdle: [SessionUpdate] = [stubReplyChunk, idleState(stopReason: .endTurn)]
+
+/// The update script that holds the reply chunk alone, with no turn end.
+///
+/// A `state_update` flushes the coalescing buffer synchronously, so a script
+/// that carried the idle update would land its text under any cadence and
+/// would prove nothing about the cadence the seam chose.
+private let replyChunkAlone: [SessionUpdate] = [stubReplyChunk]
 
 /// One malformed ndJSON line, which makes the connection's codec write a
 /// diagnostic through the logger this seam gave it.
@@ -87,11 +95,16 @@ private struct AgentSessionHarness {
     ///   - cwd: The `--cwd` value, or `nil` for the process working
     ///     directory.
     ///   - verbosity: The verbosity to build the terminal layer with.
+    ///   - closeSessionError: The error the stub answers `session/close`
+    ///     with.
+    ///   - clock: The clock that schedules the container's coalesced flushes.
     init(
         script: [SessionUpdate] = [],
         elicitation: CreateElicitationRequest? = nil,
         cwd: String? = nil,
-        verbosity: TerminalVerbosity = .normal
+        verbosity: TerminalVerbosity = .normal,
+        closeSessionError: RequestError = .methodNotFound("session/close"),
+        clock: any Clock<Duration> = ContinuousClock()
     ) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let builtAgents = ThreadSafeBuffer<ScriptedStubAgent>()
@@ -101,7 +114,8 @@ private struct AgentSessionHarness {
                 connection: connection,
                 session: testSession,
                 script: script,
-                elicitation: elicitation
+                elicitation: elicitation,
+                closeSessionError: closeSessionError
             )
             builtAgents.append(stub)
             return stub
@@ -115,7 +129,8 @@ private struct AgentSessionHarness {
                 isStandardErrorATerminal: { false },
                 sink: { buffer.append($0) }
             ),
-            cwd: cwd
+            cwd: cwd,
+            clock: clock
         )
     }
 
@@ -171,27 +186,59 @@ func anAgentSessionInitializesOverTheInjectedTransport() async throws {
     await harness.teardown()
 }
 
-/// The caller owns the `AgentProcess`, so this file must name no way to start
-/// one. A behavioural test cannot prove the absence of a spawn — a spawn that
-/// happened would simply add a process nobody looked for — so the source
-/// itself is the assertion.
-@Test func theAgentSessionNamesNoWayToStartAProcess() throws {
-    let source = try RepositoryFile.read(relativePath: agentSessionSourcePath)
-    for name in ["AgentProcess", "Process(", "posix_spawn", "SubprocessTransport"] {
-        #expect(!source.contains(name), "AgentSession.swift names \"\(name)\".")
+/// The caller owns the agent process, so this seam starts none, and the
+/// absence of a spawn is observable rather than a matter of reading the
+/// source.
+///
+/// Every process this package starts registers its pid in the shared
+/// `ProcessRegistry.global` — see the header of `AgentProcess.swift` — and
+/// deregisters it only after the teardown killed and reaped the group. So a
+/// spawn this seam made would still be a member of that registry while the
+/// seam is live.
+///
+/// The suite is serialized because that registry is process-wide: a test that
+/// ran beside this one and spawned a process of its own could add a pid
+/// between the snapshot and the assertion.
+@Suite(.serialized)
+struct AgentSessionSpawnTests {
+    /// Building the seam, negotiating with `initialize`, and opening a
+    /// session adds no member to the process registry.
+    @MainActor @Test(.timeLimit(.minutes(1)))
+    func drivingTheSeamRegistersNoProcess() async throws {
+        let before = ProcessRegistry.global.registeredPids
+
+        let harness = await AgentSessionHarness()
+        _ = try await harness.openedSession()
+
+        #expect(ProcessRegistry.global.registeredPids.subtracting(before).isEmpty)
+        await harness.teardown()
     }
 }
 
 /// §8 wants each chunk written as it arrives, so the container this seam
-/// builds coalesces nothing.
+/// builds coalesces nothing, and one streamed chunk lands in the container
+/// with no flush of the test's own.
 ///
-/// The source is the assertion here for the same reason `DecliningClientTests`
-/// scans for a stdout writer: the cadence is not readable back off the
-/// container, and a timing assertion that could tell a zero cadence from the
-/// 33 ms default would need a bound too tight to survive a loaded machine.
-@Test func theContainerIsBuiltWithAZeroCoalescingCadence() throws {
-    let source = try RepositoryFile.read(relativePath: agentSessionSourcePath)
-    #expect(source.contains("coalescingCadence: .zero"))
+/// The manual clock is what makes the cadence observable with no wall-clock
+/// reading. `ManualClock.sleep(until:tolerance:)` resumes at once when the
+/// deadline is not later than the current time, so the scheduled flush of a
+/// `.zero` cadence runs against a clock this test never moves forward, and
+/// the flush of the 33 ms default never runs. The test therefore has no time
+/// bound to tune and cannot be flaky.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func aStreamedChunkLandsInTheContainerWithNoFlush() async throws {
+    let harness = await AgentSessionHarness(script: replyChunkAlone, clock: ManualClock())
+
+    let (sessionId, _) = try await harness.openedSession()
+    try await harness.prompt(sessionId)
+
+    let state = harness.session.container.session(for: sessionId)
+    #expect(
+        await eventually {
+            state.messageContent(for: stubMessageID) == [textBlock(stubReplyText)]
+        }
+    )
+    await harness.teardown()
 }
 
 /// The connection serves the declining wrapper, so an elicitation is refused
@@ -314,12 +361,30 @@ func theLoggerWritesToTheTerminalLayerAndNeverToStandardOutput() async throws {
 /// its answer. The refusal is reported at `--verbose` and swallowed
 /// otherwise, so no exit path turns on it.
 @MainActor @Test(.timeLimit(.minutes(1)))
-func closingASessionTheAgentDoesNotImplementIsNotAFailure() async throws {
+func aMethodNotFoundCloseIsReportedAsUnanswered() async throws {
     let harness = await AgentSessionHarness(verbosity: .verbose)
     let (sessionId, _) = try await harness.openedSession()
 
     await harness.session.closeSession(sessionId)
 
-    #expect(harness.buffer.text.contains("session/close"))
+    #expect(harness.buffer.text.contains("session/close was not answered"))
+    await harness.teardown()
+}
+
+/// An agent that answers `session/close` with any other error DID answer, so
+/// the event line must report a failure and must not say that the call went
+/// unanswered. `invalidParams` stands for every such answer.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func anyOtherCloseErrorIsReportedAsAFailure() async throws {
+    let harness = await AgentSessionHarness(
+        verbosity: .verbose,
+        closeSessionError: .invalidParams
+    )
+    let (sessionId, _) = try await harness.openedSession()
+
+    await harness.session.closeSession(sessionId)
+
+    #expect(harness.buffer.text.contains("session/close failed"))
+    #expect(!harness.buffer.text.contains("was not answered"))
     await harness.teardown()
 }
