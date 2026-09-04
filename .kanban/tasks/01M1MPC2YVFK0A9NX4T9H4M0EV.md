@@ -47,12 +47,32 @@ comments:
     - evidence: 3 files — Sources/acp-client/ExitCode.swift (new), Sources/acp-client/AcpClient.swift (usageExitCode removed, processExitCode now returns AcpClientExitCode.usage.rawValue), Tests/FoundationModelsACPClientTests/ExitCodeTests.swift (new, 8 tests). `swift test`: 161 tests in 10 suites, 0 failures. Clean-scratch `swift build --build-tests`: 0 warnings, 0 errors. Every acceptance row and every test row on the card is checked.
     - next: /review
   timestamp: 2026-09-04T16:59:01.751644+00:00
+- actor: claude-code
+  id: 01m1pnzv2bcsbv0h1g2cbdjka4
+  text: |
+    ### review — clean
+    - evidence: `review sha 7548c23~1..7548c23` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. 3 files reviewed.
+    - checked the bare-exit-literal scan in ExitCodeTests.swift for vacuity: two `#require` guards (files not empty, ExitCode.swift present) run before the assertion, and `codeOnly(in:)` removes comments and string literals only, and puts back one newline for each newline it removes. Code lines stay, and line numbers stay true. The scan can fail.
+    - the three recorded judgment calls (usage case moved into ExitCode.swift, AcpClientTimeout not Equatable, forDoctorStatus not a reuse miss) drew no finding from the engine.
+    - next: none. Task moved to done.
+  timestamp: 2026-09-04T17:03:18.091978+00:00
+- actor: claude-code
+  id: 01m1pp0kyzt9w33mym58zwpbfw
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files; the `usageExitCode` overlap from ^7mdbwg8 resolved by MOVING the constant into ExitCode.swift as the `usage` case, so no exception was needed. Both wire facts verified: StopReason has six cases including `unknown(String)` and is not CaseIterable; `IdleStateUpdate.stopReason` is optional and maps to exit 0.
+    - test: green — 161 passed in 10 suites, 0 failures, 0 warnings
+    - commit: 7548c23 feat(acp-client): map every outcome to the exit code table
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    The review confirmed the bare-exit-literal scan is not vacuous: two `try #require` guards fail loudly on an empty file list, comment/string stripping preserves line numbers, and `Int32` cannot supply a match because there is no word boundary between `t` and `3`.
+  timestamp: 2026-09-04T17:03:43.583781+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPARCGY1FHKNED47MDBWG8
 - 01M1MQEQYES0VD3F76KB55RRZ5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9480'
 title: Map every outcome to the exit code table
 ---
 ## What

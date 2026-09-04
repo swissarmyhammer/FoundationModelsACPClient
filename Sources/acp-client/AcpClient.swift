@@ -13,6 +13,13 @@ import Foundation
 /// suite imports this target.
 @main
 struct AcpClient: AsyncParsableCommand {
+    /// The name of this binary on the command line.
+    ///
+    /// One constant, so the usage text the parser prints and the name
+    /// ``AgentSession/initialize()`` reports to the agent can never disagree
+    /// about what this binary calls itself.
+    static let commandName = "acp-client"
+
     /// The command-line configuration of the root command.
     ///
     /// `version:` is what answers `--version`, so the flag can report nothing
@@ -24,7 +31,7 @@ struct AcpClient: AsyncParsableCommand {
     /// `--` separator, and without one the binary prints the usage to stderr
     /// and exits 2.
     static let configuration = CommandConfiguration(
-        commandName: "acp-client",
+        commandName: Self.commandName,
         abstract: "Runs one turn against any ACP v2 agent and prints the answer.",
         version: AcpClientVersion.current,
         subcommands: [RunCommand.self, ProbeCommand.self, DoctorCommand.self],

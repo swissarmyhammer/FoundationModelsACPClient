@@ -18,12 +18,30 @@ import FoundationModelsACP
 /// before it sends the script. The prompt turn then ends only after the
 /// client answered, which is how a test proves that a headless client
 /// refuses at once rather than waiting for a person.
+///
+/// The stub records the working directory of each `session/new` it answered,
+/// because `--cwd` is the session's working directory and the wire request is
+/// the only place that value is observable. `AgentSessionTests` reads
+/// ``lastWorkingDirectory`` to assert the path the binary resolved.
 final class ScriptedStubAgent: Agent {
     /// The connection back to the client.
     private let connection: AgentSideConnection
 
     /// The session that the script belongs to.
     private let session: SessionId
+
+    /// The working directory of each `session/new` this stub answered, in
+    /// arrival order.
+    ///
+    /// The connection serves `session/new` on a task of its own, so the
+    /// record must tolerate a write from a thread other than the test body's.
+    private let workingDirectories = ThreadSafeBuffer<AbsolutePath>()
+
+    /// The working directory of the last `session/new` this stub answered, or
+    /// `nil` when it answered none.
+    var lastWorkingDirectory: AbsolutePath? {
+        workingDirectories.elements.last
+    }
 
     /// The updates to send, in order, when a prompt arrives.
     private let script: [SessionUpdate]
@@ -60,7 +78,8 @@ final class ScriptedStubAgent: Agent {
     }
 
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-        NewSessionResponse(sessionId: session)
+        workingDirectories.append(params.cwd)
+        return NewSessionResponse(sessionId: session)
     }
 
     func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
