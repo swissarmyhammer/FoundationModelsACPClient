@@ -45,10 +45,29 @@ comments:
     - evidence: 2 files — Sources/acp-client/PromptSource.swift (new), Tests/FoundationModelsACPClientTests/PromptSourceTests.swift (new). `swift test`: 85 tests in 4 suites passed, 0 failures, 0 warnings. Acceptance row not completed: "RunCommand maps noPromptAndStdinIsATerminal to the usage text on stderr and exit code 2, with stdout empty" — `RunCommand` does not exist yet and belongs to ^7mdbwg8 / ^0e160t.
     - next: /review
   timestamp: 2026-09-04T13:17:44.227498+00:00
+- actor: claude-code
+  id: 01m1p9a3nvawpb1gre0x70e12h
+  text: |-
+    ### review — clean
+    - evidence: `review sha c2057dc~1..c2057dc` — zero new findings. counts: findings 0, confirmed 0, refuted 0, attempted 7, failed 0. Files reviewed: Sources/acp-client/PromptSource.swift, Tests/FoundationModelsACPClientTests/PromptSourceTests.swift. The four `.kanban/` files of the commit are excluded by `.reviewignore`. No prior `## Review Findings` section on the card, so nothing was open.
+    - note: the acceptance row "RunCommand maps noPromptAndStdinIsATerminal to the usage text on stderr and exit code 2" stays unchecked on purpose. `RunCommand` does not exist yet; it belongs to ^7mdbwg8 and ^0e160t. No stand-in was invented. This is correct sequencing, and it does not hold this card back.
+    - next: none — moved to done.
+  timestamp: 2026-09-04T13:21:43.099302+00:00
+- actor: claude-code
+  id: 01m1p9ahh1fs1ms62830hgxns1
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (Sources/acp-client/PromptSource.swift, Tests/FoundationModelsACPClientTests/PromptSourceTests.swift)
+    - test: green — `swift package clean && swift test`, 85 passed, 0 failed, 0 skipped, 0 warnings; `swift build --product acp-client` clean
+    - commit: c2057dc feat(acp-client): add PromptSource for the §7 prompt-source table
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    One acceptance row was deliberately left unmet: "RunCommand maps noPromptAndStdinIsATerminal to the usage text on stderr and exit 2". `RunCommand` does not exist yet. That row is a contract ^7mdbwg8 (subcommand tree) and ^0e160t (wire RunCommand) owe, and it is recorded in the doc comment on the error case. No stand-in was invented.
+  timestamp: 2026-09-04T13:21:57.281188+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8d80
 title: Resolve where the prompt comes from
 ---
 ## What

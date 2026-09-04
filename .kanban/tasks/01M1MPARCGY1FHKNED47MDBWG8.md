@@ -65,10 +65,42 @@ comments:
       the two rows the comment above explains; the third run was green.
     - next: /review.
   timestamp: 2026-09-04T13:37:40.505344+00:00
+- actor: claude-code
+  id: 01m1pagbbrny9r98taac8s7jh8
+  text: |-
+    ### review — clean
+    - evidence: `review sha 27e5c56~1..27e5c56` — 9 files reviewed, 7 validators
+      attempted, 0 failed, 0 skipped. findings 0, confirmed 0, refuted 0. Zero new
+      findings. The description has no earlier `## Review Findings` section, and
+      every acceptance and test item on the card is checked.
+    - 2 files not reviewed: `.kanban/tasks/01M1MPARCGY1FHKNED47MDBWG8.jsonl` and
+      `.md`, both excluded by the `.reviewignore` rule for `.kanban/`.
+    - The two recorded decisions were in scope and drew no finding:
+      1. `AcpClient.processExitCode(for:)` in
+         `Sources/acp-client/AcpClient.swift` maps only `.validationFailure` to
+         `usageExitCode` (2) and returns `parserExitCode.rawValue` for every other
+         class. ArgumentParser's `exitCode(for:)` stays the classifier. Rows 3, 4,
+         5 and 124 of §9 remain with ^9h4m0ev.
+      2. `@testable import acp_client` in `CommandParsingTests.swift` and
+         `AcpClientVersionTests.swift` follows the import `PromptSourceTests.swift`
+         already used before this change.
+    - next: none. The task is in `done`.
+  timestamp: 2026-09-04T13:42:36.152108+00:00
+- actor: claude-code
+  id: 01m1pagx087jnc9c06vcqcrw9t
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 9 files under Sources/acp-client/ and Tests/; all 8 acceptance rows met
+    - test: green — `swift package clean && swift test`, 100 passed, 0 failed, 0 skipped, 0 warnings; binary checks: `--help` exit 0 on stdout, `--version` prints 0.1.0, `run "hi"` without `--` exits 2 with empty stdout
+    - commit: 27e5c56 feat(acp-client): build the subcommand tree, the -- separator, and usage errors
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    Carried forward for ^9h4m0ev (exit code table): this task added `AcpClient.usageExitCode` and `AcpClient.processExitCode(for:)` in Sources/acp-client/AcpClient.swift, because ArgumentParser's own `exitCode(for:)` answers 64 (EX_USAGE) where §9 pins 2. That is the seam ^9h4m0ev extends. Its acceptance row "no file outside ExitCode.swift holds a bare numeric exit literal" must account for `usageExitCode`, either by moving the constant into ExitCode.swift or by naming the exception.
+  timestamp: 2026-09-04T13:42:54.216827+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8e80'
 title: Build the acp-client subcommand tree, the -- separator and the usage errors
 ---
 ## What
