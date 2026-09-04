@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModelsACP
-import Synchronization
 import Testing
 
 @testable import acp_client
@@ -62,32 +61,13 @@ private enum TeeBytes {
     }
 }
 
-/// A thread-safe append-only list.
-///
-/// The tee writes from its forwarding task while the test body reads, so the
-/// captures cannot be plain arrays.
-private final class Recorder<Element: Sendable>: Sendable {
-    /// Everything appended so far, in order.
-    private let storage = Mutex<[Element]>([])
-
-    /// Appends one element.
-    ///
-    /// - Parameter element: The element to record.
-    func append(_ element: Element) {
-        storage.withLock { $0.append(element) }
-    }
-
-    /// Everything appended so far, in order.
-    var elements: [Element] {
-        storage.withLock { $0 }
-    }
-}
-
 /// A ``FrameTeeTransport`` wired over an in-memory transport pair, with every
 /// teed line and every byte that crossed it captured.
 ///
 /// The two reader tasks start in `init`, so a chunk written before the test
-/// body reads anything is still recorded.
+/// body reads anything is still recorded. The tee writes from its forwarding
+/// task while the test body reads, so each capture is a ``ThreadSafeBuffer``
+/// and not a plain array.
 private final class TeeHarness: Sendable {
     /// The end of the pair that stands for the agent.
     private let agentEnd: InMemoryTransport
@@ -99,13 +79,13 @@ private final class TeeHarness: Sendable {
     let tee: FrameTeeTransport
 
     /// Every line the tee gave its sink, in order.
-    private let sinkLines: Recorder<String>
+    private let sinkLines: ThreadSafeBuffer<String>
 
     /// Every chunk the consumer read from the tee, in order.
-    private let consumedChunks: Recorder<Data>
+    private let consumedChunks: ThreadSafeBuffer<Data>
 
     /// Every chunk that reached the agent end, in order.
-    private let agentChunks: Recorder<Data>
+    private let agentChunks: ThreadSafeBuffer<Data>
 
     /// Reads the tee's byte stream to its end.
     private let consumer: Task<Void, any Error>
@@ -115,9 +95,9 @@ private final class TeeHarness: Sendable {
 
     /// Builds the pair, the tee over it, and the two readers.
     init() {
-        let lines = Recorder<String>()
-        let consumed = Recorder<Data>()
-        let reachingAgent = Recorder<Data>()
+        let lines = ThreadSafeBuffer<String>()
+        let consumed = ThreadSafeBuffer<Data>()
+        let reachingAgent = ThreadSafeBuffer<Data>()
         let (agent, client) = InMemoryTransport.pair()
         let transport = FrameTeeTransport(wrapping: client) { lines.append($0) }
         let teeBytes = transport.bytes

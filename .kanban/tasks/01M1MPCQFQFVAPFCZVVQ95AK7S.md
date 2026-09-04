@@ -51,6 +51,84 @@ comments:
     - evidence: 4 files. New `Sources/acp-client/TerminalOutput.swift`, new `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift` (16 tests), new `Tests/FoundationModelsACPClientTests/SwiftImports.swift` (shared import reader), and `Tests/FoundationModelsACPClientTests/ForbiddenImportTests.swift` edited to call the shared reader. `swift build --build-tests`: 0 errors, 0 warnings. `swift test`: 135 tests in 8 suites, all pass, 0 failures, 0 warnings, 0 skipped. All three Noora notes on the card were checked against `.build/checkouts/Noora` and all three hold. Every acceptance row and every test row is done. Three deviations are recorded above, each forced by the resolved code: `withSpinner` is `async throws` because `rethrows` does not compile over `progressStep`; `Terminal` takes `signalBehavior: .none` because the default writes to stdout and steals Ctrl-C; the type name shadows `FoundationModelsACP.TerminalOutput`, which the file header records.
     - next: `/review`
   timestamp: 2026-09-04T14:36:04.615723+00:00
+- actor: claude-code
+  id: 01m1pe0wwc1kfepp3wvmscc1am
+  text: |
+    ### review — findings
+    - evidence: `review sha d0ffb5e~1..d0ffb5e`. 1 finding, 1 confirmed, 0 refuted, 7 attempted. `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift:38` — `StandardErrorBuffer` repeats `Recorder<Element>` of `FrameTeeTransportTests.swift`.
+    - next: extract the shared buffer, then `/review` again.
+
+    **The three recorded decisions, each judged.**
+
+    1. **`withSpinner` is `async throws`, not the card's `async rethrows` — accepted.** The compiler diagnostic is correct and the rule is a language rule: a `rethrows` function may throw only what its own closure parameter threw, and `Noora.progressStep` is declared `async throws`, so the call is unconditional. The card's prose cannot be obeyed. The reason is in the doc comment of `withSpinner`, so the next reader does not try again.
+
+    2. **`Terminal(signalBehavior: .none)` — accepted, and it is the card's own rule.** The default `.restoreAndExit` prints a cursor escape to **stdout** and then `exit(0)`. §8 gives stdout to the answer text and to nothing else, so the default breaks the rule this file exists to keep. It also takes Ctrl-C from ^KCCB56C, which owes exit code 4. The card names three Noora hazards; this is a fourth of the same kind, and the file header records it beside the other three.
+
+    3. **The `TerminalOutput` name shadows `FoundationModelsACP.TerminalOutput` — accepted, but the stated reason is wrong.** The claim was "no file imports both modules". `Tests/FoundationModelsACPClientTests/FrameTeeTransportTests.swift` imports `FoundationModelsACP` and `acp_client` together, today. The name stays unambiguous only because that file never writes `TerminalOutput`. Inside `Sources/acp-client/` the local type wins the lookup, which is why `TerminalOutput.swift` compiles while it imports `FoundationModelsACP` itself. So the shadowing is safe, but the guard is a rule about the name, not a fact about the imports: a file that imports both modules must write `FoundationModelsACP.TerminalOutput` in full. That rule now sits under the finding, because the suggested shared buffer is used from the file that imports both.
+
+    **The acceptance rows about `withSpinner` still hold as implemented.** Both rows ask about behaviour, not about the signature word.
+
+    - "With `isStandardErrorATerminal` false, `withSpinner` emits zero bytes, and `body` still runs, receives a working no-op line closure, and returns its value." — `withSpinnerWritesNothingOutsideATerminal` asserts all four in one test. The `guard` returns `try await body { _ in }` before any Noora call, so no byte can leave.
+    - "One test asserts `withSpinner` returns the body's value and rethrows the body's error, under both terminal states." — four tests cover the four cells: the value outside a terminal and in one, the error outside a terminal and in one. `throws` propagates the body's error exactly as `rethrows` would, so the row's word "rethrows" reads as the behaviour and the behaviour is proved.
+  timestamp: 2026-09-04T14:44:04.108618+00:00
+- actor: claude-code
+  id: 01m1pe1k4twj9kbfp93fxszbv7
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 4 files; all three Noora notes on the card held against .build/checkouts/Noora, plus a fourth hazard found and handled (Terminal's default signalBehavior .restoreAndExit prints to stdout and exits)
+    - test: green — `swift package clean && swift test`, 135 passed, 0 failed, 0 skipped, 0 warnings; `swift build --product acp-client` clean
+    - commit: d0ffb5e feat(acp-client): build the stderr terminal layer on Noora
+    - review: findings — Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift:38, `StandardErrorBuffer` repeats the `Recorder<Element>` of FrameTeeTransportTests.swift
+
+    Correction the review made to the implement report: "no file imports both modules" is false — FrameTeeTransportTests.swift already imports FoundationModelsACP and acp_client together. The `TerminalOutput` name stays unambiguous only because that file never writes it. So a shared test buffer used from that file must spell `FoundationModelsACP.TerminalOutput` in full.
+  timestamp: 2026-09-04T14:44:26.906971+00:00
+- actor: claude-code
+  id: 01m1pedek2gsv3s0mnjy5m2cm1
+  text: |
+    Worked the open review finding: `StandardErrorBuffer` of `TerminalOutputTests.swift` repeated the `Recorder<Element>` of `FrameTeeTransportTests.swift`.
+
+    **The fix, as the finding named it.** A new shared test-support file,
+    `Tests/FoundationModelsACPClientTests/ThreadSafeBuffer.swift`, holds one
+    `final class ThreadSafeBuffer<Element: Sendable>: Sendable` over
+    `Mutex<[Element]>`, with `append(_:)` and `elements`. An extension
+    `where Element == String` gives `text`, which is the `joined()` the finding
+    asked the shared type to carry. Both copies are deleted. The finding named
+    one line; the cause is gone from both files, and a grep of `Tests/` finds no
+    other Mutex-backed append-and-read container. The `Mutex` uses that stay are
+    scalar state — a Boolean flag in `PromptSourceTests` and `SessionStateTests`,
+    a counter in `CoalescingTests`, a manual clock in `CoalescingTests` — and none
+    of them is an append-only list.
+
+    **The trap the reviewer recorded was checked and it does not fire.**
+    `ThreadSafeBuffer.swift` imports `Synchronization` alone, and it names no type
+    of `FoundationModelsACP` and no type of `acp_client`. So the file that uses it
+    and imports both packages, `FrameTeeTransportTests.swift`, still never writes
+    the bare name `TerminalOutput`, and the two modules' `TerminalOutput` types
+    stay unambiguous there. The rule is written into the header of the new file,
+    so the next reader who adds to it knows to spell
+    `FoundationModelsACP.TerminalOutput` in full.
+
+    **Both files also drop `import Synchronization`**, which the extraction leaves
+    unused. Neither file has any other use of that module.
+
+    **The extraction was proved load-bearing by a mutation, not by argument.**
+    With `append(_:)` made a no-op, `swift test` failed with 17 issues across BOTH
+    suites: 6 in "acp-client stderr terminal layer" (the success mark, the error
+    mark, the in-place cursor escape, the two `event` lines and the `error` line)
+    and 11 in "acp-client ndJSON frame tee" (every teed-line and every byte
+    assertion). That is the proof that one type now carries both callers. The
+    mutation was reverted and the suite is green again.
+
+    No production source changed. The three deviations recorded on the earlier
+    implement pass stand untouched.
+  timestamp: 2026-09-04T14:50:55.458224+00:00
+- actor: claude-code
+  id: 01m1pedm2wtb3z5x10jt9zgxmk
+  text: |
+    ### implement — changed
+    - evidence: 3 files. New `Tests/FoundationModelsACPClientTests/ThreadSafeBuffer.swift` (the shared `ThreadSafeBuffer<Element>` plus its `where Element == String` `text`); `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift` (deletes `StandardErrorBuffer`, drops `import Synchronization`, harness holds a `ThreadSafeBuffer<String>`); `Tests/FoundationModelsACPClientTests/FrameTeeTransportTests.swift` (deletes `Recorder<Element>`, drops `import Synchronization`, `TeeHarness` holds `ThreadSafeBuffer<String>` and two `ThreadSafeBuffer<Data>`). `swift build --build-tests`: 0 errors, 0 warnings. `swift test`: 135 tests in 8 suites, all pass, 0 failures, 0 warnings, 0 skipped. The one open review finding is now `- [x]`, and no finding stays open.
+    - next: `/review`
+  timestamp: 2026-09-04T14:51:01.084900+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 position_column: doing
@@ -150,3 +228,20 @@ target that imports Noora**, so a later swap costs one file (§5):
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 09:39)
+
+> Scope: `review sha d0ffb5e~1..d0ffb5e` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/TerminalOutputTests.swift:38` `reuse/reuse` — StandardErrorBuffer reinvents the thread-safe append-only container pattern that already exists as Recorder<Element> in FrameTeeTransportTests.swift. Both use identical Mutex-backed storage with append and read-access methods. Extract both StandardErrorBuffer and Recorder<Element> to a shared test utility (e.g. ThreadSafeBuffer<Element>) that both test files can reuse, or generalize Recorder<Element> to support both use cases (generic elements + optional transformation like joined()).
+
+### Note for the fix of the item above
+
+`FrameTeeTransportTests.swift` imports both `FoundationModelsACP` and
+`acp_client`. A shared buffer file must not write the bare name
+`TerminalOutput`, because that name is in both modules. Write
+`FoundationModelsACP.TerminalOutput` in full when the wire model is the one
+you want.

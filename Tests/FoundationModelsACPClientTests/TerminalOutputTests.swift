@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 import Testing
 
 @testable import acp_client
@@ -31,32 +30,14 @@ import Testing
 // and it belongs to the `--frames` integration task ^3CAT35C: stdout holds the
 // answer bytes only, while a spinner runs.
 
-/// A thread-safe text buffer that stands for standard error.
+/// A ``TerminalOutput`` over a buffer sink, and the buffer it writes to.
 ///
 /// Noora's spinner draws from a timer thread of its own while the test body
-/// runs, so the capture cannot be a plain `String`.
-private final class StandardErrorBuffer: Sendable {
-    /// Every chunk the sink received, in order.
-    private let chunks = Mutex<[String]>([])
-
-    /// Records one chunk exactly as the sink received it.
-    ///
-    /// - Parameter chunk: The text to record, with nothing added and nothing
-    ///   removed.
-    func append(_ chunk: String) {
-        chunks.withLock { $0.append(chunk) }
-    }
-
-    /// Every byte written so far, end to end.
-    var text: String {
-        chunks.withLock { $0.joined() }
-    }
-}
-
-/// A ``TerminalOutput`` over a buffer sink, and the buffer it writes to.
+/// runs, so the buffer that stands for standard error is a
+/// ``ThreadSafeBuffer`` and not a plain `String`.
 private struct TerminalOutputHarness {
-    /// Everything the layer wrote.
-    let buffer: StandardErrorBuffer
+    /// Everything the layer wrote, in the chunks the sink received.
+    let buffer: ThreadSafeBuffer<String>
 
     /// The value under test.
     let output: TerminalOutput
@@ -68,7 +49,7 @@ private struct TerminalOutputHarness {
     ///   - standardErrorIsATerminal: The answer the injected terminal reading
     ///     gives, which stands in for `isatty` on file descriptor 2.
     init(verbosity: TerminalVerbosity, standardErrorIsATerminal: Bool) {
-        let buffer = StandardErrorBuffer()
+        let buffer = ThreadSafeBuffer<String>()
         self.buffer = buffer
         output = TerminalOutput(
             verbosity: verbosity,
