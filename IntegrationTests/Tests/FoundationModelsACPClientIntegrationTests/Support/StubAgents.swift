@@ -46,7 +46,7 @@ let stubAgentDefaultAnswer = "Hello from the stub agent."
 /// that breaks it fails in a way that looks like a parsing bug in OUR client.
 let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 
-// MARK: - The three stub agents
+// MARK: - The stub agents
 
 /// Writes a stub agent that answers every request `cli-plan.md` §14 needs.
 ///
@@ -58,18 +58,56 @@ let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 /// - Parameters:
 ///   - answer: The reply text to stream during the prompt turn.
 ///   - stopReason: The stop reason to end the turn with.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+///   - transcript: Where the agent appends every request line it reads, or
+///     `nil` to record none.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeWellBehavedAgent(
     answer: String = stubAgentDefaultAnswer,
-    stopReason: StopReason = .endTurn
+    stopReason: StopReason = .endTurn,
+    pidFile: String? = nil,
+    transcript: String? = nil
 ) throws -> String {
-    try writeAgentScript(requestLoop(answer: answer, stopReason: stopReason))
+    try writeAgentScript(
+        requestLoop(
+            answer: answer,
+            stopReason: stopReason,
+            pidFile: pidFile,
+            transcript: transcript
+        )
+    )
+}
+
+/// Writes a stub agent that ends its turn with an `idle` carrying no stop
+/// reason at all.
+///
+/// `IdleStateUpdate.stopReason` is optional, and the schema says "Omitted or
+/// `null` both mean the agent is not reporting a stop reason". An agent that
+/// went idle without saying why still went idle, so this is a completed turn,
+/// and `cli-plan.md` §9 gives it the same row as `end_turn`. Nothing but a real
+/// agent that omits the member can prove a client reads it that way, which is
+/// what this stub is.
+///
+/// - Parameters:
+///   - answer: The reply text to stream during the prompt turn.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeIdleWithoutStopReasonAgent(
+    answer: String = stubAgentDefaultAnswer,
+    pidFile: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(answer: answer, stopReason: nil, pidFile: pidFile, transcript: nil)
+    )
 }
 
 /// Writes a stub agent that puts one non-JSON banner line on stdout before its
 /// first ndJSON message, and behaves as
-/// ``makeWellBehavedAgent(answer:stopReason:)`` after that.
+/// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:)`` after that.
 ///
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
@@ -77,7 +115,12 @@ func makeBannerOnStdoutAgent() throws -> String {
     try writeAgentScript(
         """
         \(printfLine(stubAgentBannerLine))
-        \(requestLoop(answer: stubAgentDefaultAnswer, stopReason: .endTurn))
+        \(requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: nil,
+            transcript: nil
+        ))
         """
     )
 }
@@ -162,12 +205,24 @@ private let promptAnswerID = 3
 ///
 /// - Parameters:
 ///   - answer: The reply text to stream during the prompt turn.
-///   - stopReason: The stop reason to end the turn with.
+///   - stopReason: The stop reason to end the turn with, or `nil` for an `idle`
+///     that reports no stop reason at all.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+///   - transcript: Where the agent appends every request line it reads, or
+///     `nil` to record none.
 /// - Returns: The script text.
 /// - Throws: A JSON-encoding failure.
-private func requestLoop(answer: String, stopReason: StopReason) throws -> String {
+private func requestLoop(
+    answer: String,
+    stopReason: StopReason?,
+    pidFile: String?,
+    transcript: String?
+) throws -> String {
     """
+    \(recordPidStatement(writingTo: pidFile))
     while IFS= read -r line; do
+      \(recordRequestStatement(appendingTo: transcript))
       case "$line" in
         *'"method":"initialize"'*)
           \(try printfLine(initializeAnswer()))
@@ -183,6 +238,35 @@ private func requestLoop(answer: String, stopReason: StopReason) throws -> Strin
       esac
     done
     """
+}
+
+/// Renders the shell statement that records the agent's own pid.
+///
+/// `$$` is the pid of the shell running the script, and that shell is what
+/// ``AgentProcess`` spawned, so a test that reads the file afterwards learns
+/// the pid to probe. `cli-plan.md` §11 lets no agent outlive the run, and a pid
+/// read back from a file is the only way to check that from outside the run.
+///
+/// - Parameter path: Where to write the pid, or `nil` to write none.
+/// - Returns: One shell statement, or the empty string.
+private func recordPidStatement(writingTo path: String?) -> String {
+    guard let path else { return "" }
+    return "printf '%s\\n' \"$$\" > \(shellSingleQuoted(path))"
+}
+
+/// Renders the shell statement that appends the request line just read to a
+/// transcript file.
+///
+/// A `/bin/sh` agent has no JSON parser, so it cannot answer WITH what it was
+/// sent. Writing each raw request line to a file is what lets a test assert
+/// what reached the agent — the prompt text among it.
+///
+/// - Parameter path: Where to append each request line, or `nil` to record
+///   none.
+/// - Returns: One shell statement, or the empty string.
+private func recordRequestStatement(appendingTo path: String?) -> String {
+    guard let path else { return "" }
+    return "printf '%s\\n' \"$line\" >> \(shellSingleQuoted(path))"
 }
 
 /// The `initialize` answer: the protocol version this client supports, the
@@ -240,18 +324,22 @@ private func messageChunk(_ answer: String) throws -> String {
     ])
 }
 
-/// One `state_update` carrying `idle` and the stop reason, which is what ends
-/// the turn.
+/// One `state_update` carrying `idle`, which is what ends the turn, and the
+/// stop reason where the caller chose one.
 ///
-/// - Parameter stopReason: The stop reason to report.
+/// The member is left OUT for a `nil` stop reason rather than written as
+/// `null`. The schema reads the two the same way, and a real agent that reports
+/// no reason omits the member, so the omission is the case worth scripting.
+///
+/// - Parameter stopReason: The stop reason to report, or `nil` to report none.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func idleState(_ stopReason: StopReason) throws -> String {
-    try sessionUpdate([
-        "sessionUpdate": "state_update",
-        "state": "idle",
-        "stopReason": stopReason.wireValue,
-    ])
+private func idleState(_ stopReason: StopReason?) throws -> String {
+    var update: [String: Any] = ["sessionUpdate": "state_update", "state": "idle"]
+    if let stopReason {
+        update["stopReason"] = stopReason.wireValue
+    }
+    return try sessionUpdate(update)
 }
 
 /// Wraps one update in the `session/update` notification the wire expects.

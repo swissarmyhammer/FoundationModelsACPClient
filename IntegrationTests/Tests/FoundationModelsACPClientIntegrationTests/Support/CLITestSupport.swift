@@ -13,6 +13,12 @@ import Foundation
 // builds. A test target cannot share source with a target in an other package,
 // so the port is a copy on purpose, in the same way as the two copies of
 // `TransportTestSupport.swift`.
+//
+// The runner opens the child's standard input rather than sharing this
+// process's, because the prompt-source table of `cli-plan.md` §7 turns on what
+// `isatty(3)` says about that one descriptor. A test process cannot make its
+// OWN standard input a terminal, so the terminal row is reached by opening a
+// pseudo-terminal and handing the child its slave end.
 
 /// The product name of the CLI these suites run, as `../Package.swift` declares
 /// it.
@@ -32,6 +38,9 @@ enum CLITestSupportError: Error, CustomStringConvertible {
 
     /// A run of `arguments` was still going when `limit` ended.
     case runTimedOut(arguments: [String], limit: Duration)
+
+    /// A pseudo-terminal could not be opened, and `errno` says why.
+    case pseudoTerminalUnavailable(errno: Int32)
 
     /// A human-readable description of this error.
     var description: String {
@@ -58,8 +67,37 @@ enum CLITestSupportError: Error, CustomStringConvertible {
                 `\(acpClientExecutableName) \(arguments.joined(separator: " "))` was still running \
                 after \(limit); it was killed so the suite could go on.
                 """
+        case .pseudoTerminalUnavailable(let errno):
+            return """
+                No pseudo-terminal could be opened (errno \(errno)), so no run can be given a \
+                standard input that isatty(3) calls a terminal.
+                """
         }
     }
+}
+
+/// What a bounded `acp-client` run gets on its standard input.
+///
+/// The three cases are the three descriptors the prompt-source table of
+/// `cli-plan.md` §7 tells apart: an empty pipe, a file holding the prompt, and
+/// a terminal.
+///
+/// The terminal case is why this is a value and not a `Data?`. A test process
+/// cannot make its OWN standard input a terminal, and it must not touch the
+/// descriptor the test runner owns, so the only way to reach the §7 row that
+/// turns on `isatty` is to open a pseudo-terminal and hand the child its slave
+/// end.
+enum CLIStandardInput {
+    /// An immediate end of file, which `isatty` reads as not a terminal.
+    case endOfFile
+
+    /// These bytes, from a regular file, which `isatty` reads as not a
+    /// terminal.
+    case bytes(Data)
+
+    /// A pseudo-terminal, which `isatty` reads as a terminal and which holds no
+    /// bytes to read.
+    case terminal
 }
 
 /// One finished `acp-client` run.
@@ -107,24 +145,21 @@ func acpClientBinaryURL() throws -> URL {
 ///
 /// - Parameters:
 ///   - arguments: The command-line arguments for `acp-client`.
-///   - standardInput: The bytes to give the run on its standard input, or `nil`
-///     to give it an immediate end of file.
+///   - standardInput: What the run gets on its standard input. The default is
+///     an immediate end of file.
 ///   - environment: The whole environment for the run, or `nil` to inherit this
 ///     process's own.
 /// - Returns: The finished run.
-/// - Throws: A locator error, a spawn or file-system failure, or
+/// - Throws: A locator error, a spawn or file-system failure,
+///   ``CLITestSupportError/pseudoTerminalUnavailable(errno:)``, or
 ///   ``CLITestSupportError/runTimedOut(arguments:limit:)``.
 func runAcpClient(
     _ arguments: [String],
-    standardInput: Data? = nil,
+    standardInput: CLIStandardInput = .endOfFile,
     environment: [String: String]? = nil
 ) async throws -> CLIResult {
-    let inputFile = try standardInput.map { try writeStandardInputFile($0) }
-    defer {
-        if let inputFile {
-            try? FileManager.default.removeItem(at: inputFile)
-        }
-    }
+    let input = try StandardInputSource(standardInput)
+    defer { input.tearDown() }
 
     let process = Process()
     process.executableURL = try acpClientBinaryURL()
@@ -132,11 +167,7 @@ func runAcpClient(
     if let environment {
         process.environment = environment
     }
-    // A regular file rather than a pipe: the run reads it with no writer on the
-    // other end, so nothing here can block on a full pipe buffer and nothing can
-    // write to a binary that has already exited.
-    process.standardInput = try inputFile.map { try FileHandle(forReadingFrom: $0) }
-        ?? FileHandle.nullDevice
+    process.standardInput = input.handle
     let standardOutputPipe = Pipe()
     let standardErrorPipe = Pipe()
     process.standardOutput = standardOutputPipe
@@ -268,6 +299,71 @@ private func productsDirectory(
 /// The text that stands before the unique part of a standard-input file's name.
 private let standardInputFileNamePrefix = "acp-client-stdin-"
 
+/// The descriptor one run reads its standard input from, and the cleanup that
+/// descriptor owes.
+///
+/// It is a value of its own because the three cases of ``CLIStandardInput``
+/// open three different things and each has to be given back: a temporary file
+/// is removed, a pseudo-terminal master is closed, and the null device is
+/// neither.
+private struct StandardInputSource {
+    /// The handle the run reads its standard input from.
+    let handle: FileHandle
+
+    /// The temporary file behind ``handle``, or `nil` when there is none.
+    private let file: URL?
+
+    /// The master end of the pseudo-terminal behind ``handle``, or `nil` when
+    /// there is none.
+    ///
+    /// It stays open for the whole run. Closing the master hangs the slave up,
+    /// and a hung-up slave is no longer the terminal the run has to see.
+    private let pseudoTerminalMaster: Int32?
+
+    /// Opens the standard input one run asked for.
+    ///
+    /// The bytes go into a regular file rather than a pipe: the run reads it
+    /// with no writer on the other end, so nothing here can block on a full
+    /// pipe buffer and nothing can write to a binary that has already exited.
+    ///
+    /// - Parameter standardInput: What the run gets on its standard input.
+    /// - Throws: The write failure of the temporary file, or
+    ///   ``CLITestSupportError/pseudoTerminalUnavailable(errno:)``.
+    init(_ standardInput: CLIStandardInput) throws {
+        switch standardInput {
+        case .endOfFile:
+            handle = FileHandle.nullDevice
+            file = nil
+            pseudoTerminalMaster = nil
+        case .bytes(let data):
+            let written = try writeStandardInputFile(data)
+            file = written
+            handle = try FileHandle(forReadingFrom: written)
+            pseudoTerminalMaster = nil
+        case .terminal:
+            let pseudoTerminal = try openPseudoTerminal()
+            handle = FileHandle(fileDescriptor: pseudoTerminal.slave, closeOnDealloc: true)
+            pseudoTerminalMaster = pseudoTerminal.master
+            file = nil
+        }
+    }
+
+    /// Closes the pseudo-terminal and removes the temporary file, where this
+    /// source opened either.
+    ///
+    /// The removal is best effort: the run has already finished by the time a
+    /// caller tears down, and a temporary file that outlives one run is not a
+    /// reason to fail a test that otherwise passed.
+    func tearDown() {
+        if let pseudoTerminalMaster {
+            close(pseudoTerminalMaster)
+        }
+        if let file {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
 /// Writes the bytes a run gets on its standard input into a temporary file.
 ///
 /// - Parameter data: The bytes to give the run.
@@ -275,6 +371,40 @@ private let standardInputFileNamePrefix = "acp-client-stdin-"
 /// - Throws: The write failure of the temporary file.
 private func writeStandardInputFile(_ data: Data) throws -> URL {
     try writeTemporaryFile(data, prefix: standardInputFileNamePrefix)
+}
+
+/// Opens a pseudo-terminal and gives back both of its ends.
+///
+/// The child reads its standard input from the slave end, and `isatty(3)` calls
+/// that end a terminal. That is the one reading a regular file and a pipe both
+/// fail, and it is what the third row of the prompt-source table of
+/// `cli-plan.md` §7 turns on.
+///
+/// - Returns: The master end, which the caller holds open for the whole run,
+///   and the slave end, which the child reads.
+/// - Throws: ``CLITestSupportError/pseudoTerminalUnavailable(errno:)``.
+private func openPseudoTerminal() throws -> (master: Int32, slave: Int32) {
+    let master = posix_openpt(O_RDWR | O_NOCTTY)
+    guard master >= 0 else {
+        throw CLITestSupportError.pseudoTerminalUnavailable(errno: errno)
+    }
+    do {
+        // `errno` is read at the throw, before the `catch` runs any call of its
+        // own, so each failure below reports the call that really failed.
+        guard grantpt(master) == 0, unlockpt(master) == 0, let name = ptsname(master) else {
+            throw CLITestSupportError.pseudoTerminalUnavailable(errno: errno)
+        }
+        let slave = open(name, O_RDWR | O_NOCTTY)
+        guard slave >= 0 else {
+            throw CLITestSupportError.pseudoTerminalUnavailable(errno: errno)
+        }
+        return (master, slave)
+    } catch {
+        // Nothing took the master over, and a suite that opens one per test
+        // cannot afford to leak it.
+        close(master)
+        throw error
+    }
 }
 
 /// Reads one file handle to its end.

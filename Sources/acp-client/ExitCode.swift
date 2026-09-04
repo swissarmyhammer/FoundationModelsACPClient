@@ -71,6 +71,19 @@ enum AcpClientExitCode: Int32, Sendable, CaseIterable {
     /// number reads this binary with no change.
     case timeout = 124
 
+    /// This row as the parser's own exit value.
+    ///
+    /// A subcommand body ends its run by throwing this. ArgumentParser reads an
+    /// `ExitCode` error as an empty message and the number it carries, so
+    /// `exit(withError:)` prints nothing and exits with exactly this row —
+    /// leaving standard output to the answer text, as `cli-plan.md` §8 requires.
+    ///
+    /// This is the one member of the target that turns a row into a number, so
+    /// the §9 table stays in this file and no command body spells a literal.
+    var parserExitCode: ExitCode {
+        ExitCode(rawValue)
+    }
+
     /// The exit code of an `idle` that reports no stop reason at all.
     ///
     /// `IdleStateUpdate.stopReason` is optional, and the schema says "Omitted

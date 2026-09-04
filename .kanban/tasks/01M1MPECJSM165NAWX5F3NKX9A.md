@@ -137,11 +137,31 @@ comments:
     - new work raised: `^pxhvwd6` — fold `AgentProcessTests` onto the shared writer and remove the `acp-agent-*` scripts it leaves in the temporary directory.
     - next: `/review`.
   timestamp: 2026-09-04T18:43:57.485858+00:00
+- actor: claude-code
+  id: 01m1pw0ck2fwdsc064ecs8sdnb
+  text: |-
+    ### review — clean
+    - evidence: `review sha caf248e~1..caf248e` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. 4 files reviewed. All 4 prior findings of 2026-09-04 13:31 are checked and verified in the code: stubAgentSilenceLimitSeconds at CLITestSupportTests.swift:24; makeWellBehavedAgent, makeBannerOnStdoutAgent and makeSilentAgent at StubAgents.swift:63, 76 and 94; writeTemporaryFile at Support/TemporaryFiles.swift:27, called by CLITestSupport.swift:277 and StubAgents.swift:121.
+    - next: none. Task moved doing -> review -> done. AgentProcessTests.swift stays outside this change; task ^1pvpbvh holds its near-copy.
+  timestamp: 2026-09-04T18:48:27.490008+00:00
+- actor: claude-code
+  id: 01m1pw13nyf0r1kbmew5ywt4v3
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 4 files; all four findings removed at the cause (named seconds constant; all THREE builders took the `make` prefix, not just the two named; one shared `writeTemporaryFile` in a new Support/TemporaryFiles.swift replaces the duplicated UUID-and-path logic)
+    - test: green — integration 10 passed in 3 suites, root 180 passed in 12 suites, 0 failures, 0 warnings on both
+    - commit: caf248e refactor(tests): apply the four ^f3nkx9a review findings to CLI test support
+    - review: clean — zero new findings, all four prior items confirmed in the code, task moved to done
+
+    Two things stand as the review directed, not as defects:
+    - The `--version` test asserts the semantic-version SHAPE, not `AcpClientVersion.current`. SwiftPM publishes no importable module for an executable product across a package boundary. The unit suite pins the constant and pins that `--version` reports it.
+    - `AgentProcessTests.swift` keeps its own near-copy of the script writer and was deliberately not edited; a separate task tracks it, and it also leaves stray `acp-agent-*.sh` and `acp-agent-child-*.pid` files in $TMPDIR because no test there removes what it wrote.
+  timestamp: 2026-09-04T18:48:51.134311+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPARCGY1FHKNED47MDBWG8
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9780'
 title: Add the CLI stub agents and the built-binary locator to the integration suite
 ---
 ## What
