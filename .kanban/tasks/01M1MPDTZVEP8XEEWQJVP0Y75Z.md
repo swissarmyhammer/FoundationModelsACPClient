@@ -65,6 +65,59 @@ comments:
 
     No other file in the target names any of the five, so moving them collides with nothing. The target already keeps shared builders in `SessionUpdateFixtures.swift`, so the new file follows that pattern and its name.
   timestamp: 2026-09-04T15:45:18.317458+00:00
+- actor: claude-code
+  id: 01m1pj2g29fj7zrzbxjd2j13ga
+  text: |-
+    ### Note for the next agent working the two open findings
+
+    A rules extraction that arrived after the run stopped names one trap in the obvious fix. The `swift/immutability` validator rule says **"A function belongs to a type"** — a top-level `func` is a DON'T, and the stated fix is `static func` members on an `enum` namespace, or an extension on an existing type. So a new `ElicitationFixtures.swift` holding two top-level `func` builders plus top-level `let` constants would draw a fresh finding.
+
+    Shapes that satisfy both the duplication finding and that rule:
+
+    - an `enum ElicitationFixtures` with `static func` builders and `static let` constants, or
+    - the builders as `static func` members on an existing test-support type.
+
+    Two more rules that bear on it:
+    - `swift/idioms` — do not repeat the namespace name in a member, so `ElicitationFixtures.formRequest(scope:)`, not `ElicitationFixtures.formElicitationRequest(scope:)`.
+    - `swift/access-control` — keep the members `internal` (the default). `public` would then require doc comments under `missing_docs`, and the fixtures they return are internal anyway.
+
+    The `reuse` validator's "per-case data" carve-out sanctions keeping `form…` and `url…` as two builders with a shared `scope` parameter, rather than merging them behind one lookup.
+  timestamp: 2026-09-04T15:54:50.825034+00:00
+- actor: claude-code
+  id: 01m1pkkne6n8g197wq00th5kns
+  text: |-
+    Work on the two open review findings.
+
+    New file `Tests/FoundationModelsACPClientTests/ElicitationFixtures.swift`. It is an `enum ElicitationFixtures` namespace at the default `internal` access level, with `static let` constants and two `static func` builders, as the prior note asked. A file of top-level `func` builders would have drawn a fresh `swift/immutability` finding ("A function belongs to a type"), and `public` members would have drawn `missing_docs`.
+
+    The namespace holds all five items that the two files each kept a private copy of, plus the two scope values and the two message strings that the copies wrote inline:
+
+    - `formMessage`, `urlMessage`, `nameSchema`, `urlID`, `urlString`
+    - `sessionScope` (an `ElicitationSessionScope`) and `requestScope` (an `ElicitationRequestScope`)
+    - `formRequest(scope:)` and `urlRequest(scope:)`
+
+    `ElicitationFormMode.Scope` and `ElicitationUrlMode.Scope` are two separate nested enums, so each builder takes its own scope type. A call site writes `.session(ElicitationFixtures.sessionScope)` or `.request(ElicitationFixtures.requestScope)`, which the leading dot resolves to the correct mode.
+
+    Both files now call the shared builders, and both private copies are deleted, not commented out. `completeness/invariant-propagation` needs both halves converted, so leaving `ElicitationTests.swift` on its own copy was not an option.
+
+    Two things that did not carry over unchanged, both by design:
+
+    - The `message` parameter of the old `ElicitationTests` `formElicitationRequest(message:)` is gone. No call site ever passed a value other than the default, so the parameter was dead. `formMessage` is a `static let` instead, and `aStubAgentsFormElicitationRoundTripsOverTheWire` asserts against that constant in place of the repeated `"Name the deployment"` literal. Same value, same assertion strength.
+    - In `theSessionFilterReturnsSessionScopedElicitationsOnly` the two local names are `formRequest` and `urlRequest`. The first draft used `form` and `url`, and `url` naming a `CreateElicitationRequest` reads against `swift/naming-clarity` "name by role, not type".
+
+    No assertion was weakened or removed. The suite still holds 148 tests in 8 suites, the same count as before this change.
+
+    One naming point to note for review. `swift/fluent-usage` says "Factory methods begin with `make`", which would give `makeFormRequest(scope:)`. The card names `ElicitationFixtures.formRequest(scope:)` word for word and says the fix shape is decided, so the card wins here. The same rule also says side-effect-free operations are noun phrases, and the existing shared file `SessionUpdateFixtures.swift` names its builders `textBlock`, `agentChunk` and `idleState` with no `make` prefix, so the noun-phrase form matches the target it joins.
+
+    Operational note for the next agent: no stale `swift test` process was present at the start (`pgrep -fl "swift-test|swiftpm-testing-helper|xctest"` returned nothing), and both bounded runs finished in about 4 seconds. `timeout` is at `/opt/homebrew/bin/timeout` on this machine.
+  timestamp: 2026-09-04T16:21:41.958284+00:00
+- actor: claude-code
+  id: 01m1pkkstm8dkg2asvyxkb47c9
+  text: |
+    ### implement — changed
+    - evidence: 3 files — Tests/FoundationModelsACPClientTests/ElicitationFixtures.swift (new shared `enum ElicitationFixtures` namespace), Tests/FoundationModelsACPClientTests/DecliningClientTests.swift (both private copies deleted, every call site now uses the shared builders), Tests/FoundationModelsACPClientTests/ElicitationTests.swift (same). Both `## Review Findings` rows are now checked. `timeout 420 swift test` gave 148 tests in 8 suites, 0 failures, 0 warnings.
+    - next: `/review` on the change, which moves the card into review.
+  timestamp: 2026-09-04T16:21:46.452930+00:00
 depends_on:
 - 01M1MPA245J7WHDHY133KGCG3Q
 - 01M1MPCQFQFVAPFCZVVQ95AK7S
@@ -158,5 +211,5 @@ the exact cases they define; do not invent an outcome shape.
 > 4 file(s) not reviewed — excluded by an ignore rule:
 > - `.kanban/ (from .reviewignore)` — 4 file(s)
 
-- [ ] `Tests/FoundationModelsACPClientTests/DecliningClientTests.swift:77` `reuse/reuse` — Nearly duplicates an existing test helper function with 0.97 similarity. The new code should reuse or parameterize the existing helper instead of creating a near-identical copy. Import and reuse the existing `formElicitationRequest` from ElicitationTests.swift, or move the helper to a shared test support module. If there are intentional differences in test data, parameterize the existing helper instead.
-- [ ] `Tests/FoundationModelsACPClientTests/DecliningClientTests.swift:98` `reuse/reuse` — Duplicates an existing test helper function with 1.00 similarity. The new code creates an identical helper that should be reused or shared instead of duplicated. Import and reuse the existing `urlElicitationRequest` from ElicitationTests.swift, or move the helper to a shared test support module accessible to both test files.
+- [x] `Tests/FoundationModelsACPClientTests/DecliningClientTests.swift:77` `reuse/reuse` — Nearly duplicates an existing test helper function with 0.97 similarity. The new code should reuse or parameterize the existing helper instead of creating a near-identical copy. Import and reuse the existing `formElicitationRequest` from ElicitationTests.swift, or move the helper to a shared test support module. If there are intentional differences in test data, parameterize the existing helper instead.
+- [x] `Tests/FoundationModelsACPClientTests/DecliningClientTests.swift:98` `reuse/reuse` — Duplicates an existing test helper function with 1.00 similarity. The new code creates an identical helper that should be reused or shared instead of duplicated. Import and reuse the existing `urlElicitationRequest` from ElicitationTests.swift, or move the helper to a shared test support module accessible to both test files.

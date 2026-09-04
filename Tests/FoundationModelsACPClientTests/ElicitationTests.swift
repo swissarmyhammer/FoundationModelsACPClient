@@ -10,61 +10,16 @@ import Testing
 // agent's in-flight call with the spec's action object. Cancellation,
 // agent withdrawal, connection drop, and `elicitation/complete` clear
 // the pending state and release each continuation.
-
-/// The form schema that each test form request carries: one required
-/// "name" string.
-private let nameSchema = ElicitationSchema(
-    properties: .object(["name": .object(["type": .string("string")])]),
-    required: ["name"]
-)
-
-/// Makes a form-mode elicitation request scoped to the test session.
-///
-/// - Parameter message: The message of the elicitation prompt.
-/// - Returns: The request, with the one-field test schema.
-private func formElicitationRequest(
-    message: String = "Name the deployment"
-) -> CreateElicitationRequest {
-    CreateElicitationRequest(
-        message: message,
-        mode: .form(
-            ElicitationFormMode(
-                requestedSchema: nameSchema,
-                scope: .session(ElicitationSessionScope(sessionId: testSession))
-            )
-        )
-    )
-}
-
-/// The elicitation id that each test URL request carries.
-private let urlElicitationID = ElicitationId(rawValue: "elicit-1")
-
-/// The URL that each test URL request points at.
-private let elicitationURLString = "https://example.test/verify"
-
-/// Makes a url-mode elicitation request scoped to a JSON-RPC request.
-///
-/// The request scope models an elicitation that arrives before any
-/// session exists, for example during authentication.
-///
-/// - Returns: The request.
-private func urlElicitationRequest() -> CreateElicitationRequest {
-    CreateElicitationRequest(
-        message: "Finish sign-in in the browser",
-        mode: .url(
-            ElicitationUrlMode(
-                elicitationId: urlElicitationID,
-                url: elicitationURLString,
-                scope: .request(ElicitationRequestScope(requestId: .string("req-1")))
-            )
-        )
-    )
-}
+//
+// The requests come from `ElicitationFixtures`, which the declining-client
+// tests of the binary share. A url request here carries the request scope,
+// which models an elicitation that arrives before any session exists, for
+// example during authentication.
 
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aFormElicitationAppearsAsPendingStateAndAcceptingResolvesTheAgentCall() async throws {
     let model = SwiftUIACPClient()
-    let request = formElicitationRequest()
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
     let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
@@ -88,8 +43,9 @@ func aFormElicitationAppearsAsPendingStateAndAcceptingResolvesTheAgentCall() asy
 @MainActor @Test(.timeLimit(.minutes(1)))
 func decliningAPendingElicitationResolvesTheAgentCallWithDecline() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let responseTask = Task { try await model.createElicitation(formElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     let pending = try #require(model.pendingElicitations.first)
@@ -103,8 +59,9 @@ func decliningAPendingElicitationResolvesTheAgentCallWithDecline() async throws 
 @MainActor @Test(.timeLimit(.minutes(1)))
 func cancellingFromTheUIResolvesTheAgentCallWithCancel() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let responseTask = Task { try await model.createElicitation(formElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     let pending = try #require(model.pendingElicitations.first)
@@ -118,8 +75,9 @@ func cancellingFromTheUIResolvesTheAgentCallWithCancel() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func cancellingTheAgentCallClearsThePendingElicitationAndResumesTheContinuation() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let responseTask = Task { try await model.createElicitation(formElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     // Task cancellation is how the connection delivers the agent's
@@ -138,8 +96,9 @@ func cancellingTheAgentCallClearsThePendingElicitationAndResumesTheContinuation(
 func connectionDropWhilePendingClearsElicitationStateCleanly() async throws {
     let model = SwiftUIACPClient()
     model.connectionState = .connected
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let responseTask = Task { try await model.createElicitation(formElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     model.connectionState = .disconnected
@@ -152,8 +111,9 @@ func connectionDropWhilePendingClearsElicitationStateCleanly() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aPendingUrlElicitationShowsTheTargetHostForTheConsentGate() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.urlRequest(scope: .request(ElicitationFixtures.requestScope))
 
-    let responseTask = Task { try await model.createElicitation(urlElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     // The container never navigates on its own. It shows the URL and the
@@ -161,8 +121,8 @@ func aPendingUrlElicitationShowsTheTargetHostForTheConsentGate() async throws {
     // navigates. The request-scoped elicitation has no session.
     let pending = try #require(model.pendingElicitations.first)
     #expect(pending.sessionId == nil)
-    #expect(pending.elicitationId == urlElicitationID)
-    #expect(pending.url == URL(string: elicitationURLString))
+    #expect(pending.elicitationId == ElicitationFixtures.urlID)
+    #expect(pending.url == URL(string: ElicitationFixtures.urlString))
     #expect(pending.targetHost == "example.test")
 
     model.cancelElicitation(pending.id)
@@ -172,12 +132,13 @@ func aPendingUrlElicitationShowsTheTargetHostForTheConsentGate() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func elicitationCompleteClosesThePendingUrlPromptWithAcceptAndNoContent() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.urlRequest(scope: .request(ElicitationFixtures.requestScope))
 
-    let responseTask = Task { try await model.createElicitation(urlElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     await model.elicitationComplete(
-        CompleteElicitationNotification(elicitationId: urlElicitationID)
+        CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
     )
 
     // The URL flow returned its data out of band. The response carries
@@ -191,8 +152,9 @@ func elicitationCompleteClosesThePendingUrlPromptWithAcceptAndNoContent() async 
 @MainActor @Test(.timeLimit(.minutes(1)))
 func elicitationCompleteWithAnUnknownIdChangesNothing() async throws {
     let model = SwiftUIACPClient()
+    let request = ElicitationFixtures.urlRequest(scope: .request(ElicitationFixtures.requestScope))
 
-    let responseTask = Task { try await model.createElicitation(urlElicitationRequest()) }
+    let responseTask = Task { try await model.createElicitation(request) }
     try await waitUntil { !model.pendingElicitations.isEmpty }
 
     await model.elicitationComplete(
@@ -208,10 +170,12 @@ func elicitationCompleteWithAnUnknownIdChangesNothing() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func theSessionFilterReturnsSessionScopedElicitationsOnly() async throws {
     let model = SwiftUIACPClient()
+    let formRequest = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
+    let urlRequest = ElicitationFixtures.urlRequest(scope: .request(ElicitationFixtures.requestScope))
 
-    let formTask = Task { try await model.createElicitation(formElicitationRequest()) }
+    let formTask = Task { try await model.createElicitation(formRequest) }
     try await waitUntil { model.pendingElicitations.count == 1 }
-    let urlTask = Task { try await model.createElicitation(urlElicitationRequest()) }
+    let urlTask = Task { try await model.createElicitation(urlRequest) }
     try await waitUntil { model.pendingElicitations.count == 2 }
 
     // Both elicitations stay pending together, in arrival order. The
@@ -271,7 +235,10 @@ private final class ElicitationStubAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        let response = try await connection.createElicitation(formElicitationRequest())
+        let request = ElicitationFixtures.formRequest(
+            scope: .session(ElicitationFixtures.sessionScope)
+        )
+        let response = try await connection.createElicitation(request)
         let actionText: String
         if case .object(let members) = response, case .string(let action) = members["action"] {
             actionText = action
@@ -311,7 +278,7 @@ func aStubAgentsFormElicitationRoundTripsOverTheWire() async throws {
     // The agent's elicitation appears as pending state on the client.
     try await waitUntil { !model.pendingElicitations.isEmpty }
     let pending = try #require(model.pendingElicitations.first)
-    #expect(pending.request.message == "Name the deployment")
+    #expect(pending.request.message == ElicitationFixtures.formMessage)
 
     // The answer resolves the agent's in-flight request, and the agent
     // reports the accept action back.

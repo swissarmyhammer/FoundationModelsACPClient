@@ -18,6 +18,9 @@ import Testing
 // Every test builds the layer over a buffer sink, so the assertions read the
 // bytes the layer wrote and the test process never touches the real standard
 // error.
+//
+// The elicitation requests come from `ElicitationFixtures`, which the
+// container's own elicitation tests share.
 
 /// The "allow" option that the permission requests here offer.
 private let allowOption = PermissionOption(
@@ -61,50 +64,6 @@ private func permissionRequest(
         sessionId: testSession,
         title: permissionTitle,
         subject: subject
-    )
-}
-
-/// The form schema that the form elicitations here carry: one required
-/// "name" string.
-private let nameSchema = ElicitationSchema(
-    properties: .object(["name": .object(["type": .string("string")])]),
-    required: ["name"]
-)
-
-/// Makes a form-mode elicitation request scoped to the test session.
-///
-/// - Returns: The request, with the one-field test schema.
-private func formElicitationRequest() -> CreateElicitationRequest {
-    CreateElicitationRequest(
-        message: "Name the deployment",
-        mode: .form(
-            ElicitationFormMode(
-                requestedSchema: nameSchema,
-                scope: .session(ElicitationSessionScope(sessionId: testSession))
-            )
-        )
-    )
-}
-
-/// The elicitation id that the url elicitations here carry.
-private let urlElicitationID = ElicitationId(rawValue: "elicit-1")
-
-/// The URL that the url elicitations here point at.
-private let elicitationURLString = "https://example.test/verify"
-
-/// Makes a url-mode elicitation request scoped to the test session.
-///
-/// - Returns: The request.
-private func urlElicitationRequest() -> CreateElicitationRequest {
-    CreateElicitationRequest(
-        message: "Finish sign-in in the browser",
-        mode: .url(
-            ElicitationUrlMode(
-                elicitationId: urlElicitationID,
-                url: elicitationURLString,
-                scope: .session(ElicitationSessionScope(sessionId: testSession))
-            )
-        )
     )
 }
 
@@ -262,8 +221,9 @@ func aPermissionRefusalNamesTheTitleWhenTheRequestCarriesNoSubject() async throw
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aFormElicitationIsDeclinedAtOnce() async throws {
     let harness = DecliningClientHarness()
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let response = try await harness.client.createElicitation(formElicitationRequest())
+    let response = try await harness.client.createElicitation(request)
 
     #expect(response == declineResponse)
     #expect(harness.buffer.text == elicitationRefusalLine(mode: formModeText))
@@ -275,8 +235,9 @@ func aFormElicitationIsDeclinedAtOnce() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aUrlElicitationIsDeclinedWithNoURLOpenedAndNoValueSentBack() async throws {
     let harness = DecliningClientHarness()
+    let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
 
-    let response = try await harness.client.createElicitation(urlElicitationRequest())
+    let response = try await harness.client.createElicitation(request)
 
     // The whole object is the decline action. It carries no "content"
     // member, so no credential goes back over ACP.
@@ -308,15 +269,16 @@ func aForwardedSessionUpdateLandsInTheContainersSessionState() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aForwardedElicitationCompleteReachesTheContainer() async throws {
     let harness = DecliningClientHarness()
+    let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
 
     // The container is the only holder of pending elicitations, so the
     // request goes to it directly. A resolution proves the notification
     // reached it through the wrapper.
-    let responseTask = Task { try await harness.container.createElicitation(urlElicitationRequest()) }
+    let responseTask = Task { try await harness.container.createElicitation(request) }
     try await waitUntil { !harness.container.pendingElicitations.isEmpty }
 
     await harness.client.elicitationComplete(
-        CompleteElicitationNotification(elicitationId: urlElicitationID)
+        CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
     )
 
     let response = try await responseTask.value
@@ -327,11 +289,12 @@ func aForwardedElicitationCompleteReachesTheContainer() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func eachRefusalWritesOneLineAtQuietToo() async throws {
     let harness = DecliningClientHarness(verbosity: .quiet)
+    let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
     _ = try await harness.client.requestPermission(
         permissionRequest(options: [allowOption, rejectOnceOption])
     )
-    _ = try await harness.client.createElicitation(formElicitationRequest())
+    _ = try await harness.client.createElicitation(request)
 
     #expect(
         harness.buffer.text
@@ -354,12 +317,15 @@ func eachRefusalWritesOneLineAtQuietToo() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func anElicitationDuringATurnStillLetsTheTurnReachItsStopReason() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let elicitation = ElicitationFixtures.formRequest(
+        scope: .session(ElicitationFixtures.sessionScope)
+    )
     let agentConnection = await AgentSideConnection(stream: agentEnd) { agentSide in
         ScriptedStubAgent(
             connection: agentSide,
             session: testSession,
             script: [idleState(stopReason: .endTurn)],
-            elicitation: formElicitationRequest()
+            elicitation: elicitation
         )
     }
     let harness = DecliningClientHarness()
