@@ -1,15 +1,15 @@
 import ArgumentParser
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 /// Pins the one version constant the binary reports, and with it the fact that
-/// the executable target is importable at all.
+/// the library holding the command-line client is importable at all.
 ///
 /// A target whose sources hold top-level code cannot be imported at all,
-/// testably or not, so the `import acp_client` above is the standing guard on
-/// `AcpClient.swift` never becoming `main.swift`. Every later unit test of the
-/// CLI rests on it.
+/// testably or not, so the `import AcpClientCore` above is the standing guard
+/// on the client staying in a library that no `main.swift` can spoil. Every
+/// later unit test of the CLI rests on it.
 @Suite("acp-client version")
 struct AcpClientVersionTests {
     /// The number of dot-separated numbers a semantic version carries.

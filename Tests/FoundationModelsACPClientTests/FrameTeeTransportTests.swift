@@ -2,7 +2,7 @@ import Foundation
 import FoundationModelsACP
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `FrameTeeTransport`, the `--frames` tee of `cli-plan.md`
 // §6.1, with one test for each acceptance row of the card.

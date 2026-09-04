@@ -109,13 +109,68 @@ comments:
       suites passed. Every acceptance row and every test row of the card is ticked.
     - next: /review
   timestamp: 2026-09-04T20:12:34.981531+00:00
+- actor: claude-code
+  id: 01m1q1dr1rvfh3j2s9scx2fc43
+  text: |-
+    ### review — clean
+    - evidence: `review sha 45a7431~1..45a7431`. 7 files reviewed, 4 excluded by
+      `.reviewignore`. 0 findings, 0 confirmed, 0 refuted. Zero prior findings, and
+      every acceptance and test row is ticked.
+    - next: none. The card is in `done`.
+
+    Three points got a direct check beyond the engine. The dated section in the
+    description holds the result. Two corrections and one note for the next reader:
+
+    - **The method is `session/resume`, not `session/load`.** The card and the
+      earlier notes say `session/load`; no such method is on the wire.
+      `ClientSideConnection` vends `resumeSession`, and no code in `Sources/` calls
+      it yet. `beginRehydration()`, `endRehydration()` and `cancelRehydration()`
+      also have no caller in `Sources/`: the library documents the HOST as the
+      caller, because ACP defines no history-invalidation signal. So a stale command
+      list cannot occur in this repository today, and it cannot occur in a host
+      either, because `endRehydration()` resets before it replays.
+    - **The new member cannot go stale, and the proof is the writer set.**
+      `availableCommands` has exactly two writers, and
+      `hasReportedAvailableCommands` has the same two:
+      `ACPSessionState.swift:311`/`312` in `resetRecordProjection()`, and
+      `ACPSessionState.swift:564`/`565` in the `available_commands_update` arm. The
+      two members are always written as a pair, so no path can separate them. The
+      reset is straight-line, with no branch that could clear one member and keep
+      the other.
+    - **Two test gaps are known, and both belong to cards that already stand.**
+      `noAgentProcessOutlivesTheProbe` covers two exit paths, the success and the
+      `initialize` refusal, which is what this card asked for. The spawn failure,
+      the `session/new` failure and the wait that ends first have no pid assertion.
+      ^m0j8r0h, "Prove no agent process outlives the run, on every exit path", is
+      the card for that. No test asserts that `endRehydration()` clears
+      `hasReportedAvailableCommands`; `RehydrationTests.swift` is where such a test
+      belongs.
+  timestamp: 2026-09-04T20:23:08.088987+00:00
+- actor: claude-code
+  id: 01m1q1eresd58d4ckqtkpvs01q
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 7 files. `probe` resolves, spawns, initializes, opens a session, waits a bounded interval for `available_commands_update`, closes the session, and writes one report to stdout. It sends no prompt.
+    - test: green — root 199 passed in 14 suites, integration 34 passed in 6 suites, 0 failures and 0 warnings on both
+    - commit: 45a7431 feat(acp-client): add probe command to report agent capabilities
+    - review: clean — zero findings, task moved to done
+
+    Three things the review established:
+    - The public API addition to `ACPSessionState` is justified, not CLI state in the library. On the wire an empty `availableCommands` carries two different facts, and a SwiftUI command menu has the same ambiguity to draw. `availableCommands` and `hasReportedAvailableCommands` have the same two writers repo-wide and are always written as a pair in a straight-line block, so no path can clear one and keep the other.
+    - The race the implementer named is real. `SessionUpdateRouter.deliver(_:)` drops an update for a session with no subscriber, and `openSession()` can subscribe only after `session/new` answers, because the subscription is keyed on the id the answer carries. `ClientSideConnection.serveNotification` calls the router first and the client second, and the client call has no subscriber gate, so the container is the race-free reader.
+    - §11 holds on every path. `AgentProcess.init` throws only before a child exists, and the spawn error path closes all four descriptors, so a spawn failure leaves nothing to reap. Everything later is covered by `defer { process.shutdown() }`, which does `killpg` then `waitpid`.
+
+    Two corrections to my own task instructions, for the record: the wire method is `session/resume`, not `session/load`; and `endRehydration()` has no caller in `Sources/`, because ACP defines no history-invalidation signal and the library documents the host as the caller.
+
+    One item carried forward, already on ^m0j8r0h: `noAgentProcessOutlivesTheProbe` asserts the pid for two exit paths only. The spawn failure, the `session/new` failure and the wait timeout have no pid assertion yet.
+  timestamp: 2026-09-04T20:23:41.273959+00:00
 depends_on:
 - 01M1MQG0S4YXS3CKAE34A9AX26
 - 01M1MPB4MKQH0Z50EH2DDJHW3G
 - 01M1MPC2YVFK0A9NX4T9H4M0EV
 - 01M1MPECJSM165NAWX5F3NKX9A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9a80
 title: 'Implement probe: report what the agent supports, and run no turn'
 ---
 ## What
@@ -198,3 +253,50 @@ agent down on every path.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 15:14)
+
+> Scope: `review sha 45a7431~1..45a7431` — reviewed the diffs only. 7 files
+> reviewed, 4 not reviewed (`.kanban/`, excluded by `.reviewignore`).
+
+The engine reports no finding. Counts: 0 findings, 0 confirmed, 0 refuted.
+
+Three points got a direct check in addition. Each one is correct.
+
+- **The new public member is library state, not CLI state.** On the wire an
+  empty `availableCommands` has two meanings, and only
+  `hasReportedAvailableCommands` tells them apart. Every other "not reported
+  yet" fact on this type uses `nil`, but `availableCommands` is a
+  non-optional array that is already public, so a parallel member is the
+  additive way to add the same fact. The name, the type and the doc comment
+  hold nothing that only the CLI can use. A SwiftUI command menu has the same
+  ambiguity to draw.
+- **The member cannot go stale.** In
+  `Sources/FoundationModelsACPClient/ACPSessionState.swift`,
+  `availableCommands` has exactly two writers: `resetRecordProjection()` line
+  311, and the `available_commands_update` arm line 564.
+  `hasReportedAvailableCommands` has the same two writers, lines 312 and 565.
+  The two members are always written together, so no third path can separate
+  them. `resetRecordProjection()` has one caller, `endRehydration()` line 282,
+  which clears and then replays the capture. Thus a `session/load` reports the
+  replayed list only, and never a stale list.
+- **The race is real, so the change of approach is correct.**
+  `Sources/acp-client/AgentSession.swift:186` awaits the `session/new` answer,
+  and line 190 subscribes only after it, because the subscription needs the
+  id that the answer carries. The doc comment at lines 170-173 records that
+  the wire package drops an update for a session with no active subscriber.
+  So an update that closely follows the answer arrives before the
+  subscription exists. To read the container is correct. The card already
+  named the container as the place to read; only the wait changed, and
+  `ProbeCommand.swift` lines 26-32 record why.
+- **`cli-plan.md` §11 holds for `probe` on every path of this commit.**
+  `Sources/acp-client/ProbeCommand.swift:141` can throw only before a child
+  exists, so a spawn failure leaves nothing to reap. Line 142,
+  `defer { process.shutdown() }`, covers every later path, an `initialize`
+  failure included. `AgentProcessState.terminateCurrent()` does `killpg` and
+  then `waitpid`, so the pid is reaped and not only signalled, and the
+  take-and-clear under the lock makes it idempotent.
+  `ProbeCommand.readReport` holds the outcome in a `Result`, so
+  `await session.teardown()` runs on both outcomes before the `defer`.
+
+No item to action.

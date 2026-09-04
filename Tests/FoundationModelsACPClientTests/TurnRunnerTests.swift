@@ -3,7 +3,7 @@ import FoundationModelsACP
 import Testing
 
 @testable import FoundationModelsACPClient
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `TurnRunner`, the turn of `cli-plan.md` §8: one prompt,
 // the answer streamed to a sink as it arrives, and the end of the turn read
@@ -15,7 +15,7 @@ import Testing
 // a pipe.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
-// both, so the binary's terminal layer is named `acp_client.TerminalOutput`
+// both, so the binary's terminal layer is named `AcpClientCore.TerminalOutput`
 // in full. The wire package's `TerminalOutput` is the ACP model of an
 // agent-owned terminal, and it has no part in these tests.
 //
@@ -162,7 +162,7 @@ private struct TurnRunnerHarness {
         let answerWrites = ThreadSafeBuffer<Data>()
         self.terminalBuffer = terminalBuffer
         self.answerWrites = answerWrites
-        let terminal = acp_client.TerminalOutput(
+        let terminal = AcpClientCore.TerminalOutput(
             verbosity: .normal,
             isStandardErrorATerminal: { standardErrorIsATerminal },
             sink: { terminalBuffer.append($0) }

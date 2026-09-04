@@ -13,9 +13,17 @@ import Testing
 /// text and pins exactly those.
 @Suite("Package manifest")
 struct ManifestTests {
-    /// The number of dependencies `cli-plan.md` §12 permits the `acp-client`
-    /// target: the library target of this package, and four products.
+    /// The number of dependencies `cli-plan.md` §12 permits the command-line
+    /// client: the library target of this package, and four products.
+    ///
+    /// They stand on `AcpClientCore` and not on the `acp-client` executable,
+    /// because that executable holds the `@main` type alone and reaches every
+    /// one of them through the library.
     private static let permittedDependencyCount = 5
+
+    /// The target of the manifest that carries the dependencies of the
+    /// command-line client.
+    private static let clientTargetName = "AcpClientCore"
 
     /// The product name of each dependency the binary must link.
     ///
@@ -42,41 +50,42 @@ struct ManifestTests {
         )
     }
 
-    @Test("the acp-client target links the wire, the parser, the terminal package and the family leaf")
+    @Test("the client target links the wire, the parser, the terminal package and the family leaf")
     func theTargetLinksEveryProductTheBinaryNeeds() throws {
         let dependencies = try Self.acpClientDependencies()
         #expect(
             Self.requiredProductNames.isSubset(of: Set(dependencies.productNames)),
             """
-            The acp-client target must name each of \
+            The \(Self.clientTargetName) target must name each of \
             \(Self.requiredProductNames.sorted()) as a product dependency. \
             It names \(dependencies.productNames.sorted()).
             """
         )
     }
 
-    @Test("the acp-client target declares exactly the five dependencies section 12 permits")
+    @Test("the client target declares exactly the five dependencies section 12 permits")
     func theTargetDeclaresFiveDependencies() throws {
         let dependencies = try Self.acpClientDependencies()
         #expect(
             dependencies.targetNames == ["FoundationModelsACPClient"],
             """
-            The acp-client target must take this package's own library target, \
-            and no other target. It takes \(dependencies.targetNames).
+            The \(Self.clientTargetName) target must take this package's own \
+            library target, and no other target. \
+            It takes \(dependencies.targetNames).
             """
         )
         #expect(
             dependencies.targetNames.count + dependencies.productNames.count
                 == Self.permittedDependencyCount,
             """
-            cli-plan.md section 12 permits the acp-client target five \
-            dependencies. It declares \(dependencies.targetNames) and \
-            \(dependencies.productNames).
+            cli-plan.md section 12 permits the command-line client five \
+            dependencies. \(Self.clientTargetName) declares \
+            \(dependencies.targetNames) and \(dependencies.productNames).
             """
         )
     }
 
-    @Test("the acp-client target names no forbidden module")
+    @Test("the client target names no forbidden module")
     func theTargetNamesNoForbiddenModule() throws {
         let dependencies = try Self.acpClientDependencies()
         let named = Set(
@@ -85,7 +94,8 @@ struct ManifestTests {
         #expect(
             named.isDisjoint(with: forbiddenModules),
             """
-            The acp-client target must name none of \(forbiddenModules.sorted()). \
+            The \(Self.clientTargetName) target must name none of \
+            \(forbiddenModules.sorted()). \
             It names \(named.intersection(forbiddenModules).sorted()).
             """
         )
@@ -136,22 +146,24 @@ struct ManifestTests {
     }
 
     /// Reads `Package.swift` and returns the dependency entries the
-    /// `acp-client` executable target declares.
+    /// ``clientTargetName`` library target declares.
     ///
     /// - Returns: the entries, split by form.
     /// - Throws: an error when the manifest cannot be read, or when it declares
-    ///   no `acp-client` executable target.
+    ///   no such library target.
     private static func acpClientDependencies() throws -> TargetDependencies {
         let manifest = try RepositoryFile.read(relativePath: "Package.swift")
         // The dependency array holds no `]` of its own, so everything up to the
-        // first closing bracket is the whole list.
+        // first closing bracket is the whole list. `.target(` cannot match
+        // `.executableTarget(`, because that name carries no dot before its
+        // capital `T`.
         let dependencyList =
-            /\.executableTarget\(\s*name:\s*"acp-client",\s*dependencies:\s*\[(?<entries>[^\]]*)\]/
+            /\.target\(\s*name:\s*"AcpClientCore",\s*dependencies:\s*\[(?<entries>[^\]]*)\]/
         let match = try #require(
             manifest.firstMatch(of: dependencyList),
             """
             Package.swift must declare \
-            `.executableTarget(name: "acp-client", dependencies: [...])`.
+            `.target(name: "\(Self.clientTargetName)", dependencies: [...])`.
             """
         )
         let entries = String(match.entries)

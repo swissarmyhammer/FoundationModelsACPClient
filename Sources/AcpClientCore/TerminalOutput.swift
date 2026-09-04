@@ -2,8 +2,8 @@
 // one file of this target that imports Noora.
 //
 // §5 keeps the terminal package behind a single file, so a later swap costs
-// one file. `TerminalOutputTests` pins that: it walks `Sources/acp-client/`
-// and fails when a second file names Noora.
+// one file. `TerminalOutputTests` pins that: it walks both source directories
+// of the command-line client and fails when a second file names Noora.
 //
 // The rule this file exists to keep is absolute. Every byte that is not the
 // answer text goes to **stderr**, and nothing is drawn when stderr is not a

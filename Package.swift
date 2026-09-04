@@ -15,6 +15,15 @@ let package = Package(
         // bind to. This library knows the ACP wire, Observation, and the
         // family leaf `FoundationModelsExtras`.
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
+        // Everything the `acp-client` binary does, as a library. It is a
+        // product, and not a target alone, because a package can import only a
+        // product of an other package, and the `IntegrationTests` package
+        // drives this code directly rather than through the binary.
+        //
+        // SwiftPM publishes no importable module for an EXECUTABLE product
+        // across a package boundary, so this library is the only shape in
+        // which that suite can reach the client at all.
+        .library(name: "AcpClientCore", targets: ["AcpClientCore"]),
         // The command-line client for any ACP v2 agent (cli-plan.md §3). It is
         // a product, and not a target alone, because FoundationModelsACPAgent
         // depends on this package and spawns this binary from its own tests
@@ -77,9 +86,12 @@ let package = Package(
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]
         ),
-        // The `acp-client` executable (cli-plan.md §3). Its file is
-        // `AcpClient.swift` and not `main.swift`, because a target holding
-        // top-level code cannot be imported by a test target.
+        // Everything the `acp-client` binary does (cli-plan.md §3): the
+        // subcommand tree, the agent session, the terminal layer and the exit
+        // code table. It is a library and not the executable target itself,
+        // because SwiftPM emits no importable module for an executable across
+        // a package boundary, and the `IntegrationTests` package drives this
+        // code directly.
         //
         // These five dependencies are all of them, and §12 permits no more:
         // this package, the wire, the parser, the terminal package, and the
@@ -89,8 +101,8 @@ let package = Package(
         // FoundationModelsRouter, FoundationModelsACPAgent,
         // FoundationModelsMCP, the FoundationModels framework, or SwiftUI, and
         // `ManifestTests` reads this block to keep it that way.
-        .executableTarget(
-            name: "acp-client",
+        .target(
+            name: "AcpClientCore",
             dependencies: [
                 "FoundationModelsACPClient",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
@@ -99,10 +111,22 @@ let package = Package(
                 .product(name: "Noora", package: "Noora"),
             ]
         ),
+        // The `acp-client` executable (cli-plan.md §3). It holds the `@main`
+        // type and nothing else, and `AcpClientCore` is its only dependency:
+        // every other dependency of the binary reaches it through that
+        // library.
+        .executableTarget(
+            name: "acp-client",
+            dependencies: [
+                "AcpClientCore"
+            ]
+        ),
         // Tests, on Swift Testing. The suite holds the linkage smoke test, the
         // forbidden-import scanner, and the manifest and version tests of the
-        // executable. It takes the `acp-client` target so those tests can
-        // `import acp_client`.
+        // command-line client. It takes the `AcpClientCore` target so those
+        // tests can `@testable import AcpClientCore`. It does not take
+        // `acp-client`: that target holds the `@main` type alone, and no test
+        // names it.
         //
         // This manifest declares no integration test target, and that is the
         // whole unit/integration split. The agent-process suite is its own
@@ -115,7 +139,7 @@ let package = Package(
             name: "FoundationModelsACPClientTests",
             dependencies: [
                 "FoundationModelsACPClient",
-                "acp-client",
+                "AcpClientCore",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]

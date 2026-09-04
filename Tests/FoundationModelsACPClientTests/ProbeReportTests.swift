@@ -2,7 +2,7 @@ import Foundation
 import FoundationModelsACP
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests build `ProbeReport` values directly and read the two forms it
 // writes: the plain text of `cli-plan.md` §6, and the JSON of `--json`.

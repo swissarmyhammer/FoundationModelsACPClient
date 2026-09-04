@@ -6,6 +6,15 @@ import Foundation
 // answers for one file; this walker answers for a whole directory tree, which
 // is what a test that scans a target needs.
 extension RepositoryFile {
+    /// The repository-relative directories that hold the `acp-client`
+    /// command-line client.
+    ///
+    /// The client is two targets: the `AcpClientCore` library, which holds
+    /// everything the binary does, and the thin `acp-client` executable, which
+    /// holds the `@main` entry point alone. A scan that answers for the client
+    /// must read both, so this is the one list of them.
+    static let commandLineClientDirectories = ["Sources/AcpClientCore", "Sources/acp-client"]
+
     /// Returns the URL of each Swift file below one directory of this
     /// repository.
     ///
@@ -30,6 +39,23 @@ extension RepositoryFile {
             throw SourceFilesError.directoryUnreadable(relativePath)
         }
         return enumerator.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+    }
+
+    /// Returns the URL of each Swift file below any of several directories of
+    /// this repository.
+    ///
+    /// A scan that answers for a component split over two targets needs the
+    /// files of both, and one target holding no Swift file at all is a failure
+    /// the caller wants to see, so each directory is walked in turn.
+    ///
+    /// - Parameter relativePaths: the directories' paths from the repository
+    ///   root.
+    /// - Returns: the URL of each file below those directories whose path
+    ///   extension is `swift`.
+    /// - Throws: whatever `swiftSourceFiles(under:)` throws for any one of
+    ///   them.
+    static func swiftSourceFiles(underAnyOf relativePaths: [String]) throws -> [URL] {
+        try relativePaths.flatMap { try swiftSourceFiles(under: $0) }
     }
 }
 

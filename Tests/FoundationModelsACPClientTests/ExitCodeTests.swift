@@ -5,7 +5,7 @@ import FoundationModelsACPClient
 import FoundationModelsExtras
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 /// Finds the numeric exit-code literals a Swift file holds.
 ///
@@ -22,7 +22,8 @@ import Testing
 /// a literal. The scan reads decimal literals only: a hexadecimal or a binary
 /// spelling of an exit code would pass it.
 private enum ExitCodeLiteralScan {
-    /// The one file of the target that is allowed to spell the §9 numbers.
+    /// The one file of the command-line client that is allowed to spell the §9
+    /// numbers.
     static let tableFileName = "ExitCode.swift"
 
     /// Returns each place in one Swift file where a line of code names an exit
@@ -122,8 +123,11 @@ struct ExitCodeTests {
     /// What the validation error of ``aValidationErrorIsAUsageError()`` says.
     private static let validationMessage = "the run needs an agent command after \"--\""
 
-    /// The target whose files may hold no exit code number of their own.
-    private static let scannedDirectory = "Sources/acp-client"
+    /// The directories whose files may hold no exit code number of their own.
+    ///
+    /// Both targets of the command-line client are read, so the table cannot
+    /// be copied into the thin executable either.
+    private static let scannedDirectories = RepositoryFile.commandLineClientDirectories
 
     @Test("every exit code carries its section 9 number")
     func everyExitCodeCarriesItsSectionNineNumber() throws {
@@ -235,16 +239,16 @@ struct ExitCodeTests {
 
     @Test("no file outside ExitCode.swift spells an exit code number")
     func noFileOutsideTheTableSpellsAnExitCodeNumber() throws {
-        let files = try RepositoryFile.swiftSourceFiles(under: Self.scannedDirectory)
+        let files = try RepositoryFile.swiftSourceFiles(underAnyOf: Self.scannedDirectories)
         try #require(
             !files.isEmpty,
-            "The scan found no Swift files below \(Self.scannedDirectory)/."
+            "The scan found no Swift files below \(Self.scannedDirectories)."
         )
         try #require(
             files.contains { $0.lastPathComponent == ExitCodeLiteralScan.tableFileName },
             """
-            The scan expects \(Self.scannedDirectory)/\(ExitCodeLiteralScan.tableFileName) \
-            to be the file that owns the table.
+            The scan expects \(ExitCodeLiteralScan.tableFileName) to stand in \
+            \(Self.scannedDirectories) as the file that owns the table.
             """
         )
         let literals = try files

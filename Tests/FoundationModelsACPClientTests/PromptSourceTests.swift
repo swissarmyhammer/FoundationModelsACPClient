@@ -1,7 +1,7 @@
 import Synchronization
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover the prompt-source table of `cli-plan.md` §7, one test for
 // each of its four rows.

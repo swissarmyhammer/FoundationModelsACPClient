@@ -2,7 +2,7 @@ import Foundation
 import FoundationModelsACP
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover the one decision `--frames` asks `RunCommand` to make: does
 // the transport the run hands `AgentSession` carry a tee, or is it the agent's
@@ -18,7 +18,7 @@ import Testing
 // package.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
-// both, so the binary's terminal layer is named `acp_client.TerminalOutput` in
+// both, so the binary's terminal layer is named `AcpClientCore.TerminalOutput` in
 // full. The wire package's `TerminalOutput` is the ACP model of an agent-owned
 // terminal, and it has no part in these tests.
 
@@ -77,7 +77,7 @@ private struct WiredTransport {
         transport = RunCommand.sessionTransport(
             over: clientEnd,
             frames: frames,
-            terminal: acp_client.TerminalOutput(
+            terminal: AcpClientCore.TerminalOutput(
                 verbosity: verbosity,
                 isStandardErrorATerminal: { false },
                 sink: { captured.append($0) }

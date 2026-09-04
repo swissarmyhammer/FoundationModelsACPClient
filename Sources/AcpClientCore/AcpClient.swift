@@ -8,11 +8,24 @@ import Foundation
 /// `--help`, `--version`, the subcommand tree and the usage errors
 /// (`cli-plan.md` §4).
 ///
-/// This type lives in `AcpClient.swift` and not in `main.swift` on purpose. A
-/// target whose sources hold top-level code cannot be imported, and the unit
-/// suite imports this target.
-@main
-struct AcpClient: AsyncParsableCommand {
+/// This type lives in the `AcpClientCore` library and not in the `acp-client`
+/// executable target, because SwiftPM publishes no importable module for an
+/// executable product across a package boundary. The `IntegrationTests`
+/// package drives this code directly, so the code has to sit in a library
+/// product. ``AcpClientMain`` in `Sources/acp-client/` is the `@main` type
+/// that calls ``main()``, and it is all that target holds.
+///
+/// This is the one seam the executable target reaches across, so it is the one
+/// type of the command tree that is `public`. ``RunCommand``, ``ProbeCommand``
+/// and ``DoctorCommand`` stay internal: the unit suite reaches them with
+/// `@testable import`, and nothing outside this module names them.
+public struct AcpClient: AsyncParsableCommand {
+    /// Creates the root command.
+    ///
+    /// `ParsableCommand` needs a public initializer on a public conforming
+    /// type. The parser is what calls it.
+    public init() {}
+
     /// The name of this binary on the command line.
     ///
     /// One constant, so the usage text the parser prints and the name
@@ -30,7 +43,7 @@ struct AcpClient: AsyncParsableCommand {
     /// empty command line a run: `run` still needs an agent command after the
     /// `--` separator, and without one the binary prints the usage to stderr
     /// and exits 2.
-    static let configuration = CommandConfiguration(
+    public static let configuration = CommandConfiguration(
         commandName: Self.commandName,
         abstract: "Runs one turn against any ACP v2 agent and prints the answer.",
         version: AcpClientVersion.current,
@@ -71,7 +84,7 @@ struct AcpClient: AsyncParsableCommand {
     /// `exit(withError:)` would have printed, and it still goes to stderr,
     /// leaving stdout empty as §8 requires. Every other outcome, `--help` and
     /// `--version` included, still goes through `exit(withError:)`.
-    static func main() async {
+    public static func main() async {
         do {
             var command = try parseAsRoot()
             if var asyncCommand = command as? AsyncParsableCommand {

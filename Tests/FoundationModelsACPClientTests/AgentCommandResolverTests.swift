@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `AgentCommandResolver`, the one place the binary turns the
 // agent command of `cli-plan.md` §6 into the absolute path

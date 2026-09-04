@@ -9,7 +9,7 @@ import Synchronization
 // both, so the two suites cannot disagree about what a thread-safe capture is.
 //
 // This file names no type of `FoundationModelsACP` and no type of
-// `acp_client`, and it must stay that way. `FrameTeeTransportTests` imports
+// `AcpClientCore`, and it must stay that way. `FrameTeeTransportTests` imports
 // both packages, and both export a type called `TerminalOutput`. A file that
 // imports both and wants the ACP wire model must spell
 // `FoundationModelsACP.TerminalOutput` in full.

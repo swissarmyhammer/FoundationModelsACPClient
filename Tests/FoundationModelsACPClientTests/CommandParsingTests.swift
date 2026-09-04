@@ -1,7 +1,7 @@
 import ArgumentParser
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover the subcommand tree, the `--` separator and the usage
 // errors of `cli-plan.md` §6, and the options of §6.1.

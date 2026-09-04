@@ -3,7 +3,7 @@ import FoundationModelsACP
 import Testing
 
 @testable import FoundationModelsACPClient
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `DecliningClient`, the headless policy of the binary: a
 // batch run has nobody at the keyboard, so every request that waits on a
@@ -11,7 +11,7 @@ import Testing
 // error.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
-// both, so the binary's terminal layer is named `acp_client.TerminalOutput`
+// both, so the binary's terminal layer is named `AcpClientCore.TerminalOutput`
 // in full. The wire package's `TerminalOutput` is the ACP model of an
 // agent-owned terminal, and it has no part in these tests.
 //
@@ -125,7 +125,7 @@ private struct DecliningClientHarness {
         self.container = container
         client = DecliningClient(
             container: container,
-            output: acp_client.TerminalOutput(
+            output: AcpClientCore.TerminalOutput(
                 verbosity: verbosity,
                 isStandardErrorATerminal: { false },
                 sink: { buffer.append($0) }
@@ -308,7 +308,9 @@ func eachRefusalWritesOneLineAtQuietToo() async throws {
 /// sink cannot see a byte that went straight to file descriptor 1, so the
 /// source itself must name no way to reach it.
 @Test func theDecliningClientNamesNoWayToWriteToStandardOutput() throws {
-    let source = try RepositoryFile.read(relativePath: "Sources/acp-client/DecliningClient.swift")
+    let source = try RepositoryFile.read(
+        relativePath: "Sources/AcpClientCore/DecliningClient.swift"
+    )
     for name in ["print(", "standardOutput", "STDOUT_FILENO", "fputs", "fwrite"] {
         #expect(!source.contains(name), "DecliningClient.swift names \"\(name)\".")
     }

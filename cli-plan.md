@@ -41,12 +41,29 @@ that CLI.
 |---|---|
 | Name | `acp-client` |
 | Kind | An executable target, and an executable product |
-| Links | This package, `FoundationModelsACP`, `ArgumentParser` and `Noora` |
+| Links | `AcpClientCore` |
 | Path | `Sources/acp-client/` |
 
 It is a **product**, and not only a target. Another package must be able
 to depend on it, so that package's tests can spawn it beside their own
 binaries.
+
+The executable holds the `@main` type and nothing else. Everything it
+does lives in a library beside it:
+
+| Item | Value |
+|---|---|
+| Name | `AcpClientCore` |
+| Kind | A library target, and a library product |
+| Links | This package, `FoundationModelsACP`, `FoundationModelsExtras`, `ArgumentParser` and `Noora` |
+| Path | `Sources/AcpClientCore/` |
+
+The library is a **product** for the same reason the binary is, and for a
+second one: SwiftPM publishes no importable module for an executable
+product across a package boundary, so a nested package can name the
+client's types only through a library product. The `IntegrationTests`
+package drives the health checks of §10 that way, rather than through the
+spawned binary.
 
 ## 4. The parser
 
@@ -71,9 +88,10 @@ comfy-table and owo-colors cover in Rust.
 tables differently is a defect a user sees.
 
 It keeps the same containment rule: **one file imports Noora.**
-`Sources/acp-client/Terminal/TerminalRenderer.swift` vends a spinner, a
+`Sources/AcpClientCore/TerminalOutput.swift` vends a spinner, a
 progress bar and a table, and every other file calls that type. A test
-pins the single import, so a swap costs one file.
+pins the single import over both source directories of §3, so a swap
+costs one file.
 
 The rule is absolute: the terminal package writes to **stderr** only, and
 it draws nothing when stderr is not a terminal. §8 holds stdout to the

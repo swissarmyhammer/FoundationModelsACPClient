@@ -61,6 +61,17 @@ let package = Package(
             dependencies: [
                 .product(name: "FoundationModelsACPClient", package: "FoundationModelsACPClient"),
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                // Everything the `acp-client` binary does, as a library. A
+                // test here can `import AcpClientCore` and drive the client
+                // directly, rather than only through the spawned binary.
+                //
+                // This is why that library exists. SwiftPM emits no importable
+                // module for an EXECUTABLE product across a package boundary:
+                // while the client lived in the `acp-client` target alone,
+                // `import acp_client` failed here at dependency scanning under
+                // the default build system, and no `acp_client.swiftmodule`
+                // was ever built.
+                .product(name: "AcpClientCore", package: "FoundationModelsACPClient"),
                 // The `acp-client` executable of the root package
                 // (`cli-plan.md` §3). A test target that depends on an
                 // EXECUTABLE product makes SwiftPM build that binary into the

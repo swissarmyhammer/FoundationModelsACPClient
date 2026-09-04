@@ -4,7 +4,7 @@ import FoundationModelsExtras
 import Testing
 
 @testable import FoundationModelsACPClient
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `AgentSession`, the connect-and-initialize seam that
 // `run`, `probe` and `doctor` share.
@@ -15,7 +15,7 @@ import Testing
 // integration tests — no binary is started, and nothing waits on a pipe.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
-// both, so the binary's terminal layer is named `acp_client.TerminalOutput`
+// both, so the binary's terminal layer is named `AcpClientCore.TerminalOutput`
 // in full. The wire package's `TerminalOutput` is the ACP model of an
 // agent-owned terminal, and it has no part in these tests.
 //
@@ -24,7 +24,7 @@ import Testing
 // standard error.
 
 /// The path of the source file under test, from the repository root.
-private let agentSessionSourcePath = "Sources/acp-client/AgentSession.swift"
+private let agentSessionSourcePath = "Sources/AcpClientCore/AgentSession.swift"
 
 /// The name ``ScriptedStubAgent`` reports in its `initialize` answer.
 private let stubAgentName = "stub-agent"
@@ -127,7 +127,7 @@ private struct AgentSessionHarness {
         self.buffer = buffer
         session = await AgentSession(
             over: clientEnd,
-            terminal: acp_client.TerminalOutput(
+            terminal: AcpClientCore.TerminalOutput(
                 verbosity: verbosity,
                 isStandardErrorATerminal: { false },
                 sink: { buffer.append($0) }
@@ -381,7 +381,7 @@ func theLoggerWritesToTheTerminalLayerAndNeverToStandardOutput() async throws {
     let buffer = ThreadSafeBuffer<String>()
     let session = await AgentSession(
         over: clientEnd,
-        terminal: acp_client.TerminalOutput(
+        terminal: AcpClientCore.TerminalOutput(
             verbosity: .verbose,
             isStandardErrorATerminal: { false },
             sink: { buffer.append($0) }

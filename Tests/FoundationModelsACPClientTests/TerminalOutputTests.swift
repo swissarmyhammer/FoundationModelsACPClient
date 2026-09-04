@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import acp_client
+@testable import AcpClientCore
 
 // These tests cover `TerminalOutput`, the stderr terminal layer of
 // `cli-plan.md` §5 and §8, with one test for each acceptance row of the card.
@@ -120,11 +120,13 @@ private enum SpinnerText {
 @Suite("acp-client stderr terminal layer")
 struct TerminalOutputTests {
     /// `cli-plan.md` §5 keeps Noora behind one file, so a later swap costs one
-    /// file. The scan walks the whole executable target.
-    @Test("exactly one file of the executable target imports Noora")
+    /// file. The scan walks both targets of the command-line client, so a
+    /// second importer cannot hide in the thin executable.
+    @Test("exactly one file of the command-line client imports Noora")
     func exactlyOneFileImportsNoora() throws {
-        let files = try RepositoryFile.swiftSourceFiles(under: "Sources/acp-client")
-        try #require(!files.isEmpty, "The scan found no Swift files below Sources/acp-client/.")
+        let directories = RepositoryFile.commandLineClientDirectories
+        let files = try RepositoryFile.swiftSourceFiles(underAnyOf: directories)
+        try #require(!files.isEmpty, "The scan found no Swift files below \(directories).")
 
         let importers = try files
             .filter { try SwiftImports.modules(in: $0).contains("Noora") }
