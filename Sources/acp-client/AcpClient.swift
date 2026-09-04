@@ -13,13 +13,6 @@ import Foundation
 /// suite imports this target.
 @main
 struct AcpClient: AsyncParsableCommand {
-    /// The exit code `cli-plan.md` §9 gives a usage error.
-    ///
-    /// ArgumentParser's own `ExitCode.validationFailure` is `EX_USAGE`, which
-    /// is 64. §9 does not use 64: it pins a usage error at 2, so that this
-    /// binary and `acp-agent` report the same code for the same mistake.
-    static let usageExitCode: Int32 = 2
-
     /// The command-line configuration of the root command.
     ///
     /// `version:` is what answers `--version`, so the flag can report nothing
@@ -44,18 +37,22 @@ struct AcpClient: AsyncParsableCommand {
     /// ArgumentParser stays the classifier: `exitCode(for:)` is what decides
     /// whether an error is a usage mistake, a clean exit, or a failure. Only
     /// the number changes, and only for the usage class, because §9 and
-    /// `EX_USAGE` disagree there and nowhere else that this milestone reaches.
+    /// `EX_USAGE` disagree there and nowhere else the parser reaches.
     ///
-    /// The rest of the §9 table — 3 for a refusal, 4 for a cancellation, 5 for
-    /// `doctor` warnings, and 124 for a timeout — arrives with the runs that
-    /// can produce those outcomes.
+    /// The number comes from ``AcpClientExitCode``, which owns the whole §9
+    /// table. This function is the parser's half of it: a `--help` and a
+    /// `--version` are clean exits ArgumentParser already numbers, so its
+    /// answer stands for every class but the usage one. The outcomes a run
+    /// produces — a refusal, a cancellation, a `doctor` verdict, a timeout —
+    /// reach the table through ``AcpClientExitCode/forError(_:)`` and its
+    /// siblings instead.
     ///
     /// - Parameter error: The error the run ended with.
     /// - Returns: The code to exit the process with.
     static func processExitCode(for error: any Error) -> Int32 {
         let parserExitCode = exitCode(for: error)
         guard parserExitCode == .validationFailure else { return parserExitCode.rawValue }
-        return usageExitCode
+        return AcpClientExitCode.usage.rawValue
     }
 
     /// Runs the binary, and exits with the code `cli-plan.md` §9 gives the

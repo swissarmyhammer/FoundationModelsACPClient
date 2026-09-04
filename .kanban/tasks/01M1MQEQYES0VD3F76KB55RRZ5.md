@@ -59,8 +59,33 @@ comments:
     - evidence: 1 new file, `Tests/FoundationModelsACPClientTests/ExtrasDoctorReachableTests.swift`. Both `Package.resolved` files re-resolved `foundationmodelsextras` from `8b4706dc4d34bad02870fd12776474c5db1497c6` to `09eed094a1a577171ff4f7fa4dffb021a21be676` on branch `main` (gitignored, so not in the diff). RED verified first: the file failed to compile at the old pin with `cannot find type` for all six types. `timeout 420 swift test` — 153 tests in 9 suites passed, zero failures, zero warnings. `timeout 600 swift test --package-path IntegrationTests` — 4 tests in 1 suite passed. `timeout 420 swift build` — clean, no warnings. The new suite alone runs 5 tests, all passing. Nothing was pushed, and the sibling repository was not touched.
     - next: `/review`
   timestamp: 2026-09-04T16:38:19.521371+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1pmr460zf4dzsxwy9we39z4
+  text: |-
+    ### review — clean
+    - scope: `review sha 124e3bc~1..124e3bc` — the diffs only. 1 file reviewed, 4 skipped by the `.reviewignore` rule for `.kanban/`.
+    - evidence: zero new findings. 7 validators attempted, 0 failed, 0 skipped, 0 confirmed, 0 refuted.
+    - prior findings: none. Every acceptance and test item was already checked.
+    - pin guard: the six Doctor types are each named in a compile-time position in `Tests/FoundationModelsACPClientTests/ExtrasDoctorReachableTests.swift`. `Doctorable` is in conformance position on `StubDoctorComponent`, which is stronger than a name: a protocol the dependency does not carry cannot be conformed to. `DoctorRunner`, `DoctorReport`, `HealthCheck`, `HealthStatus` and `PlainTextDoctorRenderer` are each in an explicit type annotation. The file cannot compile against a revision that lacks any one of them, so the guarantee holds.
+    - pin state: `Package.resolved` and `IntegrationTests/Package.resolved` both name revision `09eed094a1a577171ff4f7fa4dffb021a21be676`. `.gitignore` line 8 names `Package.resolved`, so neither file shows in the diff.
+    - first card step: satisfied upstream before this card ran. Nothing was pushed, and the sibling repository was not touched. That is correct, not a skipped step.
+    - next: none. Task moved to done. It unblocks ^m0ev and ^zvb81.
+  timestamp: 2026-09-04T16:41:36.704889+00:00
+- actor: claude-code
+  id: 01m1pmrx7aksqkc7p2ze8dzz5a
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 1 new file (Tests/.../ExtrasDoctorReachableTests.swift). The card's push step was already satisfied upstream: `origin/main` at 09eed09 carries the Doctor module, so nothing was pushed and the sibling repo was untouched. Both this package and IntegrationTests re-resolved foundationmodelsextras 8b4706dc → 09eed094. RED verified first at the old pin.
+    - test: green — `timeout 420 swift test`, 153 passed in 9 suites, 0 failures, 0 warnings; `swift test --package-path IntegrationTests`, 4 passed
+    - commit: 124e3bc test(doctor): guard the Doctor dependency pin with a reachability test
+    - review: clean — zero new findings, 7 validators, task moved to done
+
+    Two things carried forward:
+    - `IntegrationTests/Package.swift` declares no direct dependency on FoundationModelsExtras; it reaches the module transitively through its path dependency on the root. That is why its own Package.resolved held the stale pin separately. Any future card that moves an Extras pin must re-resolve BOTH packages.
+    - The guard test lives only in the main package's test target. If a later card puts doctor code behind the integration suite, that suite wants a guard of its own.
+  timestamp: 2026-09-04T16:42:02.346367+00:00
+position_column: done
+position_ordinal: '9380'
 title: 'Unblock the doctor work: push FoundationModelsExtras main and re-resolve this package'
 ---
 ## What
