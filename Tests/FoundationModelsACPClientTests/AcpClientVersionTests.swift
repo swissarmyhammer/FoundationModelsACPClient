@@ -1,13 +1,15 @@
+import ArgumentParser
 import Testing
 
-import acp_client
+@testable import acp_client
 
 /// Pins the one version constant the binary reports, and with it the fact that
 /// the executable target is importable at all.
 ///
-/// A target whose sources hold top-level code cannot be imported, so the plain
-/// `import acp_client` above is the standing guard on `AcpClient.swift` never
-/// becoming `main.swift`. Every later unit test of the CLI rests on it.
+/// A target whose sources hold top-level code cannot be imported at all,
+/// testably or not, so the `import acp_client` above is the standing guard on
+/// `AcpClient.swift` never becoming `main.swift`. Every later unit test of the
+/// CLI rests on it.
 @Suite("acp-client version")
 struct AcpClientVersionTests {
     /// The number of dot-separated numbers a semantic version carries.
@@ -29,6 +31,20 @@ struct AcpClientVersionTests {
             """
             Every component of AcpClientVersion.current must be a number. \
             It is "\(AcpClientVersion.current)".
+            """
+        )
+    }
+
+    /// `--version` is ArgumentParser's own flag, and it answers from
+    /// `CommandConfiguration.version`. This pins that the root command hands it
+    /// the one constant, so the flag and the constant cannot disagree.
+    @Test("the root command reports the version constant")
+    func theRootCommandReportsTheVersionConstant() {
+        #expect(
+            AcpClient.configuration.version == AcpClientVersion.current,
+            """
+            AcpClient.configuration.version must be AcpClientVersion.current. \
+            It is "\(AcpClient.configuration.version)".
             """
         )
     }
