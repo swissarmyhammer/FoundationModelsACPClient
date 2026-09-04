@@ -14,12 +14,18 @@ let package = Package(
         // The ACP Client role: an observable container that a UI layer can
         // bind to. This library knows the ACP wire, Observation, and the
         // family leaf `FoundationModelsExtras`.
-        .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"])
+        .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
+        // The command-line client for any ACP v2 agent (cli-plan.md §3). It is
+        // a product, and not a target alone, because FoundationModelsACPAgent
+        // depends on this package and spawns this binary from its own tests
+        // (§17), exactly as this package's own `IntegrationTests` package
+        // already spawns `acp-agent`.
+        .executable(name: "acp-client", targets: ["acp-client"]),
     ],
     dependencies: [
-        // These two are the whole external dependency list of this package,
-        // by design (plan.md, "a client, not *our* client"). Each pin is
-        // `branch: "main"` over the SSH URL, matching how every sibling in
+        // The first two are the whole in-family dependency list of this
+        // package, by design (plan.md, "a client, not *our* client"). Each pin
+        // is `branch: "main"` over the SSH URL, matching how every sibling in
         // this family pins an in-family package. A version requirement would
         // conflict for an app that depends on this package and on another
         // in-family consumer at the same time.
@@ -38,6 +44,26 @@ let package = Package(
             url: "git@github.com:swissarmyhammer/FoundationModelsExtras.git",
             branch: "main"
         ),
+        // The parser for `acp-client` (cli-plan.md §4). The binary writes no
+        // parser of its own. `FoundationModelsExtras` already declares this
+        // package from the same floor, and the graph resolves it at 1.8.2, so
+        // the direct declaration costs no new checkout. It is direct rather
+        // than taken through the `Operations` re-export because the binary
+        // wants the parser alone, and not the fusion machinery around it.
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.0"),
+        // The terminal design system for the stderr layer (cli-plan.md §5).
+        // The agent plan picked Noora, and this package follows that decision,
+        // because two CLIs in one family that draw tables differently is a
+        // defect a user sees.
+        //
+        // `.upToNextMinor` and not `from:`: Noora is a 0.x package, where
+        // `from:` accepts every future 0.x minor, and Noora's release history
+        // holds breaking 0.x minors.
+        //
+        // Noora also pulls `onevcat/Rainbow`, `apple/swift-log` and
+        // `tuist/path` into this graph. Those three are the cost, and this
+        // comment is where it is visible.
+        .package(url: "https://github.com/tuist/Noora.git", .upToNextMinor(from: "0.57.0")),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -51,8 +77,32 @@ let package = Package(
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]
         ),
-        // Tests, on Swift Testing. The suite holds the linkage smoke test and
-        // the forbidden-import scanner.
+        // The `acp-client` executable (cli-plan.md §3). Its file is
+        // `AcpClient.swift` and not `main.swift`, because a target holding
+        // top-level code cannot be imported by a test target.
+        //
+        // These five dependencies are all of them, and §12 permits no more:
+        // this package, the wire, the parser, the terminal package, and the
+        // family leaf whose `Doctorable`, `DoctorRunner`, `DoctorReport`,
+        // `HealthCheck`, `HealthStatus` and `PlainTextDoctorRenderer` the
+        // `doctor` subcommand of §10 stands on. None of them is
+        // FoundationModelsRouter, FoundationModelsACPAgent,
+        // FoundationModelsMCP, the FoundationModels framework, or SwiftUI, and
+        // `ManifestTests` reads this block to keep it that way.
+        .executableTarget(
+            name: "acp-client",
+            dependencies: [
+                "FoundationModelsACPClient",
+                .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
+                .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Noora", package: "Noora"),
+            ]
+        ),
+        // Tests, on Swift Testing. The suite holds the linkage smoke test, the
+        // forbidden-import scanner, and the manifest and version tests of the
+        // executable. It takes the `acp-client` target so those tests can
+        // `import acp_client`.
         //
         // This manifest declares no integration test target, and that is the
         // whole unit/integration split. The agent-process suite is its own
@@ -65,6 +115,7 @@ let package = Package(
             name: "FoundationModelsACPClientTests",
             dependencies: [
                 "FoundationModelsACPClient",
+                "acp-client",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
             ]

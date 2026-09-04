@@ -1,7 +1,58 @@
 ---
 assignees:
 - claude-code
-position_column: todo
+comments:
+- actor: claude-code
+  id: 01m1p74n6bnw5m3s1m39nhp86k
+  text: |
+    Picked up. Research notes before the first edit:
+
+    - Network is available. `tuist/Noora` newest tag is `0.57.0` (the repository is a monorepo, so it also carries `web-*` tags; only the bare semver tags are the Swift package).
+    - Risk cleared before touching this package: a throwaway probe package with `platforms: [.macOS("27.0")]`, `swift-tools-version: 6.2` and `.upToNextMinor(from: "0.57.0")` on Noora builds clean in 8.5 s. So the "Noora CI runs on macOS 15 / Swift 6.1" risk the card names does not stop this task.
+    - `Package.resolved` already pins `swift-argument-parser` at 1.8.2 through `FoundationModelsExtras`, so the direct `from: "1.8.0"` declaration adds no checkout, as `cli-plan.md` §4 says.
+    - The forbidden-import scan in `ForbiddenImportTests` walks `Sources/` recursively from `#filePath`, so `Sources/acp-client/` enters the scan with no change to the walk itself — only the doc comment needs the correction.
+  timestamp: 2026-09-04T12:43:47.275906+00:00
+- actor: claude-code
+  id: 01m1p80xvpbcmdjfxkavk1t4z9
+  text: |
+    Implementation landed, by `/tdd` in three red-green rounds.
+
+    **Round 1 — the manifest.** Wrote `ManifestTests.swift` first: 6 tests, all 6 red for the right reasons (no `.executable(name: "acp-client"`, no `.executableTarget` block to parse, no Noora pin, no resolved entries). Then edited `Package.swift` and added `Sources/acp-client/AcpClient.swift`. All 6 green.
+
+    **Round 2 — the importable target.** Wrote `AcpClientVersionTests.swift` with a plain `import acp_client`. Red with the exact failure the card names: `unable to resolve module dependency: 'acp_client'`. Then added `"acp-client"` to the test target, added `AcpClientVersion.swift`, and wired `version:` into the command configuration. Green.
+
+    **Round 3 — the shared walker.** A refactor, so `sourcesHoldNoForbiddenImport` is the standing test; it stayed green through the move.
+
+    **One deviation from the letter of the card, stated openly.** The card asks for `SourceFiles.swift` with `func swiftSourceFiles(under relativePath: String) throws -> [URL]`. The Swift `immutability` validator rule bans a top-level `func`: "A function belongs to a type. A top-level `func` carries no namespace ... DO: a `static func` on an `enum` namespace." So the helper is `static func swiftSourceFiles(under relativePath: String) throws -> [URL]` in an `extension RepositoryFile`, in the file the card names. The name, the argument label and the signature are all exactly what the card asks for, and the acceptance criterion holds: any file in the unit target calls `RepositoryFile.swiftSourceFiles(under: "Sources")`. A bare `SourceFiles` enum was rejected because `SourceFiles.swiftSourceFiles` stutters, which the `idioms` rule bans as well.
+
+    That choice also removed a duplication the card did not ask about: `RepositoryFile` gained `url(relativePath:)`, which holds the `#filePath` walk to the repository root and the `..` path guard once. `read(relativePath:)` and `swiftSourceFiles(under:)` both call it, so a second copy of the root navigation never entered the target.
+
+    **Second small change, also stated openly.** `forbiddenModules` in `ForbiddenImportTests.swift` went from `private` to internal, so `ManifestTests` reads the same five names from the other side of the boundary. The list itself is unchanged, as the card requires. The alternative was a second copy of the same five strings, which the `duplication` validator treats as a blocker.
+
+    **Discovery for the next agent: `Package.resolved` is gitignored in this repository.** The test that reads it still holds, because SwiftPM resolves and writes the file before any build or test run, locally and in CI. But do not expect the file in a diff, and do not add it to one.
+
+    **Risk the card named, and how it closed.** Noora resolves at `0.57.0`, and it builds against this package's macOS 27 / Swift 6.2 floor with no change to the floor, no vendoring and no substitution. Full `swift build --build-tests` is clean: 0 warnings.
+  timestamp: 2026-09-04T12:59:13.654245+00:00
+- actor: claude-code
+  id: 01m1p8133s6aysb7vk44j4nk2s
+  text: |
+    ### implement — changed
+    - evidence: 7 files — Package.swift; Sources/acp-client/AcpClient.swift (new); Sources/acp-client/AcpClientVersion.swift (new); Tests/FoundationModelsACPClientTests/ManifestTests.swift (new); Tests/FoundationModelsACPClientTests/AcpClientVersionTests.swift (new); Tests/FoundationModelsACPClientTests/SourceFiles.swift (new); Tests/FoundationModelsACPClientTests/ForbiddenImportTests.swift; Tests/FoundationModelsACPClientTests/RepositoryFile.swift. `swift build --build-tests` clean with 0 warnings; `swift test` 79 tests in 3 suites, 0 failures (72 before); `swift build --product acp-client` builds, and `.build/debug/acp-client --version` prints `0.1.0`.
+    - next: `/review`
+  timestamp: 2026-09-04T12:59:19.033732+00:00
+- actor: claude-code
+  id: 01m1p818j11akw5mf5my2hjn8s
+  text: |
+    Correction to the step record above: the count is 8 files, not 7. The list itself is complete and correct.
+  timestamp: 2026-09-04T12:59:24.609822+00:00
+- actor: claude-code
+  id: 01m1p85p5dge0yyahhmgn8nkmg
+  text: |-
+    ### test — green
+    - evidence: `swift package clean` then `swift test` — Build complete (14.30 sec), 79 tests in 3 suites passed, 0 failures, 0 skipped, 0 warnings. `swift build --product acp-client` — Build complete (0.81 sec), 0 warnings, 0 errors.
+    - next: none
+  timestamp: 2026-09-04T13:01:49.613021+00:00
+position_column: doing
 position_ordinal: '80'
 title: Declare the acp-client executable target, product and dependencies
 ---
