@@ -113,6 +113,82 @@ comments:
     - deliberate-failure check: run twice, each reverted. (1) A sixth dependency on the `acp-client` executable target made `theExecutableTargetTakesTheLibraryAlone` fail with `It names ["Noora"]`, while every other rule of the suite still passed — the hole the finding named. (2) `"AcpClientCore"` added to `forbiddenModules` made `neitherTargetNamesAForbiddenModule` fail with `They name ["AcpClientCore"]`; only the executable target names it, so that failure came from the newly-read side alone.
     - next: /review
   timestamp: 2026-09-04T22:15:13.228801+00:00
+- actor: claude-code
+  id: 01m1q8bd6mzt1dmh8s6dvmwcg8
+  text: |
+    ### review — findings
+
+    - scope: `review sha b46d5f8~1..b46d5f8` (second pass). Engine: 0 findings, 1 file reviewed.
+    - evidence: 1 finding from the scope checks — Tests/FoundationModelsACPClientTests/ManifestTests.swift:269
+    - confirmed closed: the sixth-dependency case on the `acp-client` executable fails by execution (`swift test --filter ManifestTests` → `theExecutableTargetTakesTheLibraryAlone`: `dependencies.productNames.isEmpty` failed, "It names [Noora]"); the manifest was restored and the suite is 7 of 7 again. The forbidden-module case fails on both forms the prior finding named, as a product and as a bare string, and fails BOTH the new rule and the union rule.
+    - confirmed one-sided by design: `theTargetLinksEveryProductTheBinaryNeeds` (a union would weaken it) and `theTargetDeclaresFiveDependencies` (its partner rule catches the executable-side evasion).
+    - prior item `- [x]` checked.
+    - still open: the shared splitter reads only `.product(name:package:)` and bare strings, so `.byName(name:)`, `.target(name:)` and `.product(name:package:condition:)` are invisible to the new rule.
+    - next: read every `Target.Dependency` form in the splitter, then re-review.
+  timestamp: 2026-09-04T22:24:11.476089+00:00
+- actor: claude-code
+  id: 01m1q8c8sm4h8bvt0g8na9vk28
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — 1 file. One parameterised reader now serves both targets; a new rule asserts the `acp-client` executable takes `AcpClientCore` and no product; the forbidden-module rule reads the union of both targets.
+    - test: green — root 200 passed in 14 suites (199 + the new rule), integration 35 passed in 7 suites, 0 warnings
+    - commit: b46d5f8 test(manifest): assert acp-client target deps with a shared reader
+    - review: findings — Tests/FoundationModelsACPClientTests/ManifestTests.swift:269
+
+    The review proved the first hole is genuinely closed. It added a sixth dependency to the executable target, watched the new rule fail with `It names ["Noora"]`, and restored the manifest. It also confirmed the two rules that stay on the library alone are right to stay one-sided: a union would WEAKEN the required-product rule, because moving a link down to the executable must break the library's subset check.
+
+    The new finding is the same evasion in a different dress. The shared splitter reads two of the five forms SwiftPM accepts for a `Target.Dependency`. `.byName(name:)`, `.target(name:)` and `.product(name:package:condition:)` are all invisible to it, so the same sixth dependency and the same forbidden module come straight back written another way, and the new rule's own premise — "and nothing else" — does not hold.
+  timestamp: 2026-09-04T22:24:39.732019+00:00
+- actor: claude-code
+  id: 01m1q9ndsean4bhd1xdqb89q14
+  text: |-
+    The finding is fixed. The judgement the finding asked for, the change, and the proof.
+
+    **`swift package dump-package` was measured, and it cannot work here.** The finding asked me to judge it rather than assume. Two measurements:
+
+    1. While `swift test --filter ManifestTests` ran, a concurrent `swift package dump-package` blocked for the whole test run (slowest probe 3647 ms) and printed `Another instance of SwiftPM (PID: 3683) is already running using '.build', waiting until that process has finished execution...`.
+    2. The direct test: a throwaway `@Test` that shells out to `timeout 45 swift package dump-package` from inside `swift test`. Result: `elapsed=45.013 status=124 bytes=0`, stderr `Another instance of SwiftPM (PID: 4712) is already running using '.build', waiting...`. Status 124 is the timeout kill.
+
+    SwiftPM holds the `.build` lock for the whole of a `swift test` invocation, including test execution. So a `dump-package` child waits for the parent, and the parent waits for the child: a deadlock, not a slow call. The probe file was deleted. The JSON shape itself is good — `{"byName": [...]}`, `{"target": [...]}`, `{"product": [...]}` normalises every form — but it is unreachable from a unit test of this package. So the reader reads the text, and reads every form. That measurement is now recorded in the doc comment of `dependencies(ofTargetNamed:declaredBy:)`, where the next reader meets the question.
+
+    **The hole was measured before the fix, once per form.** With the OLD reader, each of these was added to the `acp-client` executable target and `swift test --filter ManifestTests` still reported 7 of 7 passing: `.byName(name: "Noora")`; `.target(name: "FoundationModelsACPClient")`; `.product(name: "Noora", package: "Noora", condition: .when(platforms: [.macOS]))`. The finding was exact.
+
+    **What replaced the two patterns.**
+    - `entries(ofArrayAfter:in:)` reads the `dependencies:` array by nesting depth, in one pass, aware of string literals and `//` comments. This also closes a hole the finding did not name: the old block pattern `\[([^\]]*)\]` stopped at the FIRST `]`, so `condition: .when(platforms: [.macOS])` truncated the capture and every entry standing after such an entry was invisible.
+    - `DependencyEntry` is an enum — `.module`, `.product(name:package:)`, `.unreadable` — and `dependencyEntry(readFrom:)` reads one entry into it. A bare string literal, `.byName(name:)` and `.target(name:)` all name a module directly, so they fold into `.module`; a `.product(...)` reads its `name:` and `package:` whatever trailing `moduleAliases:` or `condition:` follows.
+    - **An entry in no known form is reported, never dropped.** `dependencies(ofTargetNamed:declaredBy:)` now fails through `try #require(declared.unreadableEntries.isEmpty, ...)`. A reader that silently dropped an unknown form would rebuild the same class of hole for the next form somebody writes.
+    - `dependencies(inEntries:)` maps once and derives the four lists with `compactMap`, rather than appending into four `var` accumulators.
+
+    **Two new tests lock every form permanently, so the guarantee no longer rests on a one-time manual mutation.** `theReaderReadsEveryDependencyForm` feeds a fixture manifest holding all five forms plus an entry after a bracket-carrying one plus a comment naming a module in quotes, and asserts the exact four lists. `theReaderReportsAnEntryNoFormReads` feeds an entry held in a constant and asserts it is reported and that the entry beside it survives.
+
+    **The deliberate-failure results, each reverted.**
+    | What was put in | What failed |
+    |---|---|
+    | `.byName(name: "Noora")` on the executable | `theExecutableTargetTakesTheLibraryAlone`: `It takes ["AcpClientCore", "Noora"]` |
+    | `.target(name: "FoundationModelsACPClient")` on the executable | `theExecutableTargetTakesTheLibraryAlone`: `It takes ["AcpClientCore", "FoundationModelsACPClient"]` |
+    | `.product(name: "Noora", package: "Noora", condition: .when(platforms: [.macOS]))` first in the executable list | `theExecutableTargetTakesTheLibraryAlone`: `It names ["Noora"]`. Only ONE issue was recorded, so `targetNames == ["AcpClientCore"]` still held — the entry standing after the bracket-carrying one was read, which is the truncation fix |
+    | `.byName(name: "AcpClientCore")` on the executable, with `"AcpClientCore"` added to `forbiddenModules` | `neitherTargetNamesAForbiddenModule`: `They name ["AcpClientCore"]`. Only the executable names `AcpClientCore`, and only through a newly-read form, so the union rule reads the new forms |
+    | `.target(name: "AcpClientCore")` on the executable, same forbidden list | `neitherTargetNamesAForbiddenModule`: `They name ["AcpClientCore"]` |
+    | `dependencies: [coreDependency]`, a constant of type `Target.Dependency` | BOTH `theExecutableTargetTakesTheLibraryAlone` and `neitherTargetNamesAForbiddenModule`: `No form this reader knows reads ["coreDependency"] of the acp-client target` |
+
+    The forbidden-module runs use a buildable stand-in because no name in `forbiddenModules` is a buildable dependency of this graph — `.target(name: "FoundationModelsMCP")` does not compile, so the manifest would never reach the rule.
+
+    **The new tests were watched failing too.** With `dependencyEntry(readFrom:)` mutated to read bare strings and single-line products alone, `theReaderReadsEveryDependencyForm` failed on all four expectations and named the loss: `The reader read ["BareString", "AfterTheCondition"]` and `The reader read ["Product"]`. Reverted.
+
+    **One measurement that changed my design reading.** My first mutation attempt — forcing `namePattern` to the bare-literal pattern — did NOT fail the tests. The bare-literal pattern `/"([^"]+)"/` matches the first quoted substring, and in every form SwiftPM accepts the first quoted substring IS the name, so the two patterns agree today. `quotedName` is kept because it reads the `name:` argument by name rather than by position, but a future agent should know the two are not independent, and should mutate the classification and not the pattern when testing this reader.
+
+    **Rules read before the edit.** `dump validators` returned 60 rules over code-hygiene, code-security, completeness, duplication, reuse, swift and test-integrity. The load-bearing ones here: `reuse/reuse` is why the `dump-package` measurement is recorded in the code and not only on this card; `swift/immutability` ("Build a collection with `map`/`compactMap`, not a `var` accumulator") is why the classifier maps once instead of appending into four accumulators; `swift/state-modeling` ("Switches over domain enums are exhaustive — no `default:`") is why each `DependencyEntry` accessor lists every case; `code-hygiene/magic-numbers-swift` permits `0`, `1`, `-1` and `100`, and the scanner uses no other literal; `test-integrity/no-test-cheating` bans a weakened assertion, and every assertion here got stronger; `code-hygiene/dead-code` is why the now-unused `dependencyListCapture` constant was deleted with the capture group it named.
+  timestamp: 2026-09-04T22:47:08.334529+00:00
+- actor: claude-code
+  id: 01m1q9nqx3mhm4zxhgpqctj78e
+  text: |
+    ### implement — changed
+    - evidence: 1 file — `Tests/FoundationModelsACPClientTests/ManifestTests.swift`. `Package.swift` and `ForbiddenImportTests.swift` were each edited for deliberate-failure runs and reverted with `git checkout`; `git status` shows neither. Tests: `timeout 420 swift test` — 202 tests in 14 suites passed (200 plus the two new reader tests). `timeout 600 swift test --package-path IntegrationTests` — 35 tests in 7 suites passed, unchanged. `swift build --build-tests` on both packages — 0 warnings, 0 errors. LSP diagnostics on the changed file — 0 errors, 0 warnings.
+    - dump-package judged, by measurement, not workable: a `dump-package` call from inside a test deadlocks on the `.build` lock the parent `swift test` holds — killed at 45 s, exit 124, 0 bytes, stderr `Another instance of SwiftPM (PID: 4712) is already running using '.build', waiting...`. The reader reads the manifest text instead, and reads every entry form. The measurement is recorded in the code.
+    - deliberate-failure check, per form, each reverted: `.byName(name:)` → `It takes ["AcpClientCore", "Noora"]`; `.target(name:)` → `It takes ["AcpClientCore", "FoundationModelsACPClient"]`; `.product(name:package:condition:)` → `It names ["Noora"]` with the entry after it still read; the forbidden-module union rule failed on `.byName` and on `.target` alike with `They name ["AcpClientCore"]`; an entry in an unknown form failed both executable-reading rules with `No form this reader knows reads ["coreDependency"]`. Before the fix, all three forms passed 7 of 7.
+    - also closed, unnamed by the finding: the old block pattern `\[([^\]]*)\]` truncated at the first `]`, so every entry after a `condition: .when(platforms: [.macOS])` was invisible.
+    - next: /review
+  timestamp: 2026-09-04T22:47:18.691156+00:00
 position_column: doing
 position_ordinal: '8180'
 title: Split acp-client into a library target and a thin executable
@@ -192,3 +268,19 @@ This is a move, not a rewrite. No behaviour changes.
 - The `@main` shim reading is right. `Sources/acp-client/` holds one file, `AcpClientMain.swift`. Keeping `AcpClient` in the executable would make the executable name `RunCommand`, `ProbeCommand`, `DoctorCommand` and `AcpClientExitCode` across the module boundary, which makes all four public and breaks the "do not make the whole command tree public" rule. All four stay internal, proven by their R100 blobs. `AcpClientMain` is itself internal.
 - The widening is contained. Every access-level change lands on `AcpClient`: `public struct` (line 22), `public init() {}` (line 27), `public static let configuration` (line 46), `public static func main()` (line 87). `init` and `configuration` are protocol witnesses `ParsableCommand` demands; `main()` is the seam the executable calls. `AcpClientVersion` and `AcpClientVersion.current` were already public before the move (R100). No `@_exported`, no `public extension`, no blanket `public`. 14 of the 16 moved files carry no access-level token at all.
 - `ExitCodeTests` and `TerminalOutputTests` are clean. Both now read `RepositoryFile.commandLineClientDirectories` = `["Sources/AcpClientCore", "Sources/acp-client"]`. The new file set is a strict superset of the old: all 16 former files plus `AcpClientMain.swift`. Neither rule is evadable by putting a file in the thin executable.
+
+## Review Findings (2026-09-04 17:16)
+
+> Scope: `review sha b46d5f8~1..b46d5f8` — the diffs only.
+> The review engine reported 0 findings across 1 file.
+> The item below comes from the scope checks the review asked for.
+
+- [x] `Tests/FoundationModelsACPClientTests/ManifestTests.swift:269` `scope-coverage/rule-not-evadable` — The shared splitter reads two of the five forms SwiftPM accepts for a `Target.Dependency`. `products` matches `.product(name:package:)` only, and `targets` matches a bare string only. It reads none of `.byName(name: "X")`, `.target(name: "X")`, and `.product(name:package:condition:)`, because the product pattern demands `)` straight after the package argument and the target pattern demands `^` or `,` straight before the quote. So `theExecutableTargetTakesTheLibraryAlone` sees an empty list where one of those three forms stands, and both of its expectations hold. A person can write `.byName(name: "Noora")`, `.target(name: "FoundationModelsMCP")`, or `.product(name: "FoundationModelsRouter", package: "FoundationModelsRouter", condition: .when(platforms: [.macOS]))` in the `acp-client` executable target, and no test fails — the sixth dependency and the forbidden module both come back in a new form. Read every entry of the list, not two forms of it: match the `name:` argument of `.byName(...)`, `.target(...)` and `.product(...)` alike, and end the product pattern at the `package:` argument rather than at `)`, so a trailing `condition:` still reads. The same splitter serves the library target, so the fix closes both.
+
+### What the scope checks confirmed
+
+- **The sixth-dependency case on the executable is closed, by execution.** With `.product(name: "Noora", package: "Noora")` added to the `acp-client` executable target, `swift test --filter ManifestTests` fails: `theExecutableTargetTakesTheLibraryAlone` records `Expectation failed: dependencies.productNames.isEmpty` — "It names ["Noora"]". The manifest was restored and the suite returns to 7 of 7 passing. The parameterised reader genuinely reads the `.executableTarget` block; it is not silently matching nothing.
+- **The forbidden-module case is closed for both forms the prior finding named.** Replaying the reader against mutated manifest text: a forbidden module written as `.product(name: "FoundationModelsRouter", package: "FoundationModelsRouter")` fails BOTH `theExecutableTargetTakesTheLibraryAlone` and `neitherTargetNamesAForbiddenModule`; written as the bare string `"SwiftUI"` it fails both as well. The union is real — `neitherTargetNamesAForbiddenModule` reads the executable's names, not the library's alone. The gap is the entry form, recorded above, and not the union.
+- **`theTargetLinksEveryProductTheBinaryNeeds` is right to stay one-sided.** It asserts `requiredProductNames` is a subset of the LIBRARY's products. One-sided is the strict reading: moving a required link down to the executable makes the library set incomplete and the rule fails. A union would accept that move and weaken the rule. Reading the library alone is what the comment claims, and the claim holds.
+- **`theTargetDeclaresFiveDependencies` is right to stay one-sided, and its partner covers the gap.** The cap counts where the dependencies stand. The evasion it cannot see on its own — a sixth dependency hung on the thin executable — is what `theExecutableTargetTakesTheLibraryAlone` exists to catch, and that rule permits exactly one target name and zero products there. The pairing is complete for every entry form the splitter reads, so the finding above is the whole of what is left open.
+- **The prior checklist item is checked.** The `## Review Findings (2026-09-04 16:55)` item on `ManifestTests.swift:161` carries `- [x]`, and the commit message records it as fixed.
