@@ -46,6 +46,13 @@ let stubAgentDefaultAnswer = "Hello from the stub agent."
 /// that breaks it fails in a way that looks like a parsing bug in OUR client.
 let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 
+/// The title the permission request of ``makePermissionRequestingAgent(answer:)``
+/// carries.
+///
+/// The request names no structured subject, so this title is what the binary's
+/// refusal line quotes back.
+let stubAgentPermissionTitle = "Run the stub tool?"
+
 // MARK: - The stub agents
 
 /// Writes a stub agent that answers every request `cli-plan.md` §14 needs.
@@ -62,20 +69,53 @@ let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 ///     or `nil` to record none.
 ///   - transcript: Where the agent appends every request line it reads, or
 ///     `nil` to record none.
+///   - argumentsFile: Where the agent writes its own arguments, one per line,
+///     before it answers anything, or `nil` to record none.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeWellBehavedAgent(
     answer: String = stubAgentDefaultAnswer,
     stopReason: StopReason = .endTurn,
     pidFile: String? = nil,
-    transcript: String? = nil
+    transcript: String? = nil,
+    argumentsFile: String? = nil
 ) throws -> String {
     try writeAgentScript(
         requestLoop(
             answer: answer,
             stopReason: stopReason,
             pidFile: pidFile,
-            transcript: transcript
+            transcript: transcript,
+            argumentsFile: argumentsFile
+        )
+    )
+}
+
+/// Writes a stub agent that asks for permission in the middle of its turn,
+/// waits for the answer, and then finishes the turn.
+///
+/// The wait is what makes the stub worth having. A run that never answered the
+/// request would leave this agent blocked, so the test that drives it proves
+/// the binary ANSWERED `session/request_permission` and not merely that it
+/// wrote a line about it. `cli-plan.md` §8 gives a default run no stderr until
+/// it fails, and that refusal line is the one deliberate exception the headless
+/// decline policy creates.
+///
+/// - Parameter answer: The reply text to stream once the permission request is
+///   answered.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makePermissionRequestingAgent(
+    answer: String = stubAgentDefaultAnswer
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: answer,
+            stopReason: .endTurn,
+            pidFile: nil,
+            transcript: nil,
+            argumentsFile: nil,
+            asksPermission: true
         )
     )
 }
@@ -107,7 +147,8 @@ func makeIdleWithoutStopReasonAgent(
 
 /// Writes a stub agent that puts one non-JSON banner line on stdout before its
 /// first ndJSON message, and behaves as
-/// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:)`` after that.
+/// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:argumentsFile:)``
+/// after that.
 ///
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
@@ -198,6 +239,14 @@ private let newSessionAnswerID = 2
 /// The id the stub answers `session/prompt` with. See ``initializeAnswerID``.
 private let promptAnswerID = 3
 
+/// The id the stub stamps on its own `session/request_permission` request.
+///
+/// It stands well clear of the three answer ids above so a reader can tell the
+/// one message the AGENT originates from the three it answers. The two
+/// directions carry independent id spaces on the wire, so the distance buys
+/// legibility rather than correctness.
+private let permissionRequestID = 100
+
 /// Builds the request loop that every answering stub agent shares.
 ///
 /// The loop reads one ndJSON line at a time and matches the method name as
@@ -211,16 +260,23 @@ private let promptAnswerID = 3
 ///     or `nil` to record none.
 ///   - transcript: Where the agent appends every request line it reads, or
 ///     `nil` to record none.
+///   - argumentsFile: Where the agent writes its own arguments, one per line,
+///     before it answers anything, or `nil` to record none.
+///   - asksPermission: Whether the agent asks for permission in the middle of
+///     the turn, and waits for the answer before it finishes.
 /// - Returns: The script text.
 /// - Throws: A JSON-encoding failure.
 private func requestLoop(
     answer: String,
     stopReason: StopReason?,
-    pidFile: String?,
-    transcript: String?
+    pidFile: String? = nil,
+    transcript: String? = nil,
+    argumentsFile: String? = nil,
+    asksPermission: Bool = false
 ) throws -> String {
     """
     \(recordPidStatement(writingTo: pidFile))
+    \(recordArgumentsStatement(writingTo: argumentsFile))
     while IFS= read -r line; do
       \(recordRequestStatement(appendingTo: transcript))
       case "$line" in
@@ -232,6 +288,7 @@ private func requestLoop(
           ;;
         *'"method":"session/prompt"'*)
           \(try printfLine(promptAnswer()))
+          \(try permissionExchangeStatements(asking: asksPermission))
           \(try printfLine(messageChunk(answer)))
           \(try printfLine(idleState(stopReason)))
           ;;
@@ -267,6 +324,82 @@ private func recordPidStatement(writingTo path: String?) -> String {
 private func recordRequestStatement(appendingTo path: String?) -> String {
     guard let path else { return "" }
     return "printf '%s\\n' \"$line\" >> \(shellSingleQuoted(path))"
+}
+
+/// Renders the shell statement that records the agent's own arguments, one per
+/// line.
+///
+/// `"$@"` holds the arguments that stand AFTER the script path on the
+/// ``stubAgentShellCommand`` command line, which is exactly what a caller put
+/// after the agent command that follows `--` (`cli-plan.md` §6). A run that
+/// gave the agent no argument of its own writes an EMPTY file rather than
+/// none, because the redirection stands on the loop and not inside it, so a
+/// test can tell "no arguments reached the agent" from "the agent never ran".
+///
+/// - Parameter path: Where to write the arguments, or `nil` to write none.
+/// - Returns: One shell statement, or the empty string.
+private func recordArgumentsStatement(writingTo path: String?) -> String {
+    guard let path else { return "" }
+    return """
+        for stubAgentArgument in "$@"; do \
+        printf '%s\\n' "$stubAgentArgument"; \
+        done > \(shellSingleQuoted(path))
+        """
+}
+
+/// Renders the shell statements that ask for permission mid-turn and wait for
+/// the answer.
+///
+/// The wait is a read loop rather than a single `read`, because the client may
+/// send other messages before its answer. It ends on the line carrying this
+/// request's id, which is the answer by JSON-RPC's own correlation rule.
+///
+/// - Parameter asking: Whether the agent asks at all.
+/// - Returns: The shell statements, or the empty string.
+/// - Throws: A JSON-encoding failure.
+private func permissionExchangeStatements(asking: Bool) throws -> String {
+    guard asking else { return "" }
+    return """
+        \(printfLine(try permissionRequest()))
+              while IFS= read -r permissionAnswer; do
+                case "$permissionAnswer" in
+                  *'"id":\(permissionRequestID)'*) break ;;
+                esac
+              done
+        """
+}
+
+/// The `session/request_permission` request this stub sends in the middle of
+/// its turn.
+///
+/// It offers one option of each kind the binary tells apart — an allow and a
+/// rejection — and it names no structured subject, so the refusal line the
+/// binary writes quotes ``stubAgentPermissionTitle``.
+///
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func permissionRequest() throws -> String {
+    try ndjsonLine([
+        "id": permissionRequestID,
+        "jsonrpc": jsonRPCVersion,
+        "method": "session/request_permission",
+        "params": [
+            "options": [
+                [
+                    "kind": PermissionOptionKind.allowOnce.wireValue,
+                    "name": "Allow",
+                    "optionId": "allow-once",
+                ],
+                [
+                    "kind": PermissionOptionKind.rejectOnce.wireValue,
+                    "name": "Reject",
+                    "optionId": "reject-once",
+                ],
+            ],
+            "sessionId": stubAgentSessionID.rawValue,
+            "title": stubAgentPermissionTitle,
+        ],
+    ])
 }
 
 /// The `initialize` answer: the protocol version this client supports, the

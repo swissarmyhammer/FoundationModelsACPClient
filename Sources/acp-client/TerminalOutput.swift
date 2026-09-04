@@ -157,7 +157,22 @@ struct TerminalOutput: Sendable {
     ///   the line ending.
     func event(_ line: String) {
         guard verbosity == .verbose else { return }
-        sink(line + "\n")
+        writeLine(line)
+    }
+
+    /// Writes one teed ndJSON frame line, at every verbosity.
+    ///
+    /// `cli-plan.md` §6.1 makes `--frames` a debugging switch and not a
+    /// verbosity level, so a person who asked for the frames gets them at
+    /// `--quiet` too, and gets them whether or not standard error is a
+    /// terminal. That is why this is its own member rather than a call of
+    /// ``event(_:)``, which `--verbose` gates, or of ``error(_:)``, which says
+    /// something went wrong.
+    ///
+    /// - Parameter line: The teed line, already carrying its direction mark
+    ///   and no terminator. This layer adds the line ending.
+    func frame(_ line: String) {
+        writeLine(line)
     }
 
     /// Writes one error line, at every verbosity.
@@ -169,6 +184,17 @@ struct TerminalOutput: Sendable {
     /// - Parameter line: The error text, without a terminator. This layer adds
     ///   the line ending.
     func error(_ line: String) {
+        writeLine(line)
+    }
+
+    /// Hands one line and its terminator to ``sink``.
+    ///
+    /// The three entry points above differ in WHEN they write, and they agree
+    /// on WHAT a written line looks like. That agreement lives here, so a
+    /// caller of any of the three never writes its own line ending.
+    ///
+    /// - Parameter line: The text to write, without a terminator.
+    private func writeLine(_ line: String) {
         sink(line + "\n")
     }
 

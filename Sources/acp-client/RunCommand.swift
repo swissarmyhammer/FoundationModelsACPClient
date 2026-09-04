@@ -103,6 +103,7 @@ struct RunCommand: AsyncParsableCommand {
                 agent: agent,
                 prompt: promptText,
                 cwd: options.cwd,
+                frames: options.frames,
                 terminal: terminal
             )
         } catch {
@@ -112,6 +113,12 @@ struct RunCommand: AsyncParsableCommand {
             terminal.error(String(describing: error))
             throw AcpClientExitCode.forError(error).parserExitCode
         }
+
+        // The end of the turn is the last session event, and `--verbose` is
+        // the only place it can be reported: §8 gives standard output the
+        // answer text and no stop reason at all, and the exit code carries the
+        // outcome to a script rather than to a person.
+        terminal.event(Self.turnEndedEvent(for: outcome))
 
         let outcomeCode = Self.exitCode(for: outcome)
         guard outcomeCode != .success else { return }
@@ -145,6 +152,7 @@ struct RunCommand: AsyncParsableCommand {
     ///   - agent: The agent executable and its own arguments.
     ///   - prompt: The prompt of the turn.
     ///   - cwd: The `--cwd` value, or `nil` for the process working directory.
+    ///   - frames: Whether the command line carried `--frames`.
     ///   - terminal: The layer that owns standard error.
     /// - Returns: Why the turn ended.
     /// - Throws: ``AgentCommandResolutionFailure`` when the command resolves to
@@ -154,17 +162,56 @@ struct RunCommand: AsyncParsableCommand {
         agent: AgentCommand,
         prompt: String,
         cwd: String?,
+        frames: Bool,
         terminal: TerminalOutput
     ) async throws -> TurnOutcome {
         let executable = try AgentCommandResolver().resolve(agent.executable)
         let process = try AgentProcess(command: executable, arguments: agent.arguments)
         defer { process.shutdown() }
-        return try await driveTurn(
+        terminal.event("the agent started: \(executable)")
+        // The tee is bound here rather than passed inline, so it outlives the
+        // turn: `FrameTeeTransport.deinit` cancels the forwarding task that
+        // copies the agent's lines, and a value the caller dropped would stop
+        // teeing in the middle of the exchange.
+        let transport = sessionTransport(
             over: process.transport,
+            frames: frames,
+            terminal: terminal
+        )
+        return try await driveTurn(
+            over: transport,
             prompt: prompt,
             cwd: cwd,
             terminal: terminal
         )
+    }
+
+    /// Returns the transport ``AgentSession`` runs over.
+    ///
+    /// With `--frames` that is the agent's stdio behind a
+    /// ``FrameTeeTransport`` pointed at standard error, which is the whole of
+    /// what `cli-plan.md` §6.1 asks for: "write every ndJSON message to
+    /// stderr, in both directions, with a direction mark". Without the flag it
+    /// is the agent's stdio itself, so a default run pays nothing for a
+    /// debugging switch it did not ask for.
+    ///
+    /// The tee writes through ``TerminalOutput/frame(_:)`` and not through
+    /// ``TerminalOutput/event(_:)``, because `--frames` is independent of
+    /// `--quiet` and `--verbose`: it is a debugging switch and not a verbosity
+    /// level, and it writes its lines whether or not stderr is a terminal.
+    ///
+    /// - Parameters:
+    ///   - agentTransport: The started agent's stdio.
+    ///   - frames: Whether the command line carried `--frames`.
+    ///   - terminal: The layer that owns standard error.
+    /// - Returns: The transport to hand ``AgentSession``.
+    static func sessionTransport(
+        over agentTransport: any ACPTransport,
+        frames: Bool,
+        terminal: TerminalOutput
+    ) -> any ACPTransport {
+        guard frames else { return agentTransport }
+        return FrameTeeTransport(wrapping: agentTransport) { terminal.frame($0) }
     }
 
     /// Connects to the started agent, runs the turn, and closes the connection
@@ -210,6 +257,24 @@ struct RunCommand: AsyncParsableCommand {
         }
         await session.teardown()
         return try outcome.get()
+    }
+
+    /// Renders the end of the turn as the session event line `--verbose`
+    /// writes.
+    ///
+    /// The stop reason is spelled with its wire value, because that is the
+    /// text the agent put on the wire and the text a person compares against
+    /// the agent's own log.
+    ///
+    /// - Parameter outcome: Why the turn ended.
+    /// - Returns: The event line, without a terminator.
+    private static func turnEndedEvent(for outcome: TurnOutcome) -> String {
+        switch outcome {
+        case .stopped(let reason):
+            "the turn ended: \(reason.wireValue)"
+        case .idleWithNoReason:
+            "the turn ended, and the agent reported no stop reason"
+        }
     }
 
     /// Returns the exit code `cli-plan.md` §9 gives one turn outcome.

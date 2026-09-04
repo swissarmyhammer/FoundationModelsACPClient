@@ -1,11 +1,75 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m1pyacfhvsbhg9ps45wc8zd6
+  text: |-
+    ### Research
+
+    Read `RunCommand.swift`, `FrameTeeTransport.swift`, `SharedOptions.swift`, `TerminalOutput.swift`, `DecliningClient.swift`, `AgentSession.swift`, `TurnRunner.swift`, and the IntegrationTests support files.
+
+    What the wiring needs:
+    - `RunCommand.runTurn` hands `process.transport` straight to `driveTurn`. The tee goes between them, held in a local `let` so the tee outlives the turn (its `deinit` cancels the forwarding task).
+    - `TerminalOutput` has no member that writes at every verbosity but is not an error. `event(_:)` is gated at `.verbose`; `error(_:)` writes at every verbosity. `--frames` is a debugging switch and not a verbosity level, so it needs its own member.
+
+    Discovery that changes the scope of one acceptance row:
+
+    **`--verbose` writes ZERO bytes to stderr today.** Measured by hand: built `acp-client` and ran it against a `/bin/sh` stub agent with `--verbose`, stdout to a file and stderr to a file. stdout held 24 bytes (the answer, no trailing newline) and stderr held 0 bytes.
+
+    The cause: the only source of `TerminalOutput.event(_:)` lines in a run is the wire connection's own logger, and `Connection.log(_:)` is called on an ANOMALY alone — a malformed line, a dropped message, a transport failure. A clean run logs nothing. `AgentSession.closeSession(_:)` writes event lines too, but `RunCommand` never calls it.
+
+    So acceptance row 4 ("`--verbose` writes session event lines to stderr") cannot pass without the run emitting session events of its own. `cli-plan.md` §8 states the same requirement: "`--verbose` writes the session events, one line each." The plan puts three events in reach of `RunCommand`: the agent started, `initialize` answered, and the turn ended. Those go in this change.
+
+    Rows 2 and 3 (a default run and `--quiet` each write zero bytes) hold today and stay holding, because every new line is gated at `.verbose`.
+
+    Test-support gaps the card's Tests section needs:
+    - `runAcpClient` always gives the run a pipe for stdout. The "stdout a pipe and stdout a file" row needs a second standard-output case.
+    - `makeWellBehavedAgent` records a pid file and a transcript, but not its own `argv`.
+    - No stub asks for permission mid-turn.
+  timestamp: 2026-09-04T19:28:52.209765+00:00
+- actor: claude-code
+  id: 01m1pz2snrw59t787675a3zkh5
+  text: |-
+    ### What landed
+
+    Production, `Sources/acp-client/`:
+    - `TerminalOutput.frame(_:)` — one line at EVERY verbosity, `--quiet` included and whether or not stderr is a terminal. It is its own member rather than a call of `event(_:)` (which `--verbose` gates) or of `error(_:)` (which says something went wrong), because §6.1 makes `--frames` a debugging switch and not a verbosity level. The three entry points now share one private `writeLine(_:)`, so the line ending is stated once.
+    - `RunCommand.sessionTransport(over:frames:terminal:)` — the tee when `--frames` is given, the agent's own stdio otherwise. `runTurn` binds the result to a local `let` rather than passing it inline: `FrameTeeTransport.deinit` cancels the forwarding task, and a value the caller dropped would stop teeing mid-exchange.
+    - Session events for `--verbose`, which the research comment records as absent before this change: the agent started (`RunCommand.runTurn`), `initialize` answered by name/version/protocol version (`AgentSession.initialize()`), the session opened with its id and resolved cwd (`AgentSession.openSession()`), and the turn ended with its stop reason spelled as the wire value (`RunCommand.turnEndedEvent(for:)`).
+
+    Measured by hand against a `/bin/sh` stub, stdout and stderr separated:
+    - `--verbose` now writes four lines, and stdout still holds the 24 answer bytes.
+    - `--frames` writes 8 lines, 3 outbound under `>> ` and 5 inbound under `<< `.
+    - `--frames --quiet` still writes the frames, and stdout is the answer bytes alone.
+
+    Tests:
+    - `Tests/FoundationModelsACPClientTests/RunCommandTransportTests.swift` (new) — the flag decides, both directions are teed, and `--quiet` does not silence it. The exchange is driven over `InMemoryTransport.pair()` and the wait needs no polling: the tee copies an outbound line before `write(_:)` returns and an inbound line before it yields the chunk, so one chunk read off the transport proves both sink calls happened, or that there is no tee.
+    - `TerminalOutputTests` — `frame` writes one line at each of the three verbosities.
+    - `AgentSessionTests` — `initialize` names the agent, `openSession` names the session, and neither writes at the default verbosity.
+    - `IntegrationTests/.../StreamRulesTests.swift` (new) — one test per acceptance row, plus the pipe-against-file row.
+
+    Support, `IntegrationTests/.../Support/`:
+    - `CLIStandardOutput` and `runAcpClient(_:standardInput:standardOutput:environment:)`, with a `StandardOutputSink` that drains a pipe DURING the run and reads a file AFTER it. The pipe reader is bound out of the sink before the draining task starts: an `async let` sends whatever its expression touches, and Swift 6 refused the first shape that sent the whole sink.
+    - `makeWellBehavedAgent(argumentsFile:)`, which writes `"$@"` one per line. The redirection stands on the loop, so a run that passed no argument writes an EMPTY file rather than none.
+    - `makePermissionRequestingAgent(answer:)`, which sends `session/request_permission` and then BLOCKS on a read loop until the answer carrying its id arrives. The wait is deliberate: the connection dispatches an inbound request on a task of its own, so an agent that sent the idle update straight after would let the run tear down before the refusal line was written — and the wait also makes the test prove the binary ANSWERED rather than only logged.
+
+    ### For the docs task ^01M1MPM (record the CLI decisions in cli-plan.md)
+
+    §8 already says "`--verbose` writes the session events, one line each", and this change is what makes that true. The four events the run now writes are named above. Nothing in `cli-plan.md` needed to change for this card, but the doc task may want the four named.
+  timestamp: 2026-09-04T19:42:12.152548+00:00
+- actor: claude-code
+  id: 01m1pz2zypdd6b3eqb44bv94ev
+  text: |-
+    ### implement — changed
+    - evidence: 9 files. Production: `Sources/acp-client/RunCommand.swift`, `Sources/acp-client/AgentSession.swift`, `Sources/acp-client/TerminalOutput.swift`. Unit tests: `Tests/FoundationModelsACPClientTests/RunCommandTransportTests.swift` (new), `TerminalOutputTests.swift`, `AgentSessionTests.swift`. Integration: `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/StreamRulesTests.swift` (new), `Support/CLITestSupport.swift`, `Support/StubAgents.swift`. `timeout 420 swift test` — 187 tests in 13 suites passed, zero failures, zero warnings. `timeout 600 swift test --package-path IntegrationTests` — 25 tests in 5 suites passed, zero failures, zero warnings. Every acceptance row and every Tests row of the card has a test; none was left undone. `pgrep` after the run showed no leftover `acp-client` or stub-agent process.
+    - next: `/review`
+  timestamp: 2026-09-04T19:42:18.582541+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPD4MJ9KMVVQ316YSJPJHK
-position_column: todo
-position_ordinal: 8a80
+position_column: doing
+position_ordinal: '80'
 title: Wire --frames into run, and prove the two streams end to end
 ---
 ## What

@@ -79,6 +79,12 @@ private enum SpinnerText {
     /// The line a test hands to ``TerminalOutput/error(_:)``.
     static let failure = "the agent stopped"
 
+    /// The line a test hands to ``TerminalOutput/frame(_:)``.
+    ///
+    /// It carries a direction mark and an ndJSON message, because that is what
+    /// the `--frames` tee gives the layer.
+    static let frame = #">> {"id":1,"jsonrpc":"2.0","method":"initialize"}"#
+
     /// The mark Noora's progress step draws when the task returned.
     ///
     /// The interactive path sends it to `standardPipelines.output`, so this
@@ -273,6 +279,24 @@ struct TerminalOutputTests {
         harness.output.event(SpinnerText.event)
 
         #expect(harness.buffer.text == SpinnerText.event + "\n")
+    }
+
+    /// `cli-plan.md` §6.1 makes `--frames` a debugging switch and not a
+    /// verbosity level, so a teed line goes out at every verbosity — `--quiet`
+    /// among them — and outside a terminal as readily as in one.
+    @Test(
+        "frame writes one line at every verbosity",
+        arguments: [TerminalVerbosity.quiet, .normal, .verbose]
+    )
+    func frameWritesOneLineAtEveryVerbosity(verbosity: TerminalVerbosity) {
+        let harness = TerminalOutputHarness(
+            verbosity: verbosity,
+            standardErrorIsATerminal: false
+        )
+
+        harness.output.frame(SpinnerText.frame)
+
+        #expect(harness.buffer.text == SpinnerText.frame + "\n")
     }
 
     /// §8 gives `--quiet` its errors, because a run that fails silently is a

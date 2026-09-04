@@ -134,13 +134,19 @@ struct AgentSession {
     /// ``ACPClient/advertisedCapabilities``, so this binary advertises exactly
     /// what the container implements and nothing more.
     ///
+    /// The answer is the first session event `cli-plan.md` §8 gives
+    /// `--verbose`: it says who is on the far end of the transport, and which
+    /// protocol version that agent answered with. §8 keeps standard output for
+    /// the answer text alone, so `--verbose` is the only place a person can
+    /// read either fact.
+    ///
     /// - Returns: What the agent reported: its name, its version, its own
     ///   capabilities, and its authentication methods.
     /// - Throws: `RequestError` on a peer error, `ConnectionError` when the
     ///   agent went away, or `ProtocolVersionMismatchError` when the agent
     ///   answered with a version other than the one sent.
     func initialize() async throws -> InitializeResponse {
-        try await connection.initialize(
+        let response = try await connection.initialize(
             InitializeRequest(
                 info: Implementation(
                     name: AcpClient.commandName,
@@ -150,6 +156,13 @@ struct AgentSession {
                 capabilities: ACPClient.advertisedCapabilities
             )
         )
+        output.event(
+            """
+            initialize answered by \(response.info.name) \(response.info.version), \
+            protocol version \(response.protocolVersion.rawValue)
+            """
+        )
+        return response
     }
 
     /// Opens one session and subscribes to its updates.
@@ -159,6 +172,11 @@ struct AgentSession {
     /// that subscribed after driving the turn would lose every chunk the
     /// agent sent in between.
     ///
+    /// The session that opens is a session event of §8, and it carries the
+    /// resolved working directory beside the id: `--cwd` is the one option
+    /// this seam interprets rather than passes on, so the line reports what
+    /// the agent was actually told.
+    ///
     /// - Returns: The session the agent opened, and its update stream.
     /// - Throws: ``SessionWorkingDirectoryError`` when `--cwd` does not
     ///   resolve to an absolute path, `RequestError` on a peer error, or
@@ -166,6 +184,9 @@ struct AgentSession {
     func openSession() async throws -> (SessionId, AsyncStream<SessionUpdate>) {
         let cwd = try Self.sessionWorkingDirectory(for: requestedWorkingDirectory)
         let response = try await connection.newSession(NewSessionRequest(cwd: cwd))
+        output.event(
+            "session/new opened \(response.sessionId.rawValue) in \(cwd.rawValue)"
+        )
         return (response.sessionId, connection.updates(for: response.sessionId))
     }
 

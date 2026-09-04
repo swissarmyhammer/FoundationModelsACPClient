@@ -26,6 +26,9 @@ import Testing
 /// The path of the source file under test, from the repository root.
 private let agentSessionSourcePath = "Sources/acp-client/AgentSession.swift"
 
+/// The name ``ScriptedStubAgent`` reports in its `initialize` answer.
+private let stubAgentName = "stub-agent"
+
 /// The reply text the stub agent streams during a prompt turn.
 private let stubReplyText = "Hello from the stub."
 
@@ -182,7 +185,47 @@ func anAgentSessionInitializesOverTheInjectedTransport() async throws {
     let response = try await harness.session.initialize()
 
     #expect(response.protocolVersion == ACPClient.supportedProtocolVersion)
-    #expect(response.info.name == "stub-agent")
+    #expect(response.info.name == stubAgentName)
+    await harness.teardown()
+}
+
+/// `cli-plan.md` §8 gives `--verbose` the session events, one line each, and
+/// the answer to `initialize` is the first of them: it says who is on the far
+/// end of the transport, and which protocol version that agent answered with.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func initializeWritesOneEventNamingTheAgent() async throws {
+    let harness = await AgentSessionHarness(verbosity: .verbose)
+
+    _ = try await harness.session.initialize()
+
+    let written = harness.buffer.text
+    #expect(written.contains(stubAgentName), "the layer wrote \"\(written)\"")
+    await harness.teardown()
+}
+
+/// The session the agent opened is the next session event. A person debugging
+/// a foreign agent reads the id off `--verbose`, because §8 keeps standard
+/// output for the answer text and gives it no session id at all.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func openSessionWritesOneEventNamingTheSession() async throws {
+    let harness = await AgentSessionHarness(verbosity: .verbose)
+
+    _ = try await harness.openedSession()
+
+    let written = harness.buffer.text
+    #expect(written.contains(testSession.rawValue), "the layer wrote \"\(written)\"")
+    await harness.teardown()
+}
+
+/// §8 gives a default run nothing on stderr until it fails, so the seam's own
+/// events wait for `--verbose` exactly as the connection's diagnostics do.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func theSeamWritesNoEventAtTheDefaultVerbosity() async throws {
+    let harness = await AgentSessionHarness()
+
+    _ = try await harness.openedSession()
+
+    #expect(harness.buffer.elements.isEmpty, "the layer wrote \"\(harness.buffer.text)\"")
     await harness.teardown()
 }
 

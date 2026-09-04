@@ -100,6 +100,21 @@ enum CLIStandardInput {
     case terminal
 }
 
+/// Where a bounded `acp-client` run writes its standard output.
+///
+/// `cli-plan.md` §8 asks for the answer bytes verbatim, "in a terminal and in a
+/// pipe alike", because "a rule that changes with a terminal cannot be tested
+/// byte for byte". The two cases are the two descriptors a test can give the
+/// run and then read back, and they differ in the ways a program that decided
+/// by descriptor kind would notice: a pipe cannot seek and a regular file can.
+enum CLIStandardOutput {
+    /// A pipe, drained on a task of its own while the run goes.
+    case pipe
+
+    /// A regular file, read back once the run has exited.
+    case file
+}
+
 /// One finished `acp-client` run.
 ///
 /// The two streams stay `Data` rather than `String`, so a test can assert on the
@@ -147,6 +162,8 @@ func acpClientBinaryURL() throws -> URL {
 ///   - arguments: The command-line arguments for `acp-client`.
 ///   - standardInput: What the run gets on its standard input. The default is
 ///     an immediate end of file.
+///   - standardOutput: Where the run writes its standard output. The default is
+///     a pipe.
 ///   - environment: The whole environment for the run, or `nil` to inherit this
 ///     process's own.
 /// - Returns: The finished run.
@@ -156,10 +173,13 @@ func acpClientBinaryURL() throws -> URL {
 func runAcpClient(
     _ arguments: [String],
     standardInput: CLIStandardInput = .endOfFile,
+    standardOutput: CLIStandardOutput = .pipe,
     environment: [String: String]? = nil
 ) async throws -> CLIResult {
     let input = try StandardInputSource(standardInput)
     defer { input.tearDown() }
+    let output = try StandardOutputSink(standardOutput)
+    defer { output.tearDown() }
 
     let process = Process()
     process.executableURL = try acpClientBinaryURL()
@@ -168,17 +188,20 @@ func runAcpClient(
         process.environment = environment
     }
     process.standardInput = input.handle
-    let standardOutputPipe = Pipe()
     let standardErrorPipe = Pipe()
-    process.standardOutput = standardOutputPipe
+    process.standardOutput = output.destination
     process.standardError = standardErrorPipe
 
     try process.run()
-    // Both pipes drain on child tasks that start before the wait. A full pipe
-    // buffer blocks the child, so a run that wrote more than one buffer would
-    // never exit if the reads came after.
-    async let standardOutputData = readToEnd(standardOutputPipe.fileHandleForReading)
-    async let standardErrorData = readToEnd(standardErrorPipe.fileHandleForReading)
+    // Every pipe drains on a child task that starts before the wait. A full
+    // pipe buffer blocks the child, so a run that wrote more than one buffer
+    // would never exit if the reads came after. The handles are bound out of
+    // the sink first: an `async let` sends whatever its expression touches, and
+    // the sink itself is read again below, after the wait.
+    let outputPipeReader = output.pipeReader
+    let errorPipeReader = standardErrorPipe.fileHandleForReading
+    async let drainedOutput = drainedBytes(from: outputPipeReader)
+    async let standardErrorData = readToEnd(errorPipeReader)
 
     guard await exited(process, within: TransportTestDeadline.limit) else {
         kill(process.processIdentifier, SIGKILL)
@@ -189,7 +212,7 @@ func runAcpClient(
     }
     return CLIResult(
         exitCode: process.terminationStatus,
-        standardOutput: try await standardOutputData,
+        standardOutput: try await output.bytesWritten(drainedFromPipe: drainedOutput),
         standardError: try await standardErrorData
     )
 }
@@ -364,6 +387,88 @@ private struct StandardInputSource {
     }
 }
 
+/// The text that stands before the unique part of a standard-output file's
+/// name.
+private let standardOutputFileNamePrefix = "acp-client-stdout-"
+
+/// The descriptor one run writes its standard output to, and the cleanup that
+/// descriptor owes.
+///
+/// It is a value of its own because the two cases of ``CLIStandardOutput`` are
+/// read back at different moments. A pipe has to be drained WHILE the run goes,
+/// or a full buffer blocks the child; a file is read AFTER the run exits, and
+/// reading it early would race the writer.
+private struct StandardOutputSink {
+    /// What `Process.standardOutput` is set to: a `Pipe`, or a `FileHandle` on
+    /// a regular file.
+    let destination: Any
+
+    /// The read end of the pipe behind ``destination``, or `nil` when the run
+    /// writes a file.
+    ///
+    /// It is the handle rather than the whole `Pipe`, because the caller binds
+    /// it out before it starts the draining task: an `async let` sends whatever
+    /// its expression touches, and the sink itself is read again after the
+    /// wait.
+    let pipeReader: FileHandle?
+
+    /// The file behind ``destination``, or `nil` when the run writes a pipe.
+    private let file: URL?
+
+    /// This process's own handle on ``file``, or `nil` when the run writes a
+    /// pipe.
+    ///
+    /// `Process` duplicates the descriptor for the child, so this handle is
+    /// this process's copy and closing it in ``tearDown()`` takes nothing from
+    /// the run.
+    private let fileHandle: FileHandle?
+
+    /// Opens the standard output one run asked for.
+    ///
+    /// - Parameter standardOutput: Where the run writes its standard output.
+    /// - Throws: The creation failure of the temporary file.
+    init(_ standardOutput: CLIStandardOutput) throws {
+        switch standardOutput {
+        case .pipe:
+            let opened = Pipe()
+            destination = opened
+            pipeReader = opened.fileHandleForReading
+            file = nil
+            fileHandle = nil
+        case .file:
+            let created = try writeTemporaryFile(Data(), prefix: standardOutputFileNamePrefix)
+            let handle = try FileHandle(forWritingTo: created)
+            destination = handle
+            pipeReader = nil
+            file = created
+            fileHandle = handle
+        }
+    }
+
+    /// Everything the finished run wrote to its standard output.
+    ///
+    /// - Parameter drained: What ``drainedBytes(from:)`` read off ``pipeReader``
+    ///   while the run went, which is empty for a file.
+    /// - Returns: The bytes, whichever descriptor carried them.
+    /// - Throws: The read failure of the file.
+    func bytesWritten(drainedFromPipe drained: Data) throws -> Data {
+        guard let file else { return drained }
+        return try Data(contentsOf: file)
+    }
+
+    /// Closes this process's handle and removes the temporary file, where this
+    /// sink opened either.
+    ///
+    /// The removal is best effort, for the reason
+    /// ``StandardInputSource/tearDown()`` states.
+    func tearDown() {
+        try? fileHandle?.close()
+        if let file {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+}
+
 /// Writes the bytes a run gets on its standard input into a temporary file.
 ///
 /// - Parameter data: The bytes to give the run.
@@ -415,6 +520,22 @@ private func openPseudoTerminal() throws -> (master: Int32, slave: Int32) {
 /// - Throws: The read failure of the handle.
 private func readToEnd(_ handle: FileHandle) throws -> Data {
     try handle.readToEnd() ?? Data()
+}
+
+/// Drains one run's standard-output pipe, where the run was given a pipe at
+/// all.
+///
+/// A `nil` handle is a run whose standard output went to a regular file, and a
+/// file needs no draining: nothing can block on it, and
+/// ``StandardOutputSink/bytesWritten(drainedFromPipe:)`` reads it once the run
+/// has exited.
+///
+/// - Parameter handle: The read end of the pipe, or `nil` for a file.
+/// - Returns: Every byte the pipe carried, or nothing for a file.
+/// - Throws: The read failure of the pipe.
+private func drainedBytes(from handle: FileHandle?) throws -> Data {
+    guard let handle else { return Data() }
+    return try readToEnd(handle)
 }
 
 /// Waits for `process` to exit, and gives up at `limit`.

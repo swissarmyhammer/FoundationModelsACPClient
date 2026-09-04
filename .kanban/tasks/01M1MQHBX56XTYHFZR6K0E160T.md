@@ -148,14 +148,30 @@ comments:
     - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/RunCommandExitTests.swift. `timeout 420 swift test` — 180 tests in 12 suites passed, 0 failures. `timeout 600 swift test --package-path IntegrationTests` — 17 tests in 4 suites passed, 0 failures. `swift build --package-path IntegrationTests --build-tests` — 0 warnings, 0 errors. Both `code-hygiene/idioms-swift` testSuiteAccessControl findings are checked in the description.
     - next: /review
   timestamp: 2026-09-04T19:20:35.503702+00:00
+- actor: claude-code
+  id: 01m1py07z7yx8gaqfe2cn3v7va
+  text: |
+    ### review — clean
+    - evidence: `review sha 3802458~1..3802458` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. Both prior findings (RunCommandExitTests.swift:293 and :309, `code-hygiene/idioms-swift` testSuiteAccessControl) are resolved and checked: `TurnEnding` and `PromptRow` are internal, both `@Test` methods dropped `private`, and the comment that explained the old access level is gone.
+    - next: none — the task moved to `done`.
+  timestamp: 2026-09-04T19:23:19.911701+00:00
+- actor: claude-code
+  id: 01m1py0nxyyfwy5cvnm5rnanvv
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file; both testSuiteAccessControl findings removed at the cause. `TurnEnding` and `PromptRow` were `private` at file scope, and Swift lets no method be wider than its parameter types, so the two `@Test` methods that take them were held at `private` too. Making the two types internal releases both methods. The sweep of the rest of the suite found no second occurrence.
+    - test: green — root 180 passed in 12 suites, integration 17 passed in 4 suites, 0 failures; the integration test build reports 0 warnings
+    - commit: 3802458 fix(tests): make TurnEnding and PromptRow internal in RunCommandExitTests
+    - review: clean — zero new findings, both prior items confirmed in the diff, task moved to done
+  timestamp: 2026-09-04T19:23:34.206311+00:00
 depends_on:
 - 01M1MPFEP97Z6J3R0MRC6XXKAJ
 - 01M1MPARCGY1FHKNED47MDBWG8
 - 01M1MPB4MKQH0Z50EH2DDJHW3G
 - 01M1MPC2YVFK0A9NX4T9H4M0EV
 - 01M1MPECJSM165NAWX5F3NKX9A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9880'
 title: 'Wire RunCommand: spawn the agent, run the turn, and exit with the right code'
 ---
 ## What
