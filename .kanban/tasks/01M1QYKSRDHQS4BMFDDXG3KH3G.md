@@ -20,8 +20,31 @@ comments:
     - evidence: `rg -n -i "an other" .` finds no match. `swift package clean && swift build`: build complete, no warning line. `swift test`: 223 tests in 19 suites, 0 failures, 0 warnings, 0 skipped. `swift build --package-path IntegrationTests` (after a fresh `.build` resolve): build complete, no warning line. `swift test --package-path IntegrationTests`: 87 tests in 12 suites, 0 failures, 0 warnings, 0 skipped.
     - next: both suites are green. No fix was needed.
   timestamp: 2026-09-05T13:33:39.078887+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rwf6gxp6k91p1k71r0rgd7
+  text: |-
+    ### commit — changed
+    - evidence: 0198c4f docs(comments): change "an other" to "another" in Swift comments
+    - next: none. Working tree is clean. No push was made.
+  timestamp: 2026-09-05T13:35:01.661017+00:00
+- actor: claude-code
+  id: 01m1rwhpxe655ymgyd0mk545rm
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 0198c4f), 16 files reviewed, 0 findings, 7 validators attempted, 0 failed
+    - next: none. The task moved to `done`.
+  timestamp: 2026-09-05T13:36:23.982695+00:00
+- actor: claude-code
+  id: 01m1rwj4dsgb6p2r2wvpfhq7b7
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 17 replacements in 16 Swift files across the root package and `IntegrationTests`; `rg -n -i 'an other' .` now returns nothing
+    - test: green — root 223/223 in 19 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped, on fresh builds
+    - commit: 0198c4f
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T13:36:37.817260+00:00
+position_column: done
+position_ordinal: aa80
 title: Replace "an other" with "another" in the Swift comments of both packages
 ---
 ## What

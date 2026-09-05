@@ -11,19 +11,9 @@ import Testing
 // this test runner. Each test here spawns such a child, records it in an
 // `AgentProcessState` over a private registry, and runs the teardown.
 //
-// The children are `/bin/cat` and `/bin/sleep`, and not an ACP agent. The
-// tests that spawn a real foreign agent over stdio live in the nested
-// `IntegrationTests` package.
-
-/// The command for a child that reads its stdin until end of file.
-private let readingChildCommand = "/bin/cat"
-
-/// The command for a child that ignores its stdin.
-private let idleChildCommand = "/bin/sleep"
-
-/// The number of seconds the idle child sleeps. It is long enough that the
-/// child outlives the test unless the test kills it.
-private let idleChildSeconds = "300"
+// The children are the `StdioChild` commands, `/bin/cat` and `/bin/sleep`,
+// and not an ACP agent. The tests that spawn a real foreign agent over stdio
+// live in the nested `IntegrationTests` package.
 
 /// The time limits the teardown tests use.
 private enum TeardownTestDeadline {
@@ -96,15 +86,6 @@ private func spawnInThisProcessGroup(
     return GroupMemberChild(pid: pid, stdinWriteDescriptor: writeEnd)
 }
 
-/// Tells whether the process table holds `pid`. A reaped child is gone from
-/// the table; a live child and a zombie are both in it.
-///
-/// - Parameter pid: The pid to look for.
-/// - Returns: `true` when `kill(pid, 0)` finds the process.
-private func isInProcessTable(pid: pid_t) -> Bool {
-    kill(pid, 0) == 0
-}
-
 /// Kills `pid` and collects its exit status, so a child the teardown under
 /// test did not reap never outlives the test. A no-op for a pid that is
 /// already reaped.
@@ -126,7 +107,7 @@ struct AgentProcessTeardownTests {
     /// closes that stdin. The teardown must close it BEFORE it waits, or the
     /// child never exits and the wait never ends.
     @Test func teardownReapsAnAgentTheGroupKillMissedOnceItsStdinCloses() throws {
-        let child = try spawnInThisProcessGroup(command: readingChildCommand, arguments: [])
+        let child = try spawnInThisProcessGroup(command: StdioChild.readingCommand, arguments: [])
         defer { killAndReap(pid: child.pid) }
         let signalResult = killpg(child.pid, 0)
         let signalError = errno
@@ -144,13 +125,15 @@ struct AgentProcessTeardownTests {
         #expect(elapsed < TeardownTestDeadline.reapTimeLimit + TeardownTestDeadline.slack)
         #expect(state.pid == nil)
         #expect(registry.registeredPids.isEmpty)
-        #expect(!isInProcessTable(pid: child.pid))
+        #expect(!StdioChild.isInProcessTable(pid: child.pid))
     }
 
     /// A child that ignores its stdin outlives the teardown. The teardown must
     /// still return, by the reap time limit.
     @Test func teardownReturnsByTheDeadlineWhenTheAgentOutlivesTheGroupKill() throws {
-        let child = try spawnInThisProcessGroup(command: idleChildCommand, arguments: [idleChildSeconds])
+        let child = try spawnInThisProcessGroup(
+            command: StdioChild.idleCommand, arguments: [StdioChild.idleSeconds]
+        )
         defer { killAndReap(pid: child.pid) }
 
         let registry = ProcessRegistry()
@@ -165,6 +148,6 @@ struct AgentProcessTeardownTests {
         #expect(elapsed < TeardownTestDeadline.reapTimeLimit + TeardownTestDeadline.slack)
         #expect(state.pid == nil)
         #expect(registry.registeredPids.isEmpty)
-        #expect(isInProcessTable(pid: child.pid))
+        #expect(StdioChild.isInProcessTable(pid: child.pid))
     }
 }

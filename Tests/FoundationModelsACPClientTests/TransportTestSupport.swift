@@ -63,6 +63,32 @@ func eventually(
     return await condition()
 }
 
+/// Runs `work` and waits for its answer, or gives up when `limit` ends first.
+///
+/// The wait cancels `work` when the limit ends. A wait on a stream that
+/// never ends therefore stops at the limit, and the cancellation ends the
+/// iteration of the stream.
+///
+/// - Parameters:
+///   - limit: The longest time to wait.
+///   - work: The work to run.
+/// - Returns: The answer of `work`, or `nil` when the limit ended first.
+func outcome<Answer: Sendable>(
+    within limit: Duration = TransportTestDeadline.limit,
+    of work: @escaping @Sendable () async -> Answer
+) async -> Answer? {
+    await withTaskGroup(of: Answer?.self) { group in
+        group.addTask { await work() }
+        group.addTask {
+            try? await Task.sleep(for: limit)
+            return nil
+        }
+        let first = await group.next() ?? nil
+        group.cancelAll()
+        return first
+    }
+}
+
 /// Waits for an idle `state_update` on one session-update stream.
 ///
 /// - Parameters:
@@ -73,23 +99,14 @@ func waitForIdle(
     in updates: AsyncStream<SessionUpdate>,
     within limit: Duration = TransportTestDeadline.limit
 ) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask {
-            for await update in updates {
-                if case .stateUpdate(.idle(_)) = update {
-                    return true
-                }
+    await outcome(within: limit) {
+        for await update in updates {
+            if case .stateUpdate(.idle(_)) = update {
+                return true
             }
-            return false
         }
-        group.addTask {
-            try? await Task.sleep(for: limit)
-            return false
-        }
-        let sawIdle = await group.next() ?? false
-        group.cancelAll()
-        return sawIdle
-    }
+        return false
+    } ?? false
 }
 
 /// Makes the initialize request the transport tests send.

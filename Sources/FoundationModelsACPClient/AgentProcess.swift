@@ -68,7 +68,8 @@ public enum AgentProcessError: Error, Equatable, CustomStringConvertible {
     /// must resolve it to an absolute path first.
     case commandNotAbsolute(String)
 
-    /// Creating the stdin or stdout pipe failed; carries the C `errno`.
+    /// Creating the stdin or stdout pipe failed, or one of its ends could
+    /// not take the `FD_CLOEXEC` flag; carries the C `errno`.
     case pipeCreationFailed(errno: Int32)
 
     /// `posix_spawn` itself failed; carries the `command` path and the
@@ -153,6 +154,22 @@ public struct AgentProcess: Sendable {
     ///   ``AgentProcessError/spawnFailed(command:errno:)`` when
     ///   `posix_spawn` itself fails.
     public init(command: String, arguments: [String] = []) throws {
+        try self.init(command: command, arguments: arguments, registry: .global)
+    }
+
+    /// Spawns the agent process and registers its pid in `registry`.
+    ///
+    /// ``init(command:arguments:)`` registers in `ProcessRegistry.global`,
+    /// the registry every process this package starts shares. A unit test
+    /// spawns into a registry of its own, so its pids never reach the
+    /// process-wide registry that other tests read at the same time.
+    ///
+    /// - Parameters:
+    ///   - command: The absolute path of the agent executable.
+    ///   - arguments: The arguments to give to the agent.
+    ///   - registry: The registry for the spawned pid.
+    /// - Throws: The errors of ``init(command:arguments:)``.
+    init(command: String, arguments: [String] = [], registry: ProcessRegistry) throws {
         guard command.hasPrefix("/") else {
             throw AgentProcessError.commandNotAbsolute(command)
         }
@@ -160,7 +177,7 @@ public struct AgentProcess: Sendable {
         self.arguments = arguments
 
         let spawned = try Self.spawn(command: command, arguments: arguments)
-        let state = AgentProcessState(registry: .global)
+        let state = AgentProcessState(registry: registry)
         state.record(pid: spawned.pid, stdinWriteDescriptor: spawned.stdinWriteDescriptor)
         self.state = state
 
@@ -280,14 +297,40 @@ public struct AgentProcess: Sendable {
         return Spawned(pid: pid, stdinWriteDescriptor: stdinWrite, stdoutReadDescriptor: stdoutRead)
     }
 
-    /// Creates a pipe and returns its read and write ends.
+    /// Creates a pipe that no spawned child inherits, and returns its read
+    /// and write ends.
     ///
-    /// - Returns: The `(readEnd, writeEnd)` pair from `pipe(2)`.
-    /// - Throws: ``AgentProcessError/pipeCreationFailed(errno:)``.
+    /// A child that `posix_spawn` starts inherits every open descriptor of
+    /// this process, unless the descriptor carries `FD_CLOEXEC`. The file
+    /// actions of a spawn close the four ends of THAT spawn, inside THAT
+    /// child, and nothing else. A different child, which another
+    /// ``AgentProcess`` spawns while this agent is live, would get copies of
+    /// this process's two ends. Its copy of the write end keeps this agent's
+    /// stdin open after ``closeStandardInput()`` closed this process's own
+    /// copy, so the agent never reads its end of file. The flag goes on both
+    /// ends here, directly after `pipe(2)` and before any spawn on any
+    /// thread, so no child can inherit either end. The `dup2` file action
+    /// still puts the child's end on descriptor 0 or 1, because `dup2`
+    /// clears the flag on the new descriptor.
+    ///
+    /// - Returns: The `(readEnd, writeEnd)` pair from `pipe(2)`, each with
+    ///   `FD_CLOEXEC` set.
+    /// - Throws: ``AgentProcessError/pipeCreationFailed(errno:)`` when
+    ///   `pipe(2)` fails, or when the flag cannot be set on an end. No
+    ///   descriptor stays open after a throw.
     private static func createPipe() throws -> (readEnd: Int32, writeEnd: Int32) {
         var descriptors: [Int32] = [0, 0]
         guard pipe(&descriptors) == 0 else {
             throw AgentProcessError.pipeCreationFailed(errno: errno)
+        }
+        for descriptor in descriptors {
+            guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
+                let failure = errno
+                for open in descriptors {
+                    close(open)
+                }
+                throw AgentProcessError.pipeCreationFailed(errno: failure)
+            }
         }
         return (descriptors[0], descriptors[1])
     }
@@ -314,8 +357,11 @@ public struct AgentProcess: Sendable {
         defer { posix_spawn_file_actions_destroy(&fileActions) }
         posix_spawn_file_actions_adddup2(&fileActions, childStdin, childStdinDescriptor)
         posix_spawn_file_actions_adddup2(&fileActions, childStdout, childStdoutDescriptor)
-        // The child inherited copies of all four pipe descriptors across
-        // the fork; only the dup2 targets above must stay live in it.
+        // The child gets copies of all four pipe descriptors across the
+        // fork; only the dup2 targets above must stay live in it. Each of
+        // the four carries `FD_CLOEXEC` from `createPipe()`, so the exec
+        // drops them as well. These actions close them before the exec, so
+        // the child holds only 0 and 1 from the file actions on.
         for descriptor in [childStdin, childStdout] + parentSideFdsToClose {
             posix_spawn_file_actions_addclose(&fileActions, descriptor)
         }
