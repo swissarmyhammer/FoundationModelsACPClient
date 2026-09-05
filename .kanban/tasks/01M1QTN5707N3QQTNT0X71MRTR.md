@@ -101,8 +101,33 @@ comments:
     - evidence: `git status --porcelain` after both runs shows only the files the implement step already changed. No probe file or process was left behind.
     - next: `/review`.
   timestamp: 2026-09-05T14:59:02.860093+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1s1ap91zjnpx2zr5h4nnkzt
+  text: |-
+    ### commit — changed
+    - evidence: bf939f5 feat(session): send --cwd to the agent as typed
+    - next: proceed to the next step
+  timestamp: 2026-09-05T14:59:56.833862+00:00
+- actor: claude-code
+  id: 01m1s1jq6dx7btp2tqy2br4t87
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit `bf939f5`, "feat(session): send --cwd to the agent as typed"). Counts: 0 findings, 0 confirmed, 0 refuted, 14 attempted, 0 failed. 15 files reviewed. Not reviewed: `README.md` and `cli-plan.md` (no validator matches these files), and 2 files under `.kanban/` (excluded by `.reviewignore`).
+    - evidence: the description holds no earlier `## Review Findings` section, so no review item is open.
+    - note: the "Answer 1" acceptance box in the description stays open by decision. Answer 2 was decided (see the first comment), and the two answers exclude each other. That open box is not a review finding.
+    - next: none. The card moved from `review` to `done`.
+  timestamp: 2026-09-05T15:04:19.917954+00:00
+- actor: claude-code
+  id: 01m1s1kbbwrv2m3151h7retpqt
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 17 files. `Sources/AcpClientCore/AgentSession.swift` sends `--cwd` as typed and keeps one error, `ProcessWorkingDirectoryError`; doc sweeps in `ProbeCommand.swift`, `RunCommand.swift`, `TurnRunner.swift`, `README.md`; `cli-plan.md` §6.1 records that the agent is the only judge. Red then green for `aRelativeCwdReachesNewSessionAsTyped`, `anEmptyProcessWorkingDirectoryIsReportedAndNoSessionOpens`, the §6.1 plan guard, and the integration test with the judging stub agent (exit 0 → exit 1 with field and reason on stderr). `FoundationModelsACP` resolved at `3b0a4fd`, after the wire fix `f6e2b6e`.
+    - test: green — root 227/227 in 20 suites, integration 89/89 in 12 suites, 0 warnings, 0 skipped
+    - commit: bf939f5
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T15:04:40.572041+00:00
+position_column: done
+position_ordinal: ae80
 title: 'Send --cwd to the agent as typed: delete the client-side resolution and the dead error'
 ---
 ## What
