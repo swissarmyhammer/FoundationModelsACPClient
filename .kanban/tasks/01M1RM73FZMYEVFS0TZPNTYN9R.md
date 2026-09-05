@@ -91,8 +91,31 @@ comments:
     - No worktree was made. No push. No commit.
     - next: send the card to review.
   timestamp: 2026-09-05T14:00:42.963685+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1ry036rjw69nndty4zbmrwq
+  text: |-
+    ### commit — changed
+    - sha: 8629eafb253c537ade6a4a9fb4dc273dae223cb4
+    - subject: style(process): rename cleanup loop variable in createPipe
+  timestamp: 2026-09-05T14:01:43.896684+00:00
+- actor: claude-code
+  id: 01m1ry2ewtppwg8vwk5qe19kdy
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 8629eaf) — 0 findings, 1 file reviewed, 7 validators attempted, 0 failed. The one prior finding of 2026-09-05 08:51 is checked.
+    - next: none. The task is in `done`.
+  timestamp: 2026-09-05T14:03:01.402136+00:00
+- actor: claude-code
+  id: 01m1ry303vwgvzvy1h6ygebaqp
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — `Sources/FoundationModelsACPClient/AgentProcess.swift`: the cleanup loop in `createPipe()` names its variable `descriptor`. 1 of 1 findings checked.
+    - test: green — root 224/224 in 20 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped, on clean rebuilds; no child process outlived the runs
+    - commit: 8629eaf
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T14:03:19.035284+00:00
+position_column: done
+position_ordinal: ab80
 title: AgentProcess.spawn lets a second agent inherit the first agent's pipe ends
 ---
 ## What

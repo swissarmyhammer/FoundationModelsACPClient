@@ -308,7 +308,7 @@ package writes one `Doctorable` conformance over an agent command:
 | It writes valid ndJSON, and nothing else, to stdout | An agent that prints a banner to stdout — the most common ACP defect |
 | `initialize` answers inside a time limit | An agent that hangs |
 | The protocol version is one we support | A v1 agent, or a newer draft |
-| The `initialize` answer decodes, and no member of `capabilities` is dropped in silence | A malformed `initialize` result |
+| The `initialize` answer decodes, and no member of `capabilities` and no element of `authMethods` is dropped in silence | A malformed `initialize` result |
 | The process ends when its stdin closes, and it leaves no child | A leaked agent |
 
 The third row is worth the command on its own. `plan.md` for the agent
@@ -334,13 +334,21 @@ decodes the raw answer itself and compares the two results. Only `info`
 and `protocolVersion` can make the decode throw, and the row reports that
 as an ERROR.
 
-The row compares the members of `capabilities` ALONE. It reads
-`capabilities` out of the raw answer, it reads the same member out of the
-decoded value, and it names each member that the raw answer holds and the
-decoded value does not. Each such member is a WARNING. The row does NOT
-yet read `authMethods`, which decodes in the same way, so an agent that
-sends a malformed `authMethods` gets no warning for it. Card ^1qfgtye
-holds that work.
+The row reads two members of the raw answer, `capabilities` and
+`authMethods`, and there are three cases for each member. A member that
+is absent, or that is `null`, is no loss: the schema lets an agent leave
+each member out, and `null` is one way to write absent. A member of the
+wrong shape is a WARNING that names the member, because the decode drops
+the whole of it: a `capabilities` member that is not an object, or an
+`authMethods` member that is not an array. A member of the correct shape
+is compared with the decoded value. For `capabilities` the comparison is
+by NAME: the row names each member that the raw object holds and the
+decoded value does not. For `authMethods` the comparison is by COUNT
+alone. `AuthMethod` is the wire's own union, and this package must not
+spell what a correct element looks like. So an element that the raw
+array holds and the decoded array does not is a dropped one, and the row
+reports how many were dropped. Every loss stands on the one row, so a
+person repairs the agent in one pass.
 
 **Row 7 watches the process GROUP, and it runs BEFORE the teardown.**
 `kill(pid, 0)` cannot tell an agent that runs from an unreaped zombie of

@@ -132,6 +132,39 @@ private enum PlanSection {
             }
             .map { String($0.element) }
     }
+
+    /// The text that ends one sentence of the plan and opens the next.
+    static let sentenceEnd = ". "
+
+    /// Returns the given name as the plan writes it, inside a code span.
+    ///
+    /// - Parameter name: A member name, as the wire spells it.
+    /// - Returns: The name between two backticks.
+    static func codeSpan(_ name: String) -> String {
+        String(quoteMark) + name + String(quoteMark)
+    }
+
+    /// Returns the sentences of a section, each one whole.
+    ///
+    /// The lines are joined first, because Markdown wraps a paragraph and a
+    /// sentence therefore need not stand whole on one line.
+    ///
+    /// - Parameter lines: The lines of one section.
+    /// - Returns: The text between one sentence end and the next, in order.
+    static func sentences(of lines: [Substring]) -> [String] {
+        lines.joined(separator: " ").components(separatedBy: sentenceEnd)
+    }
+
+    /// Returns the words of one sentence, in lower case.
+    ///
+    /// A word is a run of letters, so a code span contributes the name it
+    /// holds and a capitalised word reads the same as a plain one.
+    ///
+    /// - Parameter sentence: One sentence of the plan.
+    /// - Returns: The distinct words.
+    static func words(of sentence: String) -> Set<String> {
+        Set(sentence.lowercased().split { !$0.isLetter }.map(String.init))
+    }
 }
 
 /// Pins the statements `cli-plan.md` and `README.md` make about the shipped
@@ -167,6 +200,70 @@ struct PlanDocumentTests {
 
     /// The name of the binary, which `README.md` must give a reader.
     private static let binaryName = "acp-client"
+
+    /// The heading opening of the `doctor` section of the plan.
+    private static let doctorHeading = "## 10."
+
+    /// The member of a raw `initialize` answer that the sixth row of the §10
+    /// check table compares by name, as the wire spells it.
+    private static let capabilitiesMember = "capabilities"
+
+    /// The member of a raw `initialize` answer that the sixth row of the §10
+    /// check table compares by count, as the wire spells it.
+    private static let authMethodsMember = "authMethods"
+
+    /// Every member the sixth row reads. `AgentCommandDoctor.capabilitiesCheck`
+    /// reads both, and §10 must say so of both.
+    private static let membersRowSixReads = [capabilitiesMember, authMethodsMember]
+
+    /// The two words that, together in one sentence about a member, state that
+    /// the row does not read it.
+    private static let denialWords: Set<String> = ["not", "read"]
+
+    @Test("section 10 states that row 6 reads every member the doctor compares")
+    func sectionTenStatesThatRowSixReadsEveryMember() throws {
+        let section = try PlanSection.lines(
+            under: Self.doctorHeading,
+            of: PlanSection.planPath
+        )
+        let capabilitiesSpan = PlanSection.codeSpan(Self.capabilitiesMember)
+        let row = try #require(
+            PlanSection.firstCells(of: section).first { $0.contains(capabilitiesSpan) },
+            """
+            \(PlanSection.planPath) section 10 must hold a check-table row that \
+            names \(capabilitiesSpan): that row is the decode check.
+            """
+        )
+        for member in Self.membersRowSixReads {
+            let span = PlanSection.codeSpan(member)
+            #expect(
+                row.contains(span),
+                """
+                \(PlanSection.planPath) section 10: the check-table row that names \
+                \(capabilitiesSpan) must also name \(span), because \
+                AgentCommandDoctor.capabilitiesCheck reads both members of the raw \
+                initialize answer. The row reads: \(row)
+                """
+            )
+        }
+
+        let denials = PlanSection.sentences(of: section).filter { sentence in
+            let mentionsAMember = Self.membersRowSixReads.contains { member in
+                sentence.contains(PlanSection.codeSpan(member))
+            }
+            return mentionsAMember && Self.denialWords.isSubset(of: PlanSection.words(of: sentence))
+        }
+        #expect(
+            denials.isEmpty,
+            """
+            \(PlanSection.planPath) section 10 must not say that row 6 does not read \
+            a member it reads. AgentCommandDoctor.capabilitiesCheck reads \
+            \(Self.membersRowSixReads), and a plan that says otherwise sends a \
+            reader to repair a check that already runs. These sentences say so: \
+            \(denials)
+            """
+        )
+    }
 
     @Test("the plan states the permission and elicitation policy")
     func thePlanStatesTheDeclinePolicy() throws {
