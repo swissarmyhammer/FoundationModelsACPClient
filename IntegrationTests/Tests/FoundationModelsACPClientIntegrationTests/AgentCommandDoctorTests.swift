@@ -11,10 +11,17 @@ import Testing
 // the person reading the report after the wrong repair, and only a per-row
 // assertion catches that.
 //
-// The five rows here are the first five: the command resolves, the process
+// The seven rows here are the whole table: the command resolves, the process
 // starts and does not end at once, standard output carries ndJSON and nothing
-// else, `initialize` answers inside the time limit, and the protocol version is
-// the one that was sent. The two rows after them belong to the following task.
+// else, `initialize` answers inside the time limit, the protocol version is the
+// one that was sent, the answer this build read is the answer the agent sent,
+// and the agent leaves nothing behind when its stdin closes.
+//
+// The sixth row is the one row a test can make pass by accident. `capabilities`
+// and `authMethods` both decode forgivingly, so a check that read the DECODED
+// answer would report `ok` against every agent, malformed ones included. The
+// two tests below drive agents that send an answer this build cannot read, and
+// they are what state that the row can fail at all.
 //
 // The suite lives in the nested `IntegrationTests` package because every row
 // after the first spawns a real agent. The root `swift test` never sees this
@@ -47,6 +54,8 @@ private let checkNamesInOrder = [
     AgentCommandDoctor.standardOutputCheckName,
     AgentCommandDoctor.initializeCheckName,
     AgentCommandDoctor.protocolVersionCheckName,
+    AgentCommandDoctor.capabilitiesCheckName,
+    AgentCommandDoctor.teardownCheckName,
 ]
 
 /// Names a bare command that no `PATH` directory holds.
@@ -60,19 +69,23 @@ private func unresolvableAgentCommand() -> String {
     "acp-client-doctor-no-such-agent-\(UUID().uuidString)"
 }
 
-/// The first five rows of the `doctor` check table, against real agents.
+/// Every row of the `doctor` check table, against real agents.
 ///
 /// Serialized and time-limited, in the same way as every other suite in this
 /// package: each test here spawns real processes, so the tests must not share
 /// a moment on a loaded machine.
 @Suite(
-    "AgentCommandDoctor: the command, the process, stdout, initialize and the version",
+    "AgentCommandDoctor: every row of the check table, against real agents",
     .serialized,
     .timeLimit(.minutes(doctorSuiteTimeLimitMinutes))
 )
 struct AgentCommandDoctorTests {
     /// The text that stands before the unique part of a pid file's name.
     private static let pidFileNamePrefix = "acp-client-doctor-agent-pid-"
+
+    /// How many pids ``makeChildLeavingAgent(pidFile:)`` records: its own, and
+    /// its child's.
+    private static let childLeavingAgentPidCount = 2
 
     /// The number of seconds ``shortTimeLimit`` covers.
     private static let shortTimeLimitSeconds = 2
@@ -202,7 +215,10 @@ struct AgentCommandDoctorTests {
         // the same shape. `HealthStatus` states no "skipped", so a row that
         // did not run is a warning naming the row to repair first.
         #expect(checks.map(\.name) == checkNamesInOrder)
-        #expect(checks.map(\.status) == [.error, .warning, .warning, .warning, .warning])
+        #expect(
+            checks.map(\.status)
+                == [.error, .warning, .warning, .warning, .warning, .warning, .warning]
+        )
         #expect(checks.first?.message.contains(command) == true)
         for skipped in checks.dropFirst() {
             #expect(skipped.message.contains(AgentCommandDoctor.commandCheckName))
@@ -217,7 +233,9 @@ struct AgentCommandDoctorTests {
         let checks = await Self.doctor(over: script).runHealthChecks()
 
         #expect(checks.map(\.name) == checkNamesInOrder)
-        #expect(checks.map(\.status) == [.ok, .error, .warning, .warning, .warning])
+        #expect(
+            checks.map(\.status) == [.ok, .error, .warning, .warning, .warning, .warning, .warning]
+        )
         for skipped in checks.dropFirst(2) {
             #expect(skipped.message.contains(AgentCommandDoctor.processCheckName))
         }
@@ -231,7 +249,7 @@ struct AgentCommandDoctorTests {
         let (checks, elapsed) = await Self.timedChecks(over: script)
 
         #expect(checks.map(\.name) == checkNamesInOrder)
-        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok])
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .ok, .ok])
         // A conformant agent writes to stdout only in ANSWER to a request, so a
         // standard-output row that read before it asked would wait here for
         // ever. The bound is what states that it does not.
@@ -260,7 +278,7 @@ struct AgentCommandDoctorTests {
         // The wire package logs a line it cannot decode and reads the next one,
         // so the handshake still completes. That is what makes this row worth
         // the command on its own: it is the only row that catches the defect.
-        #expect(checks.map(\.status) == [.ok, .ok, .error, .ok, .ok])
+        #expect(checks.map(\.status) == [.ok, .ok, .error, .ok, .ok, .ok, .ok])
         #expect(elapsed < Self.runReturnBound, "the checks took \(elapsed)")
     }
 
@@ -281,9 +299,14 @@ struct AgentCommandDoctorTests {
             "the row did not name the limit it reached: \(initialize.message)"
         )
         // The agent wrote nothing, so the standard-output row had nothing to
-        // judge and the protocol-version row had no answer to read. Both are
-        // reported as rows that did not run, beside the error that caused it.
-        #expect(checks.map(\.status) == [.ok, .ok, .warning, .error, .warning])
+        // judge, and neither the protocol-version row nor the capabilities row
+        // had an answer to read. All three are reported as rows that did not
+        // run, beside the error that caused it. The teardown row needs no
+        // answer at all, so it still runs, and this agent ends when its stdin
+        // closes.
+        #expect(
+            checks.map(\.status) == [.ok, .ok, .warning, .error, .warning, .warning, .ok]
+        )
         #expect(
             elapsed < Self.runReturnBound,
             "the checks took \(elapsed) against a silent agent"
@@ -310,8 +333,101 @@ struct AgentCommandDoctorTests {
             "the row did not name the version the agent answered: \(version.message)"
         )
         // The agent DID answer, and it answered in time, so the fourth row
-        // passes and the failure stands on the fifth row alone.
-        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .error])
+        // passes and the failure stands on the fifth row alone. The answer is
+        // also readable and the agent goes away, so the last two rows pass.
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .error, .ok, .ok])
+    }
+
+    @Test("an initialize answer that omits protocolVersion fails the capabilities row")
+    func anUndecodableInitializeAnswerFailsTheCapabilitiesRow() async throws {
+        let script = try makeMissingProtocolVersionAgent()
+        defer { removeAgentScript(script) }
+
+        let (checks, elapsed) = await Self.timedChecks(
+            over: script,
+            timeLimit: Self.shortTimeLimit
+        )
+
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .error)
+        // The row names the member it could not read, because the person who
+        // has to repair the agent needs to know which one it is.
+        #expect(
+            capabilities.message.contains("protocolVersion"),
+            "the row did not name the member it could not read: \(capabilities.message)"
+        )
+        #expect(elapsed < Self.runReturnBound, "the checks took \(elapsed)")
+    }
+
+    @Test("a capabilities member this build cannot read warns on the capabilities row")
+    func unreadableCapabilitiesWarnOnTheCapabilitiesRow() async throws {
+        let script = try makeUnreadableCapabilitiesAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The handshake SUCCEEDED. `capabilities` decodes forgivingly, so every
+        // other row passes and the client is left believing this agent serves no
+        // `session/*` method at all. This row is the only one that says so, and
+        // a silent `ok` here would be the defect rather than the check.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .warning)
+        #expect(
+            capabilities.message.contains("session"),
+            "the row did not name the member the decode dropped: \(capabilities.message)"
+        )
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("an agent that ignores a closed stdin warns on the teardown row, and asks for exit 5")
+    func anAgentThatIgnoresAClosedStdinWarnsOnTheTeardownRow() async throws {
+        let pidFile = temporaryFileURL(prefix: Self.pidFileNamePrefix)
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let script = try makeLingeringAgent(pidFile: pidFile.path)
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        let teardown = try Self.row(named: AgentCommandDoctor.teardownCheckName, in: checks)
+        #expect(teardown.status == .warning)
+        // Such an agent is usable and it leaks, so the report's verdict is a
+        // warning rather than an error, and `cli-plan.md` §9 gives that verdict
+        // exit code 5. This row is why the doctor needs that code at all.
+        let worst = DoctorReport(checks: checks).worstStatus
+        #expect(worst == .warning)
+        #expect(AcpClientExitCode.forDoctorStatus(worst) == .doctorWarning)
+        let pid = try recordedAgentPid(in: pidFile)
+        #expect(
+            await eventually { !processExists(pid) },
+            "the agent with pid \(pid) outlived the checks"
+        )
+    }
+
+    @Test("an agent that ends and leaves a child warns on the teardown row")
+    func anAgentThatLeavesAChildWarnsOnTheTeardownRow() async throws {
+        let pidFile = temporaryFileURL(prefix: Self.pidFileNamePrefix)
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let script = try makeChildLeavingAgent(pidFile: pidFile.path)
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The agent itself obeyed the rule and ended. A row that read the
+        // agent's own pid alone would report `ok` here, while the child it left
+        // was still holding the machine.
+        let teardown = try Self.row(named: AgentCommandDoctor.teardownCheckName, in: checks)
+        #expect(teardown.status == .warning)
+        let pids = try recordedAgentPids(in: pidFile)
+        #expect(
+            pids.count == Self.childLeavingAgentPidCount,
+            "the agent recorded \(pids.count) pids rather than \(Self.childLeavingAgentPidCount)"
+        )
+        for pid in pids {
+            #expect(
+                await eventually { !processExists(pid) },
+                "the process with pid \(pid) outlived the checks"
+            )
+        }
     }
 
     @Test("no agent process outlives the checks")

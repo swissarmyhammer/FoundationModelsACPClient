@@ -179,6 +179,23 @@ public struct AgentProcess: Sendable {
         state.terminateCurrent()
     }
 
+    /// Closes the agent's stdin and leaves the agent running.
+    ///
+    /// This is the polite half of a teardown, and it is the only way to ask an
+    /// agent to end on its own terms: an ACP agent reads its stdin until EOF,
+    /// so a closed stdin is the wire's own "no more requests are coming".
+    /// ``shutdown()`` is the impolite half, and it never asks.
+    ///
+    /// A caller that wants the agent gone still runs ``shutdown()`` after.
+    /// Nothing here waits, nothing here kills, and an agent that ignores the
+    /// EOF keeps running.
+    ///
+    /// Idempotent, and a no-op after teardown. Every ``write(_:)`` after this
+    /// call fails with ``AgentProcessError/agentUnavailable``.
+    public func closeStandardInput() {
+        state.closeStandardInput()
+    }
+
     // MARK: - Spawning
 
     /// One freshly spawned agent: its pid and this process's ends of the
@@ -430,8 +447,10 @@ final class AgentProcessState: Sendable {
     private struct Live {
         /// The agent's pid, equal to its process-group id.
         var pid: pid_t
-        /// The write end that feeds the agent's stdin.
-        var stdinWriteDescriptor: Int32
+        /// The write end that feeds the agent's stdin, or `nil` once that end
+        /// is closed. A closed stdin leaves the agent live: it is the EOF the
+        /// agent reads, and not the end of the agent.
+        var stdinWriteDescriptor: Int32?
     }
 
     /// The live agent, or `nil` before the record and after teardown.
@@ -471,11 +490,27 @@ final class AgentProcessState: Sendable {
     ///   ``AgentProcessError/writeFailed(errno:)`` when the write fails.
     func writeToStdin(_ data: Data) throws {
         try live.withLock { current in
-            guard let current else {
+            guard let descriptor = current?.stdinWriteDescriptor else {
                 throw AgentProcessError.agentUnavailable
             }
-            try Self.fullyWrite(current.stdinWriteDescriptor, data)
+            try Self.fullyWrite(descriptor, data)
         }
+    }
+
+    /// Closes the agent's stdin and keeps the agent recorded.
+    ///
+    /// The take-and-clear of the descriptor happens inside the same lock every
+    /// write and every teardown takes, so the close never races a write and no
+    /// descriptor is closed twice. The pid stays, because the agent stays: this
+    /// hands the agent an EOF and nothing else.
+    func closeStandardInput() {
+        let taken = live.withLock { current -> Int32? in
+            let descriptor = current?.stdinWriteDescriptor
+            current?.stdinWriteDescriptor = nil
+            return descriptor
+        }
+        guard let taken else { return }
+        close(taken)
     }
 
     /// Group-kills and reaps the recorded agent, closes its stdin, and
@@ -483,6 +518,7 @@ final class AgentProcessState: Sendable {
     /// inside the lock — so every teardown trigger can call it safely, in
     /// any order, any number of times. A `killpg` of an already-dead group
     /// is a harmless `ESRCH`, and `waitpid` runs exactly one time per pid.
+    /// A stdin ``closeStandardInput()`` already closed is left alone.
     func terminateCurrent() {
         let taken = live.withLock { current -> Live? in
             let recorded = current
@@ -493,7 +529,9 @@ final class AgentProcessState: Sendable {
         _ = killpg(taken.pid, SIGKILL)
         var status: Int32 = 0
         _ = waitpid(taken.pid, &status, 0)
-        close(taken.stdinWriteDescriptor)
+        if let descriptor = taken.stdinWriteDescriptor {
+            close(descriptor)
+        }
         registry.deregister(taken.pid)
     }
 

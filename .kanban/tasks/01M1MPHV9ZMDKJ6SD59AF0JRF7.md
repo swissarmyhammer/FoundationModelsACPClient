@@ -84,11 +84,42 @@ comments:
     - evidence: 3 files — Sources/AcpClientCore/AgentCommandDoctor.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift. `timeout 420 swift test` → 201 tests in 15 suites passed. `timeout 600 swift test --package-path IntegrationTests` → 46 tests in 8 suites passed. Zero failures, zero warnings, zero skipped. Both builds clean. The card's file paths were corrected on the description, and the change to check 3 is recorded there with its reason.
     - next: `/review`
   timestamp: 2026-09-05T00:05:43.090190+00:00
+- actor: claude-code
+  id: 01m1qej8hd1e35qx1f0dwsdjnw
+  text: |-
+    ### review — clean
+    - evidence: `review sha 67974d4~1..67974d4`, 3 files reviewed, 7 validators attempted, 0 findings, 0 confirmed, 0 refuted. `swift test --package-path IntegrationTests --filter AgentCommandDoctor` — 11 tests, 1 suite, 0 failures, 0 warnings.
+    - judgement points, all verified:
+      1. The change to check 3 is sound. A conformant ACP agent answers only a request, so a read of the first stdout line before `initialize` waits for ever. The replacement reads nothing on its own: it judges the reading the `FrameTeeTransport` sink built, so it ends when the handshake ends and the row-4 limit bounds that. It still catches the banner, because the tee calls its sink BEFORE it yields the chunk, so every line ahead of the answer is recorded before the connection can see the answer. "First OFFENDING line" is stronger than "first line" and adds no false report: outbound lines and the tee's `[incomplete]` tail are both dropped.
+      2. The cancellation returns, and nothing leaks. `Connection.request` wraps the continuation in `withTaskCancellationHandler`, and `onCancel` runs `cancelOutbound(id:)`, which resumes the pending continuation with `CancellationError`. `Connection` is an actor and the registration holds no suspension point between the `Task.isCancelled` guard and `pending[id] = ...`, so a cancel cannot arrive between the two and be lost. `defer { limiter.cancel() }` ends the limiter on the answering path. No `requestTimeout` is set anywhere in `Sources`, so the doctor's own limit is the only bound and `.timeLimitReached` is reachable. The silent-agent tests return at 2.52s against a 2s limit plus the 0.5s settle.
+      3. Both row vectors are right. Banner agent `[ok, ok, error, ok, ok]`: the read loop answers a line it cannot decode with a parse error and reads the next one, so the banner fails row 3 and leaves rows 4 and 5 passing. Rows 4 and 5 reporting `ok` beside a failing row 3 is the point §10 makes about this row — a stdout defect that does not break the handshake, and the only row that catches it. Silent agent `[ok, ok, warning, error, warning]`: no line to judge and no answer to read, so rows 3 and 5 are rows that did not run, and §9 ranks the row-4 error above them.
+      4. §11 holds on every path. `defer { agent.shutdown() }` stands from the moment `AgentProcess` is built, and `AgentProcessState.terminateCurrent()` is `killpg(SIGKILL)` followed by a blocking `waitpid`, so the group is dead and reaped before the function returns. `runHealthChecks()` throws nothing and `connectedChecks` always returns, so the defer runs on the failing branches too. Three tests assert this with `kill(pid, 0)`, on the passing branch, the time-limit branch and the version-mismatch branch.
+    - next: task moved to done. Checks 6 and 7 stand on ^t3y93w4.
+  timestamp: 2026-09-05T00:12:47.533683+00:00
+- actor: claude-code
+  id: 01m1qekd5gmdnbz96pfe69mep7
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files. Rows 3 to 5 of the §10 table landed in `AgentCommandDoctor`. The card's stale `Sources/acp-client/` paths are corrected on the description.
+    - test: green — root 201 passed in 15 suites, integration 46 passed in 8 suites, 0 failures and 0 warnings
+    - commit: 67974d4 feat(doctor): add checks 3-5 to AgentCommandDoctor for stdout ndJSON, initialize timing, and version match
+    - review: clean — zero findings, task moved to done
+
+    Check 3 could not be written as the card asked, and the review confirmed the reasoning. An ACP agent is the responder: it writes to stdout only in answer to a request, so a blocking read placed before `initialize` waits for ever against a CONFORMANT agent. The row now sends `initialize`, lets the row-4 time limit bound the wait, and judges every complete line the frame tee already recorded. It still catches the banner, and the ordering is a guarantee rather than a hope: `FrameTeeTransport` sinks every whole line BEFORE it yields the chunk, so a line standing ahead of the answer is recorded before the connection can see the answer.
+
+    Two things the review checked that the implementer did not claim:
+    - There is no lost-cancel window. `Connection` is an actor, and no suspension point stands between the cancellation check and the store of the pending continuation, so a cancel cannot interleave and find nothing to fail.
+    - No competing timeout. `Connection.requestTimeout` defaults to nil and nothing under `Sources/` passes one, so the doctor's own limiter is the only bound and the time-limit row is genuinely reachable.
+
+    One correction to my own instructions: in the banner vector `[ok, ok, error, ok, ok]`, row 3 is the ERROR. Rows 4 and 5 report `ok` because the read loop answers an undecodable line with a parse error and reads the next one, so the banner never ends the handshake. Row 3 is the only row that catches it, which is exactly the claim §10 makes about it.
+
+    The review ran the suite itself rather than trusting the commit message, and read the clock: the two silent-agent tests return at 2.52 s against a 2 s limit plus the 0.5 s settle, which is what separates a reported timeout from a hang.
+  timestamp: 2026-09-05T00:13:25.040057+00:00
 depends_on:
 - 01M1MPH5DRJ6BEFCX0VBTZVB81
 - 01M1MPD4MJ9KMVVQ316YSJPJHK
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9d80
 title: 'Doctor checks 3 to 5: stdout is only ndJSON, initialize answers in time, and the version matches'
 ---
 ## What

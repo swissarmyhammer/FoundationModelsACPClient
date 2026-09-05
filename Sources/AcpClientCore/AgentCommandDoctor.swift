@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import FoundationModelsACP
 import FoundationModelsACPClient
@@ -11,7 +12,7 @@ import Synchronization
 // `FoundationModelsExtras`. This package writes no doctor framework: it writes
 // the checks, because it is the only part that knows what an ACP agent is.
 //
-// Three rules of this file are not free choices.
+// Six rules of this file are not free choices.
 //
 // 1. **A check that could not run is reported, not dropped.** `HealthStatus`
 //    states three levels — ok, warning, error — and no "skipped" among them.
@@ -34,9 +35,29 @@ import Synchronization
 //    then judges every whole line the agent wrote while that ran. A banner on
 //    stdout — the defect §10 calls the most common one — stands ahead of the
 //    answer in that reading, so the row still catches it.
+// 4. **The capabilities row reads the RAW answer, and never the decoded one.**
+//    `InitializeResponse` decodes `capabilities` and `authMethods` forgivingly:
+//    a member of the wrong shape degrades to a default and throws nothing. A
+//    row that read the decoded value would therefore report `ok` against every
+//    agent, and a check that cannot fail is not a check. So the row takes the
+//    `result` member of the answer off the frame tee, decodes it itself, and
+//    compares what the agent SENT with what the decode kept. Only `info` and
+//    `protocolVersion` can make that decode throw at all, and those two are
+//    what the row reports as an error; every member the decode silently
+//    dropped is what it reports as a warning.
+// 5. **The teardown row runs BEFORE the connection closes.** Closing the
+//    connection cancels the tee's forwarding task, which ends the transport's
+//    byte stream, which runs `AgentProcess`'s own teardown and group-kills the
+//    agent. A teardown row placed after that would report `ok` against every
+//    agent, for the same reason rule 4 exists.
+// 6. **The teardown row watches the process GROUP, and never the pid.**
+//    `kill(pid, 0)` cannot tell a running agent from an unreaped zombie of one,
+//    and an agent that leaves a child holds its own stdout open through that
+//    child, so nothing reaps it. `killpg(pid, 0)` asks the question the row
+//    means to ask — is anything left — and it answers for the agent, for a
+//    zombie of the agent, and for a child of it, all at once.
 //
-// The rows below are the first five of the §10 table. The two after them read
-// the capabilities and the teardown, and they belong to the following task.
+// The rows below are the whole §10 table.
 
 /// Reports whether one foreign agent command is usable (`cli-plan.md` §10).
 ///
@@ -69,6 +90,14 @@ struct AgentCommandDoctor: Doctorable {
     /// sent.
     static let protocolVersionCheckName = "the protocol version"
 
+    /// The name of the sixth row: the answer this build read is the answer the
+    /// agent sent.
+    static let capabilitiesCheckName = "the advertised capabilities"
+
+    /// The name of the seventh row: the agent leaves nothing behind when its
+    /// stdin closes.
+    static let teardownCheckName = "the agent's teardown"
+
     /// Every row this doctor reports, in the order the report carries them.
     ///
     /// The order is the content, and it is also what
@@ -80,6 +109,8 @@ struct AgentCommandDoctor: Doctorable {
         standardOutputCheckName,
         initializeCheckName,
         protocolVersionCheckName,
+        capabilitiesCheckName,
+        teardownCheckName,
     ]
 
     /// The number of milliseconds ``settleInterval`` covers.
@@ -99,6 +130,19 @@ struct AgentCommandDoctor: Doctorable {
 
     /// The pause between two readings of the agent's pid.
     private static let watchPollInterval: Duration = .milliseconds(watchPollMilliseconds)
+
+    /// The number of seconds ``teardownInterval`` covers.
+    private static let teardownSeconds = 2
+
+    /// How long the seventh row waits for the agent's process group to empty
+    /// after the agent's stdin closes.
+    ///
+    /// An agent that obeys the rule ends on the EOF and needs a fraction of
+    /// this, and the wait ends the moment the group empties, so the whole
+    /// interval is spent only against an agent that is already leaking. Two
+    /// seconds is long beside the exit of a program with nothing left to do,
+    /// and short beside the patience of a person running a diagnosis.
+    static let teardownInterval: Duration = .seconds(teardownSeconds)
 
     /// The number of seconds ``defaultTimeLimit`` covers.
     private static let defaultTimeLimitSeconds = 10
@@ -162,7 +206,7 @@ struct AgentCommandDoctor: Doctorable {
     /// The group every finding of this doctor belongs to.
     var doctorCategory: String { Self.category }
 
-    /// Runs the five rows of `cli-plan.md` §10 this doctor owns, in order.
+    /// Runs the seven rows of `cli-plan.md` §10 this doctor owns, in order.
     ///
     /// Each row rests on the ones before it: a command that resolves to nothing
     /// cannot be started, and an agent that never started answers nothing. Each
@@ -200,7 +244,7 @@ struct AgentCommandDoctor: Doctorable {
     /// while it waits for `initialize` — keeps it.
     ///
     /// - Parameter executable: The absolute path the first row resolved.
-    /// - Returns: The findings for rows two to five, in report order.
+    /// - Returns: The findings for rows two to seven, in report order.
     private func startedAgentChecks(for executable: String) async -> [HealthCheck] {
         let agent: AgentProcess
         do {
@@ -237,36 +281,53 @@ struct AgentCommandDoctor: Doctorable {
                 Self.processCheckName,
                 message: "the agent started and stayed, as process \(pid)"
             )
-        ] + (await connectedChecks(over: agent.transport))
+        ] + (await connectedChecks(of: agent, pid: pid))
     }
 
-    /// Runs the three rows that need a live connection, and closes it after.
+    /// Runs the five rows that need the started agent's stdio, and closes the
+    /// connection after.
     ///
-    /// The three share one connection because they are one exchange. See rule 3
-    /// at the head of this file for why the standard-output row reads what the
-    /// `initialize` request produced rather than waiting for a line of its own.
+    /// The first four share one connection because they are one exchange. See
+    /// rule 3 at the head of this file for why the standard-output row reads
+    /// what the `initialize` request produced rather than waiting for a line of
+    /// its own, and rule 4 for why the capabilities row reads the raw answer.
     ///
     /// The connection reads the agent's stdout through a ``FrameTeeTransport``,
     /// which copies each whole line to a sink BEFORE it hands the chunk on. So
-    /// every line that reached the handshake has already reached the reading,
-    /// and the reading needs no wait of its own.
+    /// every line that reached the handshake has already reached both readings,
+    /// and neither needs a wait of its own.
     ///
-    /// - Parameter transport: The started agent's stdio.
-    /// - Returns: The findings for rows three to five, in report order.
+    /// The teardown row runs before the connection closes. See rule 5.
+    ///
+    /// - Parameters:
+    ///   - agent: The started agent, whose stdio the connection runs over.
+    ///   - pid: The agent's pid, which is also its process-group id.
+    /// - Returns: The findings for rows three to seven, in report order.
     @MainActor
-    private func connectedChecks(over transport: any ACPTransport) async -> [HealthCheck] {
+    private func connectedChecks(of agent: AgentProcess, pid: pid_t) async -> [HealthCheck] {
         let reading = AgentStandardOutputReading()
+        let answer = AgentInitializeAnswerReading()
         // The tee is bound here rather than passed inline, so it outlives the
         // exchange: `FrameTeeTransport.deinit` cancels the forwarding task that
         // copies the agent's lines.
-        let tee = FrameTeeTransport(wrapping: transport) { line in reading.record(line) }
+        let tee = FrameTeeTransport(wrapping: agent.transport) { line in
+            reading.record(line)
+            answer.record(line)
+        }
         let session = await AgentSession(over: tee, terminal: Self.silentTerminal, cwd: nil)
         let outcome = await initializeOutcome(of: session)
+        let teardown = await Self.teardownCheck(
+            of: agent,
+            pid: pid,
+            within: min(Self.teardownInterval, timeLimit)
+        )
         await session.teardown()
         return [
             Self.standardOutputCheck(reading),
             Self.initializeCheck(outcome, within: timeLimit),
             Self.protocolVersionCheck(outcome),
+            Self.capabilitiesCheck(answer.result),
+            teardown,
         ]
     }
 
@@ -430,6 +491,180 @@ struct AgentCommandDoctor: Doctorable {
         }
     }
 
+    /// The finding for the sixth row: the answer this build read is the answer
+    /// the agent sent.
+    ///
+    /// See rule 4 at the head of this file for why the row reads the raw answer
+    /// and never the decoded one.
+    ///
+    /// An agent that answered nothing at all, and one that answered a JSON-RPC
+    /// error, both leave this row nothing to read. That is not a defect of its
+    /// own, so the row is reported as one that did not run, which rule 1 makes
+    /// a warning.
+    ///
+    /// - Parameter result: The `result` member of the agent's `initialize`
+    ///   answer, as it reached the wire, or `nil` when no answer arrived.
+    /// - Returns: The finding for the sixth row.
+    private static func capabilitiesCheck(_ result: Data?) -> HealthCheck {
+        guard let result else {
+            return checkThatDidNotRun(named: capabilitiesCheckName, after: initializeCheckName)
+        }
+        let response: InitializeResponse
+        do {
+            response = try JSONDecoder().decode(InitializeResponse.self, from: result)
+        } catch {
+            return failed(
+                capabilitiesCheckName,
+                message: "the initialize answer cannot be read: \(error)",
+                fix: """
+                    Correct the member the message names. An initialize answer \
+                    must carry both info and protocolVersion, and this client \
+                    can do without neither.
+                    """
+            )
+        }
+        let dropped = membersTheDecodeDropped(from: result, keeping: response.capabilities)
+        guard !dropped.isEmpty else {
+            return passed(
+                capabilitiesCheckName,
+                message: "every capability member the agent sent was read"
+            )
+        }
+        return warned(
+            capabilitiesCheckName,
+            message: """
+                the agent sent capability members this build cannot read, and the \
+                decode dropped them: \(dropped.joined(separator: ", "))
+                """,
+            fix: """
+                Send each capability in the shape the negotiated protocol \
+                version states. A member this client cannot read becomes an \
+                unsupported one, so the agent loses the capability rather than \
+                the handshake.
+                """
+        )
+    }
+
+    /// The names of the `capabilities` members the agent sent and the decode
+    /// did not keep.
+    ///
+    /// The comparison is a round trip, and not a list of member names spelled
+    /// here: the decoded capabilities are encoded again, and every key the raw
+    /// object carried with a value other than `null` that the re-encoding does
+    /// not carry is a member this build lost. That catches a member of the
+    /// wrong shape, which `AgentCapabilities` degrades to `nil` rather than
+    /// refusing, and it catches a member of a schema this build does not know.
+    /// It cannot report a member the agent never sent, and it keeps no list of
+    /// its own to go stale against the schema.
+    ///
+    /// - Parameters:
+    ///   - result: The raw `result` member of the agent's initialize answer.
+    ///   - capabilities: What the decode made of that answer's `capabilities`.
+    /// - Returns: The names of the lost members, sorted, or an empty array.
+    private static func membersTheDecodeDropped(
+        from result: Data,
+        keeping capabilities: AgentCapabilities
+    ) -> [String] {
+        guard let sent = jsonMembers(of: result)?[capabilitiesKey] else {
+            return []
+        }
+        guard let sentMembers = sent as? [String: Any] else {
+            // The agent sent a `capabilities` value that is not an object at
+            // all, so the decode kept none of it. The member itself is the one
+            // thing to name.
+            return [capabilitiesKey]
+        }
+        let read = encodedMemberNames(of: capabilities)
+        return sentMembers.keys
+            .filter { !(sentMembers[$0] is NSNull) && !read.contains($0) }
+            .sorted()
+    }
+
+    /// The member names one `AgentCapabilities` value would send.
+    ///
+    /// - Parameter capabilities: The decoded capabilities.
+    /// - Returns: The member names, or an empty set when the value does not
+    ///   encode to a JSON object.
+    private static func encodedMemberNames(of capabilities: AgentCapabilities) -> Set<String> {
+        guard let encoded = try? JSONEncoder().encode(capabilities),
+            let members = jsonMembers(of: encoded)
+        else {
+            return []
+        }
+        return Set(members.keys)
+    }
+
+    /// The members of one JSON object, untyped.
+    ///
+    /// - Parameter json: The bytes of one JSON value.
+    /// - Returns: The members, or `nil` when the bytes are not a JSON object.
+    private static func jsonMembers(of json: Data) -> [String: Any]? {
+        guard let value = try? JSONSerialization.jsonObject(with: json) else { return nil }
+        return value as? [String: Any]
+    }
+
+    /// The finding for the seventh row: the agent leaves nothing behind.
+    ///
+    /// The row closes the agent's stdin, which is the wire's own way of saying
+    /// that no more requests are coming, and then watches the agent's process
+    /// GROUP. See rule 6 at the head of this file for why the group and not the
+    /// pid, and rule 5 for why this row runs before the connection closes.
+    ///
+    /// The finding is a WARNING and never an error: such an agent answered
+    /// every request, so it is usable, and it leaks. `cli-plan.md` §9 gives
+    /// that verdict exit code 5, and this row is the reason that code exists.
+    ///
+    /// - Parameters:
+    ///   - agent: The started agent, whose stdin this closes.
+    ///   - pid: The agent's pid, which is also its process-group id.
+    ///   - interval: The longest time to wait for the group to empty.
+    /// - Returns: The finding for the seventh row.
+    private static func teardownCheck(
+        of agent: AgentProcess,
+        pid: pid_t,
+        within interval: Duration
+    ) async -> HealthCheck {
+        agent.closeStandardInput()
+        guard await processGroupOutlived(pid, for: interval) else {
+            return passed(
+                teardownCheckName,
+                message: "the agent ended when its stdin closed, and it left no child"
+            )
+        }
+        return warned(
+            teardownCheckName,
+            message: """
+                the process group of agent \(pid) still held a process \(interval) after \
+                its stdin closed
+                """,
+            fix: """
+                End the agent when its stdin reaches EOF, and end every child \
+                it started before it goes. A leaked agent holds the model \
+                weights it loaded.
+                """
+        )
+    }
+
+    /// Watches one agent's process group until it empties or the interval ends.
+    ///
+    /// ``AgentProcess`` spawns the agent as the leader of its own process
+    /// group, so the agent's pid is that group's id and `killpg` with signal 0
+    /// asks whether ANY member of it is left.
+    ///
+    /// - Parameters:
+    ///   - pid: The agent's pid, which is also its process-group id.
+    ///   - interval: The longest time to watch.
+    /// - Returns: Whether the group still held a process when the watch ended.
+    private static func processGroupOutlived(_ pid: pid_t, for interval: Duration) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: interval)
+        while killpg(pid, 0) == 0 {
+            guard clock.now < deadline else { return true }
+            try? await Task.sleep(for: watchPollInterval)
+        }
+        return false
+    }
+
     /// One passing finding of this doctor.
     ///
     /// - Parameters:
@@ -438,6 +673,17 @@ struct AgentCommandDoctor: Doctorable {
     /// - Returns: The finding, in this doctor's own group.
     private static func passed(_ name: String, message: String) -> HealthCheck {
         .ok(name: name, message: message, category: category)
+    }
+
+    /// One warning finding of this doctor.
+    ///
+    /// - Parameters:
+    ///   - name: The row that found a defect short of a failure.
+    ///   - message: What the row found.
+    ///   - fix: The action that repairs it.
+    /// - Returns: The finding, in this doctor's own group.
+    private static func warned(_ name: String, message: String, fix: String) -> HealthCheck {
+        .warning(name: name, message: message, fix: fix, category: category)
     }
 
     /// One failing finding of this doctor.
@@ -525,6 +771,81 @@ private enum InitializeOutcome {
     case failed(any Error)
 }
 
+/// The member of an `initialize` answer that carries what the agent supports.
+private let capabilitiesKey = "capabilities"
+
+/// The member of a JSON-RPC answer that carries what the call produced.
+private let jsonRPCResultKey = "result"
+
+/// The agent's own text of one teed line, or `nil` for a line no reading in
+/// this file may judge.
+///
+/// Two kinds are dropped. A line this CLIENT sent carries the outbound mark,
+/// and every reading here reads the agent's standard output alone. A line the
+/// tee marked incomplete is the tail of a stream that ended mid-message, which
+/// says the agent died rather than that it wrote something whole.
+///
+/// - Parameter teedLine: One line of the exchange, as the tee marked it.
+/// - Returns: The line the agent wrote, without its mark.
+private func completeLineFromTheAgent(in teedLine: String) -> String? {
+    guard teedLine.hasPrefix(FrameTeeTransport.inboundMark) else { return nil }
+    let line = teedLine.dropFirst(FrameTeeTransport.inboundMark.count)
+    guard !line.hasPrefix(FrameTeeTransport.incompleteTag) else { return nil }
+    return String(line)
+}
+
+/// The `result` member of the one `initialize` answer the doctor's exchange
+/// produced.
+///
+/// The doctor sends exactly one request, `initialize`, so the first complete
+/// line the agent wrote that is a JSON object carrying a `result` member IS
+/// that request's answer. A notification carries a `method` and no `result`,
+/// and an agent that refused the handshake carries an `error` and no `result`,
+/// so neither reaches this reading.
+///
+/// The reading is taken through the same ``FrameTeeTransport`` sink as
+/// ``AgentStandardOutputReading``, and that sink is called from more than one
+/// task, so the state stands behind a `Mutex`.
+private final class AgentInitializeAnswerReading: Sendable {
+    /// The `result` member of the answer, as JSON, under the lock the sink
+    /// takes.
+    private let answer = Mutex<Data?>(nil)
+
+    /// The `result` member of the agent's `initialize` answer, as it reached
+    /// the wire, or `nil` when no answer arrived.
+    var result: Data? { answer.withLock { $0 } }
+
+    /// Records one line the tee copied, and keeps the first answer among them.
+    ///
+    /// - Parameter teedLine: One line of the exchange, as the tee marked it.
+    func record(_ teedLine: String) {
+        guard let line = completeLineFromTheAgent(in: teedLine),
+            let result = Self.resultMember(of: line)
+        else {
+            return
+        }
+        answer.withLock { recorded in
+            if recorded == nil {
+                recorded = result
+            }
+        }
+    }
+
+    /// The `result` member of one ndJSON line, as JSON of its own.
+    ///
+    /// - Parameter line: One complete line the agent wrote.
+    /// - Returns: The member, or `nil` when the line carries none.
+    private static func resultMember(of line: String) -> Data? {
+        guard let message = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
+            let members = message as? [String: Any],
+            let result = members[jsonRPCResultKey]
+        else {
+            return nil
+        }
+        return try? JSONSerialization.data(withJSONObject: result)
+    }
+}
+
 /// What one agent wrote to its standard output while the handshake ran.
 ///
 /// The reading is taken through a ``FrameTeeTransport`` sink, which is the one
@@ -555,31 +876,13 @@ private final class AgentStandardOutputReading: Sendable {
     ///
     /// - Parameter teedLine: One line of the exchange, as the tee marked it.
     func record(_ teedLine: String) {
-        guard let line = Self.completeLineFromTheAgent(in: teedLine) else { return }
+        guard let line = completeLineFromTheAgent(in: teedLine) else { return }
         lines.withLock { seen in
             seen.sawALine = true
             if seen.firstLineThatIsNotJSON == nil && !Self.isJSON(line) {
                 seen.firstLineThatIsNotJSON = line
             }
         }
-    }
-
-    /// The agent's own text of one teed line, or `nil` for a line this row may
-    /// not judge.
-    ///
-    /// Two kinds are dropped. A line this CLIENT sent carries the outbound
-    /// mark, and this row reads the agent's standard output alone. A line the
-    /// tee marked incomplete is the tail of a stream that ended mid-message,
-    /// which says the agent died rather than that it wrote something that is
-    /// not ndJSON.
-    ///
-    /// - Parameter teedLine: One line of the exchange, as the tee marked it.
-    /// - Returns: The line the agent wrote, without its mark.
-    private static func completeLineFromTheAgent(in teedLine: String) -> String? {
-        guard teedLine.hasPrefix(FrameTeeTransport.inboundMark) else { return nil }
-        let line = teedLine.dropFirst(FrameTeeTransport.inboundMark.count)
-        guard !line.hasPrefix(FrameTeeTransport.incompleteTag) else { return nil }
-        return String(line)
     }
 
     /// Whether one line of the agent's standard output parses as JSON.

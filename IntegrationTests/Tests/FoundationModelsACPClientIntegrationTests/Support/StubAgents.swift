@@ -45,6 +45,15 @@ let stubAgentUnsupportedProtocolVersion = ProtocolVersion(rawValue: 1)
 /// The message id each stub agent stamps on its reply chunks.
 let stubAgentMessageID = MessageId(rawValue: "stub-agent-msg-1")
 
+/// How long a stub agent that will not go away stays alive, in seconds.
+///
+/// The seventh row of the check table of `cli-plan.md` §10 asks whether an agent left
+/// anything behind after its stdin closed, and it answers inside a bounded interval. So an
+/// agent that is meant to still be there when the row reads must outlast that interval by
+/// far, and it is the caller's teardown that ends it rather than the clock. Five minutes is
+/// the same figure `AgentProcessTests` already gives a process it means to group-kill.
+private let stubAgentLingerSeconds = 300
+
 /// The reply text a stub agent streams when the caller chose none.
 let stubAgentDefaultAnswer = "Hello from the stub agent."
 
@@ -360,6 +369,110 @@ func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
     )
 }
 
+/// Writes a stub agent whose `initialize` answer leaves `protocolVersion` out.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 is what this one is for.
+/// `InitializeResponse.init(from:)` reads `protocolVersion` with `try container.decode`,
+/// so a missing member is a decoding failure rather than a value that degrades to a
+/// default. Only `info` and `protocolVersion` behave that way in that answer, so this agent
+/// is the shape that proves the row reports an `error` for an answer this build cannot read
+/// at all.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's work and never
+/// the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeMissingProtocolVersionAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .omitsProtocolVersion
+        )
+    )
+}
+
+/// Writes a stub agent that answers `initialize` with a `capabilities` object this build
+/// cannot read.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 is what this one is for, and it is
+/// the half of that row a stricter decode could never reach. `AgentCapabilities` reads each
+/// of its own members with `forgivingDecodeIfPresent`, so a `session` member that is not the
+/// object the schema states becomes `nil` and nothing throws. The client then believes the
+/// agent supports no `session/*` method at all, which is a silent misreading of a live
+/// agent. Only a real agent that sends this shape can prove the row catches it.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's work and never
+/// the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .reportsUnreadableCapabilities
+        )
+    )
+}
+
+/// Writes a stub agent that answers every request and then ignores a closed stdin.
+///
+/// The seventh row of the check table of `cli-plan.md` §10 is what this one is for: it
+/// answers `initialize` the way a conformant agent does, so every earlier row passes, and
+/// then it stays alive for ``stubAgentLingerSeconds`` after its stdin reaches EOF. That is
+/// the leaked agent §11 forbids, and it is the one defect of the table that is a WARNING
+/// rather than an error, because such an agent is usable and it leaks.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeLingeringAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        """
+        \(try requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile
+        ))
+        sleep \(stubAgentLingerSeconds)
+        """
+    )
+}
+
+/// Writes a stub agent that ends when its stdin closes and leaves a child behind.
+///
+/// The other half of the seventh row of the check table of `cli-plan.md` §10. The agent
+/// itself obeys the rule and ends, so a check that read the agent's pid alone would report
+/// `ok`; the child it spawned is what still holds the machine. The child also inherits the
+/// agent's stdout, so the pipe never reaches EOF and ``AgentProcess`` never reaps the agent
+/// on its own — which is why the row reads the process GROUP rather than the pid.
+///
+/// The file holds two pids, the agent's own first and its child's second, so a test can
+/// prove that neither outlived the run.
+///
+/// - Parameter pidFile: Where the agent records its own pid and its child's, one per line.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeChildLeavingAgent(pidFile: String) throws -> String {
+    try writeAgentScript(
+        """
+        sleep \(stubAgentLingerSeconds) &
+        printf '%s\\n%s\\n' "$$" "$!" > \(shellSingleQuoted(pidFile))
+        \(try requestLoop(answer: stubAgentDefaultAnswer, stopReason: .endTurn))
+        """
+    )
+}
+
 // MARK: - The script files
 
 /// The text that stands before the unique part of a stub-agent script's name.
@@ -395,6 +508,26 @@ func removeAgentScript(_ path: String) {
     try? FileManager.default.removeItem(atPath: path)
 }
 
+/// Reads every pid a stub agent recorded, in the order the agent wrote them.
+///
+/// Most stub agents record one pid, their own.
+/// ``makeChildLeavingAgent(pidFile:)`` records two — its own and its child's —
+/// because `cli-plan.md` §11 asks the same question of both, and one file keeps
+/// the two answers together.
+///
+/// - Parameter file: The pid file the agent wrote.
+/// - Returns: The pids the file holds.
+/// - Throws: The read failure of the file, or a requirement failure when a line
+///   of the file is not a pid.
+func recordedAgentPids(in file: URL) throws -> [pid_t] {
+    try String(contentsOf: file, encoding: .utf8)
+        .split(whereSeparator: \.isNewline)
+        .map { line in
+            let recorded = line.trimmingCharacters(in: .whitespaces)
+            return try #require(pid_t(recorded), "the pid file held \"\(recorded)\"")
+        }
+}
+
 /// Reads the pid a stub agent recorded through ``recordPidStatement(writingTo:)``.
 ///
 /// It is the one reader every suite here shares, because every suite asks the
@@ -406,9 +539,7 @@ func removeAgentScript(_ path: String) {
 /// - Throws: The read failure of the file, or a requirement failure when the
 ///   file holds no pid.
 func recordedAgentPid(in file: URL) throws -> pid_t {
-    let recorded = try String(contentsOf: file, encoding: .utf8)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    return try #require(pid_t(recorded), "the pid file held \"\(recorded)\"")
+    try #require(recordedAgentPids(in: file).first, "the pid file at \(file.path) holds no pid")
 }
 
 // MARK: - The script text
@@ -629,8 +760,39 @@ private enum StubAgentInitializeAnswer {
     /// sent, and advertises no authentication method.
     case reportsProtocolVersion(ProtocolVersion)
 
+    /// The agent leaves `protocolVersion` out of its answer altogether.
+    case omitsProtocolVersion
+
+    /// The agent answers with a `capabilities` object holding a member this build
+    /// cannot read.
+    case reportsUnreadableCapabilities
+
     /// The agent answers with a JSON-RPC error, and the handshake fails.
     case fails
+}
+
+/// The `capabilities` member a conformant stub agent answers `initialize` with.
+///
+/// `{"session": {}}` is what the schema calls the baseline session surface: the agent
+/// serves `session/new`, `session/prompt`, `session/cancel` and `session/update`.
+///
+/// - Returns: The member, as the untyped JSON `JSONSerialization` writes.
+private func readableStubAgentCapabilities() -> [String: Any] {
+    ["session": [String: String]()]
+}
+
+/// The `capabilities` member ``makeUnreadableCapabilitiesAgent(pidFile:)`` answers
+/// `initialize` with.
+///
+/// The schema states `session` as an object, and this sends a string in its place.
+/// `AgentCapabilities` reads that member with `forgivingDecodeIfPresent`, so the decode
+/// gives `nil` and throws nothing at all: the client silently believes the agent serves no
+/// `session/*` method. That silence is the defect the sixth row of the check table of
+/// `cli-plan.md` §10 exists to catch.
+///
+/// - Returns: The member, as the untyped JSON `JSONSerialization` writes.
+private func unreadableStubAgentCapabilities() -> [String: Any] {
+    ["session": "yes"]
 }
 
 /// The JSON-RPC code an agent answers with when it will not serve a request it
@@ -658,6 +820,14 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
         )
     case .reportsProtocolVersion(let protocolVersion):
         try initializeResult(reporting: [], protocolVersion: protocolVersion)
+    case .omitsProtocolVersion:
+        try initializeResult(reporting: [], protocolVersion: nil)
+    case .reportsUnreadableCapabilities:
+        try initializeResult(
+            reporting: [],
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            capabilities: unreadableStubAgentCapabilities()
+        )
     case .fails:
         try initializeError()
     }
@@ -671,18 +841,25 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
 ///   - authMethods: The authentication methods to advertise. An empty list
 ///     leaves the member out, which is what an agent that advertises none sends.
 ///   - protocolVersion: The protocol version to answer with. It reaches the wire
-///     as a bare integer, which is the only form `ProtocolVersion` takes.
+///     as a bare integer, which is the only form `ProtocolVersion` takes. `nil`
+///     leaves the member out altogether, which is one of only two ways to make
+///     that answer undecodable at all.
+///   - capabilities: The `capabilities` member to answer with. The default is the
+///     baseline session surface every conformant stub advertises.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
 private func initializeResult(
     reporting authMethods: [AuthMethod],
-    protocolVersion: ProtocolVersion
+    protocolVersion: ProtocolVersion?,
+    capabilities: [String: Any] = readableStubAgentCapabilities()
 ) throws -> String {
     var result: [String: Any] = [
-        "capabilities": ["session": [String: String]()],
+        "capabilities": capabilities,
         "info": ["name": stubAgentName, "version": stubAgentVersion],
-        "protocolVersion": protocolVersion.rawValue,
     ]
+    if let protocolVersion {
+        result["protocolVersion"] = protocolVersion.rawValue
+    }
     if !authMethods.isEmpty {
         result["authMethods"] = try jsonValue(of: authMethods)
     }
