@@ -39,12 +39,46 @@ comments:
     - evidence: 4 files — `Sources/AcpClientCore/DoctorCommand.swift`, `Sources/AcpClientCore/SubcommandNotImplementedError.swift` (deleted), `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/DoctorCommandTests.swift` (new), `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/CLITestSupport.swift`. `timeout 420 swift test`: 201 tests in 15 suites passed. `timeout 600 swift test --package-path IntegrationTests`: 60 tests in 9 suites passed, 10 of them new. Both builds carry zero warnings. Watched every new test fail first: the RED run reported 23 issues over 10 tests.
     - next: `/review`
   timestamp: 2026-09-05T00:52:24.257012+00:00
+- actor: claude-code
+  id: 01m1qh9hgrds6pacnt5stsdqaz
+  text: |
+    ### review — clean
+    - evidence: `review sha 58883fe~1..58883fe`. counts: findings 0, confirmed 0, refuted 0, attempted 7, failed 0. Zero findings. Task moved to `done`.
+    - Five `code-hygiene` tool rules declined one item each on `Sources/AcpClientCore/SubcommandNotImplementedError.swift`, because this change deletes that file. A deleted file has nothing to read; the decline is expected and is not a gap.
+    - Judgement asked for, and answered by direct measurement of the built binary:
+      1. `--timeout` not reaching the doctor is correct. Its own help text says "End the run if the turn does not stop in time", and `doctor` runs no turn, so the option is out of scope by its own contract. A message saying the option does nothing would have to go to stderr, which §8 and decision 1 of `DoctorCommand.swift` keep empty for this subcommand. `--frames`, `--verbose` and `--cwd` are equally inert here; all four were measured inert, so `--timeout` is not a special case.
+      2. `SubcommandNotImplementedError` has no Swift reference left anywhere in `Sources/`, `Tests/` or `IntegrationTests/`. The only remaining mentions are in `.kanban` history. `doctor` was its last thrower.
+      3. `runAcpClient(within:)` defaults to `TransportTestDeadline.limit`, the same 10 seconds the call used before. No other caller's behaviour changed. The longer 60-second bound reaches only the new `DoctorCommandTests`, whose slowest row waits out `AgentCommandDoctor.defaultTimeLimit`; a hang there still fails the test at 60 s, under the suite's own 5-minute backstop, so nothing is hidden.
+      4. Exit codes verified against §9. `AcpClientExitCode.forDoctorStatus(_:)` maps ok→0, warning→5, error→1, and `usage` stays 2. Measured: `doctor -- no-such-agent-xyz` exits 1, writes 1873 bytes to stdout and 0 bytes to stderr, and the command that resolved to nothing is the first ROW of the report ("error   the agent command"), with a fix line, followed by six `warning` rows that say the check did not run.
+    - One correction to the stderr claim: the CLIENT writes nothing to stderr on any doctor path, and that part holds. The AGENT's own stderr is inherited and passes through: `doctor -- sh -c 'echo "agent noise on stderr" >&2; sleep 30'` put 22 bytes on the client's stderr. The spawn that inherits that descriptor is in `AgentCommandDoctor` (FoundationModelsExtras), outside this delta, and showing an agent's own diagnostics to a person running a doctor is reasonable. Recorded so the claim is read as scoped to the client.
+    - `--frames` card ^3et20e2 is right to be separate. Wiring it needs a seam through `AgentCommandDoctor`, which owns the tee its rows read, so the change is in another type and another package, not in this delta.
+    - next: /commit is already done for 58883fe. `Record the CLI decisions in cli-plan.md and README.md` (^bgsxs2) is unblocked.
+  timestamp: 2026-09-05T01:00:27.544426+00:00
+- actor: claude-code
+  id: 01m1qhaqjw0pe6pabem5rf5cgj
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files. `doctor` runs `AgentCommandDoctor` through `DoctorRunner`, writes the report to stdout plain or `--json`, and exits through `AcpClientExitCode.forDoctorStatus(_:)`. `SubcommandNotImplementedError.swift` is deleted; `doctor` was its last thrower. The card's stale `Sources/acp-client/` path is corrected.
+    - test: green — root 201 passed in 15 suites, integration 60 passed in 9 suites with 10 new, 0 warnings on both builds. RED first: 23 issues over the 10 new tests before the body existed.
+    - commit: 58883fe feat(cli): implement doctor subcommand with report, --json, and exit codes
+    - review: clean — zero findings, task moved to done
+
+    The review measured the built binary rather than reading the code:
+    - Ignoring `--timeout` is right, and it is not a special case. The option's own help text says it ends the run if the TURN does not stop in time, and a doctor runs no turn. All four §6.1 options are inert here: `--frames`, `--timeout 0`, `--timeout=-1`, `--verbose` and `--cwd /tmp` all give byte-identical output. So no command-line number can reach `min(settleInterval, timeLimit)` and collapse it — the hazard the ^btzvb81 review raised cannot happen.
+    - Exit codes: ok→0, warning→5, error→1, usage pinned at 2. `doctor -- no-such-agent` exits 1 and writes the failure as the FIRST ROW with a fix line, followed by six warning rows, and zero bytes on stderr.
+
+    One correction the review made to the implementer's claim: the client writes nothing to stderr on any doctor path, but the AGENT's own stderr is inherited and passes through. That is defensible — a person diagnosing an agent wants to see what it complains about — and it means the well-behaved-agent test's empty-stderr assertion tests the client and the silent stub together.
+
+    One error in the review's own prose, for the record: it places `AgentCommandDoctor` in `FoundationModelsExtras`. That type is ours, in `Sources/AcpClientCore/`. The conclusion it drew is unaffected, because the inherited descriptor comes from `AgentProcess` either way.
+
+    `--frames` shaping nothing is filed as ^3et20e2, and the review agreed a separate card is right: three sibling options are equally inert, all four are documented at the head of `DoctorCommand.swift` with a reason each, and `--frames` needs a seam through `AgentCommandDoctor`, which owns the tee its rows read.
+  timestamp: 2026-09-05T01:01:06.524331+00:00
 depends_on:
 - 01M1MQQ5T3KQWESKQ2AT3Y93W4
 - 01M1MPC2YVFK0A9NX4T9H4M0EV
 - 01M1MPARCGY1FHKNED47MDBWG8
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9f80
 title: 'Implement the doctor subcommand: render the report, --json, and exit 0, 1 or 5'
 ---
 ## What
@@ -104,3 +138,19 @@ implementer corrected it):
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 19:53)
+
+> Scope: `review sha 58883fe~1..58883fe` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 6 not reviewed.
+
+Zero findings. Seven validator sets ran over the delta and confirmed nothing.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+> ⚠️ five tool rules of `code-hygiene` (`disallowed-constructs-swift`,
+> `function-length-swift`, `idioms-swift`, `magic-numbers-swift`,
+> `missing-docs-swift`) each declined one item: they found no file at
+> `Sources/AcpClientCore/SubcommandNotImplementedError.swift`, because this
+> change DELETES that file. A deleted file has nothing left to read, so the
+> decline is the expected answer and not a gap in the review.

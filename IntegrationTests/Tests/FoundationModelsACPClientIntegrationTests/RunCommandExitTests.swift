@@ -10,9 +10,9 @@ import Testing
 // process table, the answer from the pipe, and the agent's pid from a file the
 // agent wrote itself. Nothing here can import the binary's own types: SwiftPM
 // builds an executable product for this test bundle to spawn, and it does not
-// publish that target's module to an other package. So the exit codes and the
-// `-` prompt argument are spelled again below, against the same sections of
-// `cli-plan.md` the unit suite pins the binary to.
+// publish that target's module to an other package. So the `-` prompt argument
+// is spelled again below, and the exit codes stand in ``SectionNineExitCode``,
+// against the same sections of `cli-plan.md` the unit suite pins the binary to.
 
 /// The number of minutes this file's suite allows itself.
 ///
@@ -21,29 +21,6 @@ import Testing
 /// bound each test really rests on is ``TransportTestDeadline/limit``; this one
 /// is the backstop that ends a wedged run rather than holding the package open.
 private let runSuiteTimeLimitMinutes = 5
-
-/// The exit codes of `cli-plan.md` §9 this suite asserts.
-///
-/// The numbers are spelled here rather than read from the binary's
-/// `AcpClientExitCode`, which this package cannot import. The unit suite's
-/// `ExitCodeTests` pins that table against the same §9 rows, so a renumbering
-/// fails there and here alike.
-private enum SectionNineExitCode {
-    /// A turn that ended. `cli-plan.md` §9, row 0.
-    static let success: Int32 = 0
-
-    /// A spawn, protocol or I/O error. `cli-plan.md` §9, row 1.
-    static let failure: Int32 = 1
-
-    /// A mistake on the command line. `cli-plan.md` §9, row 2.
-    static let usage: Int32 = 2
-
-    /// The agent refused to continue the turn. `cli-plan.md` §9, row 3.
-    static let refusal: Int32 = 3
-
-    /// The turn was cancelled. `cli-plan.md` §9, row 4.
-    static let cancelled: Int32 = 4
-}
 
 /// The prompt argument that names standard input rather than a prompt
 /// (`cli-plan.md` §7, row 4).

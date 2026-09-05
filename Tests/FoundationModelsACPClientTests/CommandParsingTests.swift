@@ -16,6 +16,14 @@ import Testing
 // command tree public would widen the surface of a binary that no other module
 // links, and it would buy nothing this suite cannot already reach.
 
+/// The `--timeout` values that give the turn no time to run in.
+///
+/// Zero is a limit that has already passed at the moment the turn starts, and a
+/// negative limit passed before that. Neither can end anything but the run
+/// itself, so `cli-plan.md` §6.1 has no meaning for either and §9 makes them the
+/// usage error.
+private let meaninglessTimeoutValues = ["0", "-1"]
+
 @Suite("acp-client command parsing")
 struct CommandParsingTests {
     /// The exit code `cli-plan.md` §9 gives a usage error.
@@ -205,6 +213,26 @@ struct CommandParsingTests {
         let error = try #require(
             Self.errorFromParsing(["run", "p"]),
             "`run p` must throw: it names no agent command."
+        )
+
+        #expect(AcpClient.exitCode(for: error) == .validationFailure)
+        #expect(AcpClient.processExitCode(for: error) == Self.usageErrorExitCode)
+    }
+
+    /// §6.1 gives `--timeout` a number of seconds to run the turn in, and §9
+    /// gives a mistake on the command line the code 2. A limit that is not more
+    /// than zero seconds gives the turn no time at all, so it can only end the
+    /// run it was meant to bound.
+    @Test(
+        "a --timeout that is not more than zero is a usage error that exits 2",
+        arguments: meaninglessTimeoutValues
+    )
+    func aTimeoutThatIsNotMoreThanZeroIsAUsageError(value: String) throws {
+        let error = try #require(
+            Self.errorFromParsing(
+                ["run", Self.prompt, "--timeout", value, "--"] + Self.agentCommand
+            ),
+            "`--timeout \(value)` must throw: it gives the turn no time to run in."
         )
 
         #expect(AcpClient.exitCode(for: error) == .validationFailure)

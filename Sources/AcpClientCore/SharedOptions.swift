@@ -43,6 +43,38 @@ struct SharedOptions: ParsableArguments {
     /// Whether to draw no progress and no decoration, in a terminal too.
     @Flag(help: "Draw no progress and no decoration, in a terminal too.")
     var quiet = false
+
+    /// The limit ``timeout`` states as a `Duration`, or `nil` for no limit.
+    ///
+    /// It is the TURN's limit, and never a diagnosis's own. ``AgentCommandDoctor``
+    /// bounds each of its rows with a limit of its own, for the reason rule 2 at
+    /// the head of that file states, and the two never share a value.
+    var turnLimit: Duration? {
+        timeout.map { .seconds($0) }
+    }
+
+    /// Rejects a `--timeout` value the turn cannot run in.
+    ///
+    /// ArgumentParser calls this on the group of every subcommand that embeds
+    /// it, and it reads what this throws as a validation failure, which
+    /// ``AcpClient/processExitCode(for:)`` turns into the usage row of
+    /// `cli-plan.md` §9. So one check here holds for `run`, `probe` and
+    /// `doctor` alike: a limit that gives the turn no time at all is a mistake
+    /// on the command line whichever subcommand it was typed after.
+    ///
+    /// - Throws: `ValidationError` when `--timeout` is not more than zero
+    ///   seconds.
+    mutating func validate() throws {
+        guard let timeout else { return }
+        guard timeout > 0 else {
+            throw ValidationError(
+                """
+                The --timeout value must be more than zero seconds. \
+                \(timeout) gives the turn no time to run in.
+                """
+            )
+        }
+    }
 }
 
 /// The `--json` option of `cli-plan.md` §6.1, which `probe` and `doctor` take

@@ -104,6 +104,7 @@ struct RunCommand: AsyncParsableCommand {
                 prompt: promptText,
                 cwd: options.cwd,
                 frames: options.frames,
+                limit: options.turnLimit,
                 terminal: terminal
             )
         } catch {
@@ -153,16 +154,19 @@ struct RunCommand: AsyncParsableCommand {
     ///   - prompt: The prompt of the turn.
     ///   - cwd: The `--cwd` value, or `nil` for the process working directory.
     ///   - frames: Whether the command line carried `--frames`.
+    ///   - limit: The `--timeout` limit of the turn, or `nil` for no limit.
     ///   - terminal: The layer that owns standard error.
     /// - Returns: Why the turn ended.
     /// - Throws: ``AgentCommandResolutionFailure`` when the command resolves to
     ///   no executable, `AgentProcessError` when the spawn fails, or whatever
-    ///   the turn itself threw.
+    ///   the turn itself threw — ``AcpClientTimeout`` among it, which the
+    ///   `defer` above reaps the agent on exactly as it reaps every other row.
     private static func runTurn(
         agent: AgentCommand,
         prompt: String,
         cwd: String?,
         frames: Bool,
+        limit: Duration?,
         terminal: TerminalOutput
     ) async throws -> TurnOutcome {
         let executable = try AgentCommandResolver().resolve(agent.executable)
@@ -182,6 +186,7 @@ struct RunCommand: AsyncParsableCommand {
             over: transport,
             prompt: prompt,
             cwd: cwd,
+            limit: limit,
             terminal: terminal
         )
     }
@@ -226,18 +231,21 @@ struct RunCommand: AsyncParsableCommand {
     ///   - transport: The started agent's stdio.
     ///   - prompt: The prompt of the turn.
     ///   - cwd: The `--cwd` value, or `nil` for the process working directory.
+    ///   - limit: The `--timeout` limit of the turn, or `nil` for no limit.
     ///   - terminal: The layer that owns standard error.
     /// - Returns: Why the turn ended.
     /// - Throws: `ProtocolVersionMismatchError` when the agent answered
     ///   `initialize` with an other version, ``SessionWorkingDirectoryError``
-    ///   when `--cwd` does not resolve, ``TurnEndedWithoutIdleError`` when the
-    ///   agent went away in the middle of the turn, `RequestError` on a peer
-    ///   error, or `ConnectionError` when the agent went away.
+    ///   when `--cwd` does not resolve, ``AcpClientTimeout`` when the turn
+    ///   reached its limit, ``TurnEndedWithoutIdleError`` when the agent went
+    ///   away in the middle of the turn, `RequestError` on a peer error, or
+    ///   `ConnectionError` when the agent went away.
     @MainActor
     private static func driveTurn(
         over transport: any ACPTransport,
         prompt: String,
         cwd: String?,
+        limit: Duration?,
         terminal: TerminalOutput
     ) async throws -> TurnOutcome {
         let session = await AgentSession(over: transport, terminal: terminal, cwd: cwd)
@@ -249,7 +257,8 @@ struct RunCommand: AsyncParsableCommand {
                     session: session,
                     prompt: prompt,
                     terminal: terminal,
-                    answerSink: answerSink
+                    answerSink: answerSink,
+                    limit: limit
                 ).run()
             )
         } catch {

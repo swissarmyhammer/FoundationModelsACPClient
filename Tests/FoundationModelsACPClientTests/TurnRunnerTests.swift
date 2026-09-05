@@ -68,6 +68,25 @@ private enum TurnText {
     /// The title of the tool call that runs AFTER the first answer chunk.
     static let lateToolName = "reading the late file"
 
+    /// The number of milliseconds ``shortLimit`` covers.
+    private static let shortLimitMilliseconds = 200
+
+    /// The number of seconds ``generousLimit`` covers.
+    private static let generousLimitSeconds = 60
+
+    /// A `--timeout` limit the turn under it cannot reach.
+    ///
+    /// The stub on the far end of an in-memory pair answers as fast as the
+    /// runtime schedules it, so a fifth of a second is long beside every turn
+    /// this file scripts and short beside the suite's own time limit.
+    static let shortLimit: Duration = .milliseconds(shortLimitMilliseconds)
+
+    /// A `--timeout` limit no turn in this file can reach.
+    ///
+    /// It stands far beyond the suite's own time limit, so a test that runs
+    /// under it fails as a failed expectation rather than as a limit reached.
+    static let generousLimit: Duration = .seconds(generousLimitSeconds)
+
     /// Makes a tool-call update that carries a title and nothing else.
     ///
     /// - Parameters:
@@ -143,11 +162,14 @@ private struct TurnRunnerHarness {
     ///     prompt, one step per gate.
     ///   - standardErrorIsATerminal: The answer the injected terminal reading
     ///     gives, which stands in for `isatty` on file descriptor 2.
+    ///   - limit: The `--timeout` limit of the turn, or `nil` for no limit,
+    ///     which is the default `cli-plan.md` §6.1 states.
     /// - Throws: Whatever `initialize` threw.
     init(
         script: [SessionUpdate] = [],
         deferredScript: [GatedUpdates] = [],
-        standardErrorIsATerminal: Bool = false
+        standardErrorIsATerminal: Bool = false,
+        limit: Duration? = nil
     ) async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
@@ -173,7 +195,8 @@ private struct TurnRunnerHarness {
             session: session,
             prompt: TurnText.prompt,
             terminal: terminal,
-            answerSink: { answerWrites.append($0) }
+            answerSink: { answerWrites.append($0) },
+            limit: limit
         )
     }
 
@@ -355,6 +378,48 @@ struct TurnRunnerTests {
         _ = try await harness.runner.run()
 
         #expect(harness.answer == Data(TurnText.wholeMultiByteAnswer.utf8))
+        await harness.teardown()
+    }
+
+    /// §6.1 gives `--timeout` the turn: a turn that does not stop in time ends
+    /// at the limit. The stub sends one answer chunk and no `idle` update at
+    /// all, so nothing but the limit can end this turn.
+    ///
+    /// The sink is asserted beside the throw, because §8 keeps the bytes that
+    /// already arrived: a limit ends the turn, and it discards nothing the
+    /// agent already sent.
+    @MainActor @Test("a turn that never goes idle ends at its limit", .timeLimit(.minutes(1)))
+    func aTurnThatNeverGoesIdleEndsAtItsLimit() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [agentChunk(text: TurnText.firstAnswerHalf)],
+            limit: TurnText.shortLimit
+        )
+
+        await #expect(throws: AcpClientTimeout.self) {
+            try await harness.runner.run()
+        }
+
+        #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
+        await harness.teardown()
+    }
+
+    /// A turn that goes idle inside its limit gives its own outcome, and never
+    /// the limit's. §9 gives that run the code its stop reason owes, and not
+    /// the timeout row.
+    @MainActor @Test("a turn that ends inside its limit keeps its own outcome", .timeLimit(.minutes(1)))
+    func aTurnThatEndsInsideItsLimitKeepsItsOwnOutcome() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [
+                agentChunk(text: TurnText.firstAnswerHalf),
+                idleState(stopReason: .endTurn),
+            ],
+            limit: TurnText.generousLimit
+        )
+
+        let outcome = try await harness.runner.run()
+
+        #expect(outcome == .stopped(.endTurn))
+        #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
         await harness.teardown()
     }
 }

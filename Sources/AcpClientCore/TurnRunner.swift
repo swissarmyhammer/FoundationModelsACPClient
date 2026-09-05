@@ -7,7 +7,7 @@
 // `InMemoryTransport.pair()`: no binary is started, and no test waits on a
 // pipe.
 //
-// Four decisions here are not free choices.
+// Five decisions here are not free choices.
 //
 // 1. The turn ends on a `state_update` that reports `idle`, and NOT on the
 //    prompt answer. In v2 `PromptResponse` carries only `meta`: it says the
@@ -26,6 +26,19 @@
 //    bytes verbatim: nothing added, no trailing newline and no colour, in a
 //    terminal and in a pipe alike. One write per chunk is one flush per
 //    chunk, so the answer leaves this binary as fast as it arrives.
+// 5. The `--timeout` limit of §6.1 is a CHILD of that same task group, and
+//    never a limiter task racing it from outside. `AgentCommandDoctor` does
+//    race one from outside, and it reads a `CancellationError` as "the limit
+//    ended first"; that reading is sound there because the raced work is one
+//    `Connection.call`, which fails a cancelled request with exactly that
+//    error. It is not sound here. By the time a limit lands, the prompt has
+//    usually already been answered, so cancelling this group makes the reader
+//    end its stream and `run()` throw ``TurnEndedWithoutIdleError`` instead —
+//    a race between two errors that mean different things. A child that
+//    sleeps and then throws ``AcpClientTimeout`` has no such race: the group
+//    IS the race, the throw is the limit and nothing else, and
+//    `withThrowingTaskGroup` cancels and drains the other children on the way
+//    out, so no task is left running behind the exit.
 //
 // The spinner is the third child of the group, and a stream of tool names
 // joins it to the reading. ``TerminalOutput/withSpinner(_:_:)`` draws for
@@ -122,6 +135,9 @@ struct TurnRunner {
     /// nothing else, so the caller writes and flushes as the answer arrives.
     private let answerSink: @Sendable (Data) -> Void
 
+    /// The longest the turn may run, or `nil` for no limit.
+    private let limit: Duration?
+
     /// Builds the runner.
     ///
     /// - Parameters:
@@ -129,16 +145,21 @@ struct TurnRunner {
     ///   - prompt: The prompt of the turn.
     ///   - terminal: The layer that owns standard error.
     ///   - answerSink: Receives the answer bytes, verbatim.
+    ///   - limit: The longest the turn may run. The default is `nil`, which is
+    ///     the "no limit" `cli-plan.md` §6.1 gives a run that carried no
+    ///     `--timeout`.
     init(
         session: AgentSession,
         prompt: String,
         terminal: TerminalOutput,
-        answerSink: @escaping @Sendable (Data) -> Void
+        answerSink: @escaping @Sendable (Data) -> Void,
+        limit: Duration? = nil
     ) {
         self.session = session
         self.prompt = prompt
         output = terminal
         self.answerSink = answerSink
+        self.limit = limit
     }
 
     /// Runs one turn: opens a session, sends the prompt, streams the answer,
@@ -146,10 +167,14 @@ struct TurnRunner {
     ///
     /// The prompt, the spinner and the reading are three children of one
     /// task group, because the prompt answer does not end the turn and a
-    /// prompt that fails must not leave the reading waiting forever.
+    /// prompt that fails must not leave the reading waiting forever. A run
+    /// that carried `--timeout` adds the limit as a fourth child — see rule 5
+    /// at the head of this file for why the limit is a child and not a race
+    /// from outside.
     ///
     /// - Returns: Why the turn ended.
-    /// - Throws: ``TurnEndedWithoutIdleError`` when the stream ended first,
+    /// - Throws: ``AcpClientTimeout`` when the turn reached its limit,
+    ///   ``TurnEndedWithoutIdleError`` when the stream ended first,
     ///   ``SessionWorkingDirectoryError`` when `--cwd` does not resolve,
     ///   `RequestError` on a peer error, or `ConnectionError` when the agent
     ///   went away.
@@ -172,6 +197,12 @@ struct TurnRunner {
             }
             group.addTask {
                 await self.readTurn(from: updates, reportingToolNamesTo: toolNameFeed)
+            }
+            if let limit {
+                group.addTask {
+                    try await Task.sleep(for: limit)
+                    throw AcpClientTimeout()
+                }
             }
             while let result = try await group.next() {
                 guard let outcome = result else { continue }

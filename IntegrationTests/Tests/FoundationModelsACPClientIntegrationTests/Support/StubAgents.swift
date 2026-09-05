@@ -424,6 +424,73 @@ func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
     )
 }
 
+/// Writes a stub agent that streams one answer chunk and then never sends a
+/// `state_update` at all.
+///
+/// The `--timeout` rows of `cli-plan.md` §6.1 and §9 are what this one is for.
+/// The turn of §8 ends on `idle` and on nothing else, so an agent that never
+/// sends one leaves the run with no ending of its own: a client that bounds the
+/// turn ends it at the limit and exits 124, and a client that does not waits
+/// for ever.
+///
+/// The chunk goes out BEFORE the wait, so the run has answer bytes on its
+/// standard output by the time the limit lands. That is the half of §8 a
+/// timeout must not break: the text that already arrived stays written.
+///
+/// The agent reports no stop reason, because it sends no `state_update` for one
+/// to stand on. It stays alive until its stdin closes, so the reap is the
+/// caller's work and never the agent's own exit.
+///
+/// - Parameters:
+///   - answer: The reply text to stream before the turn stops going anywhere.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNeverIdleAgent(
+    answer: String = stubAgentDefaultAnswer,
+    pidFile: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(answer: answer, stopReason: nil, pidFile: pidFile, turnEnd: .never)
+    )
+}
+
+/// Writes a stub agent that streams one answer chunk, waits, and only then ends
+/// its turn.
+///
+/// It is the other half of the `--timeout` rows: a SLOW agent is not a stuck
+/// one. A run that gave this agent no limit must wait it out and exit with the
+/// code its stop reason owes, and a run whose limit is shorter than the wait
+/// must end at the limit instead. One agent serves both readings, so the two
+/// tests differ in the option alone.
+///
+/// - Parameters:
+///   - answer: The reply text to stream before the wait.
+///   - stopReason: The stop reason to end the turn with.
+///   - delaySeconds: How long the agent waits before it sends `idle`. `/bin/sh`
+///     hands the wait to `sleep`, which reads whole seconds, so this is an
+///     integer.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeSlowTurnAgent(
+    answer: String = stubAgentDefaultAnswer,
+    stopReason: StopReason = .endTurn,
+    delaySeconds: Int,
+    pidFile: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: answer,
+            stopReason: stopReason,
+            pidFile: pidFile,
+            turnEnd: .afterSeconds(delaySeconds)
+        )
+    )
+}
+
 /// Writes a stub agent that answers every request and then ignores a closed stdin.
 ///
 /// The seventh row of the check table of `cli-plan.md` §10 is what this one is for: it
@@ -495,6 +562,24 @@ func writeAgentScript(_ content: String) throws -> String {
         prefix: agentScriptNamePrefix,
         suffix: agentScriptNameSuffix
     ).path
+}
+
+/// Builds the command line of one `acp-client run` against a stub-agent script.
+///
+/// The scripts carry no execute bit, so the agent command is
+/// ``stubAgentShellCommand`` and the script is its first argument, which is also
+/// the shape `cli-plan.md` §6 gives an agent that takes arguments of its own.
+///
+/// - Parameters:
+///   - prompt: The prompt argument, or `nil` to put none on the line, which is
+///     the §7 row that reads the prompt off standard input.
+///   - options: The options of `cli-plan.md` §6.1 to put before the separator.
+///   - script: The absolute path of the stub-agent script.
+/// - Returns: The arguments for
+///   ``runAcpClient(_:standardInput:standardOutput:environment:within:)``.
+func runArguments(prompt: String?, options: [String] = [], script: String) -> [String] {
+    ["run"] + (prompt.map { [$0] } ?? []) + options
+        + ["--", stubAgentShellCommand, script]
 }
 
 /// Removes a script a builder in this file wrote.
@@ -589,6 +674,9 @@ private let permissionRequestID = 100
 ///   - initialize: How the agent answers `initialize`.
 ///   - availableCommands: The slash commands the agent reports right after its
 ///     `session/new` answer, or `nil` to send no `available_commands_update`.
+///   - turnEnd: What the agent does once it has streamed its answer chunk. The
+///     default sends the `idle` update at once, which is what a conformant
+///     agent with nothing left to do does.
 /// - Returns: The script text.
 /// - Throws: A JSON-encoding failure.
 private func requestLoop(
@@ -599,7 +687,8 @@ private func requestLoop(
     argumentsFile: String? = nil,
     asksPermission: Bool = false,
     initialize: StubAgentInitializeAnswer = .reports([]),
-    availableCommands: [AvailableCommand]? = nil
+    availableCommands: [AvailableCommand]? = nil,
+    turnEnd: StubAgentTurnEnd = .atOnce
 ) throws -> String {
     """
     \(recordPidStatement(writingTo: pidFile))
@@ -621,7 +710,7 @@ private func requestLoop(
           \(try printfLine(promptAnswer()))
           \(try permissionExchangeStatements(asking: asksPermission))
           \(try printfLine(messageChunk(answer)))
-          \(try printfLine(idleState(stopReason)))
+          \(try turnEndStatements(turnEnd, stopReason: stopReason))
           ;;
       esac
     done
@@ -747,6 +836,47 @@ private func permissionRequest() throws -> String {
             "title": stubAgentPermissionTitle,
         ],
     ])
+}
+
+/// What a stub agent does once it has streamed its answer chunk.
+///
+/// The turn of `cli-plan.md` §8 ends on an `idle` `state_update` and on nothing
+/// else, so these three cases are the three endings a client has to tell apart:
+/// a turn that ends at once, a turn that is merely slow, and a turn that never
+/// ends at all.
+private enum StubAgentTurnEnd {
+    /// The agent sends the `idle` update at once.
+    case atOnce
+
+    /// The agent waits this many whole seconds, and then sends the `idle`
+    /// update.
+    case afterSeconds(Int)
+
+    /// The agent sends no `state_update` at all, so the turn has no ending of
+    /// its own. The stop reason the caller named reaches the wire nowhere.
+    case never
+}
+
+/// Renders the shell statements that end one stub agent's turn.
+///
+/// - Parameters:
+///   - turnEnd: What the agent does once it has streamed its answer chunk.
+///   - stopReason: The stop reason to report, or `nil` to report none. A
+///     ``StubAgentTurnEnd/never`` agent sends no update to carry it.
+/// - Returns: The shell statements, or the empty string.
+/// - Throws: A JSON-encoding failure.
+private func turnEndStatements(
+    _ turnEnd: StubAgentTurnEnd,
+    stopReason: StopReason?
+) throws -> String {
+    switch turnEnd {
+    case .atOnce:
+        return printfLine(try idleState(stopReason))
+    case .afterSeconds(let seconds):
+        return "sleep \(seconds)\n\(printfLine(try idleState(stopReason)))"
+    case .never:
+        return ""
+    }
 }
 
 /// How a stub agent answers `initialize`.

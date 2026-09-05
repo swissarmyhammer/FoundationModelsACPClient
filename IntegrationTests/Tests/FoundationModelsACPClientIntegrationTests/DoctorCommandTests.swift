@@ -295,7 +295,10 @@ struct DoctorCommandTests {
 
     @Test(
         "--timeout never becomes the doctor's own limit",
-        arguments: [["--timeout", "0"], ["--timeout=-1"]]
+        arguments: [
+            timeoutOption(collapsingTimeoutValue),
+            ["\(timeoutOptionName)=\(collapsingTimeoutValue)"],
+        ]
     )
     func theTurnTimeoutNeverBecomesTheDoctorsLimit(option: [String]) async throws {
         let script = try makeWellBehavedAgent()
@@ -305,9 +308,9 @@ struct DoctorCommandTests {
 
         // `--timeout` bounds the TURN of `cli-plan.md` §6.1, and `doctor` runs
         // no turn, so the doctor keeps its own limit whatever the option says.
-        // A limit of zero reaching the rows would collapse both the settle
-        // interval and the initialize race, and every row that rests on them
-        // would report a failure this agent does not have.
+        // A limit of one millisecond reaching the rows would collapse both the
+        // initialize race and the teardown watch, and every row that rests on
+        // them would report a failure this agent does not have.
         #expect(result.exitCode == doctorPassedExitCode)
         for entry in try Self.checkEntries(in: result) {
             #expect(try Self.text(checkStatusKey, of: entry) == okStatusValue, "\(entry)")
