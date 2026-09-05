@@ -33,6 +33,15 @@ let stubAgentVersion = "1.0.0"
 /// The session id each stub agent gives out from `session/new`.
 let stubAgentSessionID = SessionId(rawValue: "stub-session")
 
+/// The protocol version ``makeWrongProtocolVersionAgent(pidFile:)`` answers
+/// `initialize` with.
+///
+/// `ProtocolVersion` is a bare integer on the wire, never a string, and 1 is the
+/// version of the ACP draft that came before the one this client speaks. So this
+/// is the "a v1 agent" half of the fifth row of the check table of
+/// `cli-plan.md` §10, written as the number that reaches the wire.
+let stubAgentUnsupportedProtocolVersion = ProtocolVersion(rawValue: 1)
+
 /// The message id each stub agent stamps on its reply chunks.
 let stubAgentMessageID = MessageId(rawValue: "stub-agent-msg-1")
 
@@ -228,15 +237,46 @@ func makeBannerOnStdoutAgent() throws -> String {
 /// stays alive and silent until its stdin closes, so a client that waits
 /// forever hangs and a client that bounds its wait reports a timeout.
 ///
+/// - Parameter pidFile: Where the agent records its own pid before it reads
+///   anything, or `nil` to record none.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: The write failure of the script file.
-func makeSilentAgent() throws -> String {
+func makeSilentAgent(pidFile: String? = nil) throws -> String {
     try writeAgentScript(
         """
+        \(recordPidStatement(writingTo: pidFile))
         while IFS= read -r line; do
           :
         done
         """
+    )
+}
+
+/// Writes a stub agent that answers `initialize` with a protocol version other
+/// than the one it was sent.
+///
+/// The fifth row of the check table of `cli-plan.md` §10 is what this one is
+/// for. `ClientSideConnection.initialize(_:)` compares the answered version with
+/// the sent one and throws `ProtocolVersionMismatchError` naming both, so only a
+/// real agent that answers with ``stubAgentUnsupportedProtocolVersion`` can
+/// prove the doctor turns that throw into a row of its own.
+///
+/// The agent stays alive until its stdin closes, exactly as
+/// ``makeInitializeRefusingAgent(pidFile:)`` does, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeWrongProtocolVersionAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .reportsProtocolVersion(stubAgentUnsupportedProtocolVersion)
+        )
     )
 }
 
@@ -580,9 +620,14 @@ private func permissionRequest() throws -> String {
 
 /// How a stub agent answers `initialize`.
 private enum StubAgentInitializeAnswer {
-    /// The agent answers with its capabilities and these authentication
-    /// methods. An empty list advertises none.
+    /// The agent answers with the protocol version it was sent, its
+    /// capabilities, and these authentication methods. An empty list advertises
+    /// none.
     case reports([AuthMethod])
+
+    /// The agent answers with this protocol version rather than the one it was
+    /// sent, and advertises no authentication method.
+    case reportsProtocolVersion(ProtocolVersion)
 
     /// The agent answers with a JSON-RPC error, and the handshake fails.
     case fails
@@ -607,26 +652,36 @@ private let stubAgentInitializeRefusal = "the stub agent refuses to initialize"
 private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> String {
     switch answer {
     case .reports(let authMethods):
-        try initializeResult(reporting: authMethods)
+        try initializeResult(
+            reporting: authMethods,
+            protocolVersion: ACPClient.supportedProtocolVersion
+        )
+    case .reportsProtocolVersion(let protocolVersion):
+        try initializeResult(reporting: [], protocolVersion: protocolVersion)
     case .fails:
         try initializeError()
     }
 }
 
-/// The successful `initialize` answer: the protocol version this client
-/// supports, the stub's own name and version, a session capability, and the
-/// authentication methods the caller chose.
+/// The successful `initialize` answer: one protocol version, the stub's own name
+/// and version, a session capability, and the authentication methods the caller
+/// chose.
 ///
-/// - Parameter authMethods: The authentication methods to advertise. An empty
-///   list leaves the member out, which is what an agent that advertises none
-///   sends.
+/// - Parameters:
+///   - authMethods: The authentication methods to advertise. An empty list
+///     leaves the member out, which is what an agent that advertises none sends.
+///   - protocolVersion: The protocol version to answer with. It reaches the wire
+///     as a bare integer, which is the only form `ProtocolVersion` takes.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func initializeResult(reporting authMethods: [AuthMethod]) throws -> String {
+private func initializeResult(
+    reporting authMethods: [AuthMethod],
+    protocolVersion: ProtocolVersion
+) throws -> String {
     var result: [String: Any] = [
         "capabilities": ["session": [String: String]()],
         "info": ["name": stubAgentName, "version": stubAgentVersion],
-        "protocolVersion": ACPClient.supportedProtocolVersion.rawValue,
+        "protocolVersion": protocolVersion.rawValue,
     ]
     if !authMethods.isEmpty {
         result["authMethods"] = try jsonValue(of: authMethods)

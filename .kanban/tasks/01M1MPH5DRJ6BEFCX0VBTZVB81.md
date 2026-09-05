@@ -97,10 +97,37 @@ comments:
     - evidence: 8 files — Sources/AcpClientCore/AgentCommandDoctor.swift (new), Sources/AcpClientCore/AgentCommandResolver.swift, Tests/FoundationModelsACPClientTests/AgentCommandDoctorTests.swift (new), IntegrationTests/Package.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift (new), .../Support/StubAgents.swift, .../ProbeCommandTests.swift, .../RunCommandExitTests.swift. `timeout 420 swift test` — 201 tests in 15 suites passed, zero warnings. `timeout 600 swift test --package-path IntegrationTests` — 41 tests in 8 suites passed, zero warnings. RED was measured first: `swift build --package-path IntegrationTests --build-tests` reported `cannot find type 'AgentCommandDoctor' in scope` before the source file was written. Every acceptance row and every test row of the description is ticked; no row was left undone.
     - next: /review. The `doctor` subcommand that renders these checks is ^39xrxnp and was out of scope here, so `DoctorCommand.run()` still throws `SubcommandNotImplementedError`.
   timestamp: 2026-09-04T23:45:04.120622+00:00
+- actor: claude-code
+  id: 01m1qd8hd6vjfkn87a2s2zymgr
+  text: |-
+    ### review — clean
+    - evidence: `review sha c8b0a59~1..c8b0a59` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed, 0 skipped. 8 files reviewed.
+    - checked by hand, on request: (1) check 2 cannot report a false failure on a slow agent — `AgentProcess.init` records the pid at the spawn, and only stdout EOF clears it, so an agent that blocks on stdin holds its pid for the full watch; (2) the typed throw on `AgentCommandResolver.resolve(_:)` breaks no caller — `RunCommand`, `ProbeCommand` and the resolver tests all call it from untyped `throws` contexts, and the four `AgentCommandResolutionFailure` cases stay reachable; (3) §11 holds — `defer { agent.shutdown() }` stands after the spawn succeeds, and the resolve-failure path starts no process; (4) the `warning` for a row that did not run hides nothing — it is only ever returned beside the `error` row that dominates the exit code of §9; (5) the tests drive the doctor value, not the source text.
+    - next: none. Card is done. Checks 3 to 7 belong to ^0jrf7 and ^93w4.
+  timestamp: 2026-09-04T23:50:00.358919+00:00
+- actor: claude-code
+  id: 01m1qd9nbfeeafhaw8vyryr25t
+  text: |-
+    ### finish iteration 1 — clean
+    This card was stuck once, and the block is gone: `AgentCommandDoctor` lives in the new `AcpClientCore` library, which both suites can import.
+
+    - implement: changed — 8 files. `struct AgentCommandDoctor: Doctorable` resolves the command, starts the agent, and reports both rows whichever way the first went. `AgentCommandResolver.resolve(_:)` gained a typed throw so the doctor can switch the failure cases exhaustively.
+    - test: green — root 201 passed in 15 suites, integration 41 passed in 8 suites, 0 warnings on both
+    - commit: c8b0a59 feat(doctor): add AgentCommandDoctor for command resolution and process start checks
+    - review: clean — zero findings, task moved to done
+
+    The four points the review settled:
+    - Check 2's premise holds. `AgentProcess` records the pid synchronously inside `init`, and only stdout EOF, a read failure or `shutdown()` clear it. A conformant agent that blocks on stdin writes nothing and closes nothing, so the watch runs its full window and reports `ok`. Slowness alone cannot make a false failure, because the check never waits for output — it asks only whether the child is still there.
+    - The typed throw narrows nothing. Both callers sit inside untyped `throws` functions, which a typed throw widens into, and every case the resolver could report before it can still report.
+    - §11 holds on every path. The `defer` sits after the `AgentProcess` init succeeds; the failed-init return has no process, and the resolve-failure branch returns before any spawn. An integration test proves it against a real pid read back from a file.
+    - The `warning` row hides no failure. It is reachable from one place only, so it always stands beside the `error` row that caused it, and §9 ranks `error` above `warning`, so the exit code still carries the failure.
+
+    One observation the review raised, outside this delta and not a finding: `min(settleInterval, timeLimit)` collapses to zero if a caller ever passes a zero or negative `timeLimit`, which would give a false `ok`, never a false failure. Nothing constructs the doctor that way today. The CLI wiring is ^39xrxnp — check it there.
+  timestamp: 2026-09-04T23:50:37.167346+00:00
 depends_on:
 - 01M1Q5ZSJXM50HEWDVXW83ZSHZ
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9c80
 title: 'Doctor checks 1 and 2: the command resolves, and the process starts and stays'
 ---
 ## What
