@@ -23,7 +23,7 @@ import FoundationModelsACP
 /// `session/close` refuses with the error the test chose. The default is the
 /// `methodNotFound` refusal an agent that does not implement the optional
 /// method sends, and a test that drives the other branch of
-/// `AgentSession.closeSession(_:)` asks for an error with an other code.
+/// `AgentSession.closeSession(_:)` asks for an error with another code.
 ///
 /// A stub built with an elicitation asks the client for that elicitation
 /// before it sends the script. The prompt turn then ends only after the

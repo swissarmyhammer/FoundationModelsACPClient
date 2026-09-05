@@ -47,7 +47,7 @@ final class ManualClock: Clock, Sendable {
             Instant(offset: offset + duration)
         }
 
-        /// Returns the distance from this instant to an other instant.
+        /// Returns the distance from this instant to another instant.
         ///
         /// - Parameter other: The target instant.
         /// - Returns: The distance.

@@ -940,7 +940,7 @@ private enum InitializeOutcome {
     /// The agent answered, with the protocol version that was sent.
     case answered(InitializeResponse)
 
-    /// The agent answered with an other protocol version.
+    /// The agent answered with another protocol version.
     case mismatched(ProtocolVersionMismatchError)
 
     /// The doctor's time limit ended before any answer arrived.

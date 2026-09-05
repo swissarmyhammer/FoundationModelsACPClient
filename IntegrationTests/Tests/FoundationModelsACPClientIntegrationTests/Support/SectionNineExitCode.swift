@@ -3,7 +3,7 @@
 //
 // The numbers are spelled here rather than read from the binary's
 // `AcpClientExitCode`: SwiftPM builds an executable product for this test
-// bundle to spawn, and it publishes no module to an other package. The unit
+// bundle to spawn, and it publishes no module to another package. The unit
 // suite's `ExitCodeTests` pins that table against the same §9 rows, so a
 // renumbering fails there and here alike.
 //

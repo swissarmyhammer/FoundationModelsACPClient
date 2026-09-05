@@ -10,7 +10,7 @@ import Testing
 // runtime, so a test that drives one proves the WIRE is the interface. It is
 // also the only shape available. The unit suite's `ScriptedStubAgent` is a type
 // inside `FoundationModelsACPClientTests`, and a Swift test target publishes no
-// type to a test target in an other package, so this suite cannot reuse it.
+// type to a test target in another package, so this suite cannot reuse it.
 //
 // `cli-plan.md` §14 needs three of them, and later CLI tasks add more. Each
 // builder here writes one script into a temporary directory and gives back its

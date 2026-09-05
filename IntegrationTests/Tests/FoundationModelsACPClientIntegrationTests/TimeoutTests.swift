@@ -21,7 +21,7 @@ import Testing
 //   agent wrote itself, so the reading is taken from outside the run.
 //
 // Nothing here can import the binary's own types: SwiftPM builds an executable
-// product for this test bundle to spawn, and it publishes no module to an other
+// product for this test bundle to spawn, and it publishes no module to another
 // package. The exit codes stand in ``SectionNineExitCode``, against the same §9
 // rows the unit suite's `ExitCodeTests` pins the binary to.
 

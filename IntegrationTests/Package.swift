@@ -30,7 +30,7 @@ import PackageDescription
 /// suite pins that `ci.yml` sets the input.
 ///
 /// **Why the dependency list below repeats the root manifest's.** A SwiftPM
-/// manifest cannot import code from an other manifest. A package may only
+/// manifest cannot import code from another manifest. A package may only
 /// name the products of the packages it declares itself. Each URL and
 /// requirement below matches `../Package.swift` exactly. A mismatch is a
 /// resolution conflict, not a second opinion. `../Package.swift` carries

@@ -10,7 +10,7 @@ import Testing
 // process table, the answer from the pipe, and the agent's pid from a file the
 // agent wrote itself. Nothing here can import the binary's own types: SwiftPM
 // builds an executable product for this test bundle to spawn, and it does not
-// publish that target's module to an other package. So the `-` prompt argument
+// publish that target's module to another package. So the `-` prompt argument
 // is spelled again below, and the exit codes stand in ``SectionNineExitCode``,
 // against the same sections of `cli-plan.md` the unit suite pins the binary to.
 

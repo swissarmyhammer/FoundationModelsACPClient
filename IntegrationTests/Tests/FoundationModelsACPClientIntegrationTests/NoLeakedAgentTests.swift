@@ -53,7 +53,7 @@ import Testing
 // go red.
 //
 // Nothing here can import the binary's own types: SwiftPM builds an executable
-// product for this test bundle to spawn, and it publishes no module to an other
+// product for this test bundle to spawn, and it publishes no module to another
 // package. The exit codes stand in ``SectionNineExitCode``.
 
 /// The number of minutes this file's suite allows itself.

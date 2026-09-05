@@ -11,7 +11,7 @@ import Synchronization
 //
 // The locator is a behavioural port of `BuiltProductLocator` in the sibling
 // package FoundationModelsACPAgent, narrowed to the one executable this package
-// builds. A test target cannot share source with a target in an other package,
+// builds. A test target cannot share source with a target in another package,
 // so the port is a copy on purpose, in the same way as the two copies of
 // `TransportTestSupport.swift`.
 //
@@ -683,7 +683,7 @@ struct PipeDrain {
 /// The smallest pid this support will ever signal.
 ///
 /// `kill(2)` reads 0 as "every process in the sender's OWN process group" and a
-/// negative number as "an other process group", so a pid that is not strictly
+/// negative number as "another process group", so a pid that is not strictly
 /// positive would signal the TEST RUNNER rather than the run under test. A
 /// spawn that has not happened yet answers 0, which is exactly the value this
 /// guard refuses.

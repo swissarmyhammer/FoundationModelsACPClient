@@ -103,7 +103,7 @@ struct CLITestSupportTests {
     ///
     /// The binary's own `AcpClientVersion.current` cannot be read from here.
     /// SwiftPM builds an executable product for this test bundle to spawn, and
-    /// it does not publish that target's module to an other package, so the
+    /// it does not publish that target's module to another package, so the
     /// assertion below is on the SHAPE the unit suite's
     /// `AcpClientVersionTests` pins the constant to.
     private static let semanticVersionComponentCount = 3

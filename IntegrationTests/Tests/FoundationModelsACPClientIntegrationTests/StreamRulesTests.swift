@@ -17,7 +17,7 @@ import Testing
 // in a pipe alike — and byte-for-byte is the only way to check that.
 //
 // Nothing here can import the binary's own types: SwiftPM builds an executable
-// product for this test bundle to spawn, and it publishes no module to an other
+// product for this test bundle to spawn, and it publishes no module to another
 // package. So the exit code and the two direction marks are spelled again
 // below, against the same sections of `cli-plan.md` the unit suite pins the
 // binary to.

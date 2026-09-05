@@ -55,8 +55,30 @@ comments:
     - Nested: `swift package --package-path IntegrationTests clean` then `swift build --package-path IntegrationTests` — build complete, no warnings. `swift test --package-path IntegrationTests` — 87 tests, 12 suites, all passed, 0 failures, 0 skipped.
     - No fix was needed. No file was changed.
   timestamp: 2026-09-05T13:23:39.770827+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rvwej14mm8yp9t0rbqzmxm
+  text: |-
+    ### commit — changed
+    - evidence: 00741f6 feat(doctor): tee --frames lines to stderr during the doctor check
+  timestamp: 2026-09-05T13:24:47.297432+00:00
+- actor: claude-code
+  id: 01m1rw07yk0x41z70kce8ewja5
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 00741f6) — 0 findings, 7 validator passes attempted, 0 failed, 6 files reviewed
+    - next: none. The task is in `done`.
+  timestamp: 2026-09-05T13:26:51.603781+00:00
+- actor: claude-code
+  id: 01m1rw0qbzzpk6wkz8cbp38hk9
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 7 files: `Sources/AcpClientCore/AgentCommandDoctor.swift` (frame sink seam), `Sources/AcpClientCore/DoctorCommand.swift`, `Sources/AcpClientCore/FrameTeeTransport.swift` (`FrameLineSink`), `cli-plan.md` §6.1, `IntegrationTests/.../DoctorCommandTests.swift` (2 tests), `IntegrationTests/.../Support/CapturedStreams.swift` (new), `IntegrationTests/.../StreamRulesTests.swift`. Red: the `--frames` doctor test failed with stderr `[]`; green after the seam.
+    - test: green — root 223/223 in 19 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped, on a clean build
+    - commit: 00741f6
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T13:27:07.391722+00:00
+position_column: done
+position_ordinal: a980
 title: Wire --frames into doctor, so a diagnosis can show the handshake it ran
 ---
 ## What

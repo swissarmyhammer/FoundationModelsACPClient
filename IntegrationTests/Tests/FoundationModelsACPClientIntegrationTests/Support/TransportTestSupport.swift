@@ -10,7 +10,7 @@ import FoundationModelsACP
 // The unit target keeps a copy of its own in
 // `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift`. The two
 // copies stay separate on purpose: a test target cannot share source with a
-// test target in an other package, and the sibling package
+// test target in another package, and the sibling package
 // FoundationModelsMultitool makes the same choice.
 
 /// The time limits the transport tests use.

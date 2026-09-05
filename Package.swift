@@ -17,7 +17,7 @@ let package = Package(
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
         // Everything the `acp-client` binary does, as a library. It is a
         // product, and not a target alone, because a package can import only a
-        // product of an other package, and the `IntegrationTests` package
+        // product of another package, and the `IntegrationTests` package
         // drives this code directly rather than through the binary.
         //
         // SwiftPM publishes no importable module for an EXECUTABLE product

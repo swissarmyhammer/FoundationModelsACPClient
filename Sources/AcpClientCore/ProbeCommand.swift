@@ -165,7 +165,7 @@ struct ProbeCommand: AsyncParsableCommand {
     ///   - terminal: The layer that owns standard error.
     /// - Returns: What the agent reported.
     /// - Throws: `ProtocolVersionMismatchError` when the agent answered
-    ///   `initialize` with an other version, ``SessionWorkingDirectoryError``
+    ///   `initialize` with another version, ``SessionWorkingDirectoryError``
     ///   when `--cwd` does not resolve, `RequestError` on a peer error, or
     ///   `ConnectionError` when the agent went away.
     @MainActor
