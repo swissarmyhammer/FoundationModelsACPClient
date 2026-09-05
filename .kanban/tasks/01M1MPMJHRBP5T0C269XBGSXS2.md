@@ -272,14 +272,64 @@ comments:
     - next: `/review`. The engine matches no Markdown validator, so the two
       documents need a read against the code, not a tool run.
   timestamp: 2026-09-05T04:56:48.957402+00:00
+- actor: claude-code
+  id: 01m1qywt89fnn5q1z5rnc7hy9k
+  text: |-
+    ### commit — changed
+    - evidence: 218c6ed docs(cli-plan): fix Noora decision ownership and doctor row 6 wording
+    - next: none
+  timestamp: 2026-09-05T04:58:10.569097+00:00
+- actor: claude-code
+  id: 01m1qzj5me8kjy59a7ps5gr3px
+  text: |
+    ### review — clean
+
+    - evidence: zero new findings. `review sha 218c6ed~1..218c6ed` returned
+      findings 0, confirmed 0, refuted 0 over 7 attempts. It reviewed
+      `PlanDocumentTests.swift` and `RepositoryFile.swift`. It matched no
+      validator to `cli-plan.md`, so the prose read below is a hand read.
+    - All seven findings of the 2026-09-04 23:35 section are resolved:
+      - §5 ownership. `cli-plan.md:96-101` now reads "The agent package made
+        that decision, and this package follows it". It agrees with
+        `Package.swift:64` and with `FoundationModelsACPAgent/cli-plan.md`
+        §5.2 "We adopt Noora ... the client CLI follows it".
+      - §5 and §5.2 file names. `cli-plan.md:111-113` states that each package
+        holds the import in a file of its own, and names
+        `TerminalRenderer.swift` for the agent package.
+      - §10 row 6. `cli-plan.md:306` and `cli-plan.md:330-337` state that the
+        row compares the members of `capabilities` alone, and cite ^1qfgtye.
+        `AgentCommandDoctor.swift:526,568,775` reads `capabilities` only.
+      - §12. `cli-plan.md:394-403` gives the executable one link and
+        `AcpClientCore` five. `Package.swift:107-111` declares those five, and
+        `ManifestTests.swift:100,125` holds both counts.
+      - §5 drift guard. `PlanDocumentTests.swift:266-297` compares
+        `onDisk == [documented]`, path against path.
+        `RepositoryFile.swift` gained `rootURL` and `relativePath(of:)`.
+      - ASD-STE100. `cli-plan.md` holds no "an other" and no "forgivingly".
+    - Document read, second pass. Nine statements of §6, §6.1, §7, §8 and
+      §13.1 were checked against the code, and each one is true: the four
+      parts of the `probe` report; the six options and no seventh; the
+      `--timeout` check on all three subcommands
+      (`SharedOptions.swift:67-77`); the inert-option table; the `PATH` walk
+      that drops an empty entry (`AgentCommandResolver.swift:116-118`);
+      `AgentProcess.init` refusing a command that is not absolute
+      (`AgentProcess.swift:148-151`); the spinner that ends on the first
+      chunk (`TurnRunner.swift:357-358`); stdout with no added newline
+      (`TurnRunner.swift:401`); and the two decline lines at every verbosity
+      (`DecliningClient.swift:102-131`).
+    - `timeout 900 swift test --filter PlanDocumentTests`: 6 tests in 1 suite
+      passed, no warning. No file under `Sources/`, `Tests/` or
+      `IntegrationTests/` was modified, and no test process was left running.
+    - next: none. Task moved to `done`.
+  timestamp: 2026-09-05T05:09:50.350930+00:00
 depends_on:
 - 01M1MPJBWDJSX6PEP6N39XRXNP
 - 01M1MPGFG6DKJFC7T3R24Q3M8S
 - 01M1MPG0WT31XJVP37C3CAT35C
 - 01M1MPJRCZKG9CEZ7N5TDX6EDK
 - 01M1MPM0J8R0H6XYAVJF1FZ3BV
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a380
 title: Record the CLI decisions in cli-plan.md and README.md
 ---
 ## What
