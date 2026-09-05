@@ -17,6 +17,13 @@
 // What this file owns is the rest of the discipline: the process-group
 // spawn, the group kill, the reap, and the three teardown triggers.
 //
+// The group kill can miss — `killpg` fails with `ESRCH` for a pid that is no
+// longer a group leader, and with `EPERM` for a group this process may not
+// signal — so the teardown never depends on it. It closes the agent's stdin
+// BEFORE it waits, which is the EOF an ACP agent exits on, and it polls the
+// reap with `WNOHANG` up to a time limit. A teardown therefore always
+// returns; a leak is the worst case, never a hang.
+//
 // Spawning goes through raw `posix_spawn` rather than `Foundation.Process`,
 // for the sibling's own reason: `Process` gives no public way to put a child
 // in its own process group before it execs, and
@@ -175,6 +182,10 @@ public struct AgentProcess: Sendable {
 
     /// Group-kills and reaps the agent. Idempotent; a no-op when the agent
     /// is already torn down.
+    ///
+    /// This call always returns. The teardown closes the agent's stdin
+    /// before it waits, and the wait for the reap is bounded, so an agent
+    /// the group kill did not reach cannot block the host.
     public func shutdown() {
         state.terminateCurrent()
     }
@@ -460,11 +471,33 @@ final class AgentProcessState: Sendable {
     /// from.
     private let registry: ProcessRegistry
 
+    /// The number of seconds in ``defaultReapTimeLimit``.
+    private static let defaultReapTimeLimitSeconds = 5
+
+    /// The longest time a teardown waits for the reap of the agent, unless
+    /// ``init(registry:reapTimeLimit:)`` gets a different limit.
+    ///
+    /// `SIGKILL` ends a process at once, so a reap that needs more time than
+    /// this is a process the signal did not reach. The teardown then returns
+    /// without the reap, rather than block the host forever.
+    static let defaultReapTimeLimit: Duration = .seconds(defaultReapTimeLimitSeconds)
+
+    /// The longest time ``terminateCurrent()`` waits for the reap.
+    private let reapTimeLimit: Duration
+
     /// Creates empty bookkeeping backed by `registry`.
     ///
-    /// - Parameter registry: The registry for the spawned pid.
-    init(registry: ProcessRegistry) {
+    /// - Parameters:
+    ///   - registry: The registry for the spawned pid.
+    ///   - reapTimeLimit: The longest time ``terminateCurrent()`` waits for
+    ///     the reap. Tests give a short limit, so a teardown that must give
+    ///     up does so in a fraction of a second.
+    init(
+        registry: ProcessRegistry,
+        reapTimeLimit: Duration = AgentProcessState.defaultReapTimeLimit
+    ) {
         self.registry = registry
+        self.reapTimeLimit = reapTimeLimit
     }
 
     /// The live pid, or `nil` after teardown.
@@ -513,12 +546,21 @@ final class AgentProcessState: Sendable {
         close(taken)
     }
 
-    /// Group-kills and reaps the recorded agent, closes its stdin, and
-    /// deregisters its pid. Idempotent by construction — the take-and-clear
-    /// inside the lock — so every teardown trigger can call it safely, in
-    /// any order, any number of times. A `killpg` of an already-dead group
-    /// is a harmless `ESRCH`, and `waitpid` runs exactly one time per pid.
-    /// A stdin ``closeStandardInput()`` already closed is left alone.
+    /// Group-kills the recorded agent, closes its stdin, reaps it with a
+    /// bounded wait, and deregisters its pid. Idempotent by construction —
+    /// the take-and-clear inside the lock — so every teardown trigger can
+    /// call it safely, in any order, any number of times. A `killpg` of an
+    /// already-dead group is a harmless `ESRCH`, and the reap runs exactly
+    /// one time per pid. A stdin ``closeStandardInput()`` already closed is
+    /// left alone.
+    ///
+    /// The stdin close comes BEFORE the wait, and the wait is bounded, so
+    /// this call always returns. The group kill can miss: `killpg` fails
+    /// with `ESRCH` for a pid that is no longer a group leader, and with
+    /// `EPERM` for a group this process may not signal. An agent the signal
+    /// did not reach still reads the EOF, and an ACP agent exits on it. An
+    /// agent that ignores both stays alive after the reap time limit ends,
+    /// rather than block the host forever.
     func terminateCurrent() {
         let taken = live.withLock { current -> Live? in
             let recorded = current
@@ -527,12 +569,36 @@ final class AgentProcessState: Sendable {
         }
         guard let taken else { return }
         _ = killpg(taken.pid, SIGKILL)
-        var status: Int32 = 0
-        _ = waitpid(taken.pid, &status, 0)
         if let descriptor = taken.stdinWriteDescriptor {
             close(descriptor)
         }
+        reap(taken.pid)
         registry.deregister(taken.pid)
+    }
+
+    /// The number of milliseconds in ``reapPollInterval``.
+    private static let reapPollIntervalMilliseconds = 10
+
+    /// The pause between two polls of the reap.
+    private static let reapPollInterval: Duration = .milliseconds(reapPollIntervalMilliseconds)
+
+    /// Collects the exit status of `pid` without a blocking wait: a `WNOHANG`
+    /// poll, repeated at ``reapPollInterval`` until the child is collected or
+    /// the reap time limit ends.
+    ///
+    /// `waitpid` answers `0` while the child still runs, the pid when it has
+    /// collected the child, and `-1` when there is nothing to collect: a pid
+    /// that is not a child of this process, or a child already collected.
+    /// Only the first answer is a reason to poll again.
+    ///
+    /// - Parameter pid: The pid to collect.
+    private func reap(_ pid: pid_t) {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: reapTimeLimit)
+        var status: Int32 = 0
+        while waitpid(pid, &status, WNOHANG) == 0, clock.now < deadline {
+            Thread.sleep(forTimeInterval: Self.reapPollInterval / .seconds(1))
+        }
     }
 
     /// Owner teardown: once nothing retains this state, ARC runs the same
