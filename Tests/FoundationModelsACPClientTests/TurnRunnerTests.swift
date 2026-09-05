@@ -168,6 +168,14 @@ private struct TurnRunnerHarness {
     /// ending.
     private let agentTransport: InMemoryTransport
 
+    /// Where a test puts the interrupts of the running turn.
+    ///
+    /// Every harness carries one, whether or not its test sends anything into
+    /// it, so the interrupt child of the turn's task group runs in every test
+    /// of this file. `cli-plan.md` §11 asks that a run with no interrupt is
+    /// unchanged, and a child present in every turn is what measures it.
+    private let interruptFeed: AsyncStream<TurnInterrupt>.Continuation
+
     /// The answer bytes the sink received, end to end.
     var answer: Data {
         answerWrites.elements.reduce(into: Data()) { $0.append($1) }
@@ -181,6 +189,9 @@ private struct TurnRunnerHarness {
     ///   - script: The updates the stub sends before it answers the prompt.
     ///   - deferredScript: The updates the stub sends after it answers the
     ///     prompt, one step per gate.
+    ///   - cancelScript: The updates the stub sends when `session/cancel`
+    ///     arrives. The default is none, which is the agent that ignores a
+    ///     cancellation.
     ///   - standardErrorIsATerminal: The answer the injected terminal reading
     ///     gives, which stands in for `isatty` on file descriptor 2.
     ///   - limit: The `--timeout` limit of the turn, or `nil` for no limit,
@@ -189,6 +200,7 @@ private struct TurnRunnerHarness {
     init(
         script: [SessionUpdate] = [],
         deferredScript: [GatedUpdates] = [],
+        cancelScript: [SessionUpdate] = [],
         standardErrorIsATerminal: Bool = false,
         limit: Duration? = nil
     ) async throws {
@@ -199,7 +211,8 @@ private struct TurnRunnerHarness {
                 connection: connection,
                 session: testSession,
                 script: script,
-                deferredScript: deferredScript
+                deferredScript: deferredScript,
+                cancelScript: cancelScript
             )
         }
         let terminalBuffer = ThreadSafeBuffer<String>()
@@ -211,6 +224,8 @@ private struct TurnRunnerHarness {
             isStandardErrorATerminal: { standardErrorIsATerminal },
             sink: { terminalBuffer.append($0) }
         )
+        let (interrupts, interruptFeed) = AsyncStream<TurnInterrupt>.makeStream()
+        self.interruptFeed = interruptFeed
         session = await AgentSession(over: clientEnd, terminal: terminal, cwd: nil)
         _ = try await session.initialize()
         runner = TurnRunner(
@@ -218,7 +233,8 @@ private struct TurnRunnerHarness {
             prompt: TurnText.prompt,
             terminal: terminal,
             answerSink: { answerWrites.append($0) },
-            limit: limit
+            limit: limit,
+            interrupts: interrupts
         )
     }
 
@@ -232,8 +248,16 @@ private struct TurnRunnerHarness {
         agentTransport.close()
     }
 
+    /// Sends one interrupt into the running turn, as a `Ctrl-C` does.
+    ///
+    /// - Parameter interrupt: What the press asks of the turn.
+    func interrupt(_ interrupt: TurnInterrupt) {
+        interruptFeed.yield(interrupt)
+    }
+
     /// Tears the connection down, as every exit path of the binary does.
     func teardown() async {
+        interruptFeed.finish()
         await session.teardown()
         withExtendedLifetime(agentConnection) {}
     }
@@ -480,6 +504,55 @@ struct TurnRunnerTests {
         harness.sendAgentAway()
 
         await #expect(throws: TurnEndedWithoutIdleError.self) { try await turn.value }
+        #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
+        await harness.teardown()
+    }
+
+    /// §11 gives the FIRST `Ctrl-C` a `session/cancel` and a wait, and not an
+    /// abandoned turn. This stub sends no `idle` update of its own and answers
+    /// the notification with one carrying `cancelled`, so the turn can only
+    /// end at all if the cancellation really reached the agent, and only with
+    /// the outcome §9 sends to code 4.
+    ///
+    /// The chunk is awaited before the interrupt, so the press lands INSIDE
+    /// the turn and not before it started. The sink is asserted beside the
+    /// outcome, because §11 prints the text that arrived.
+    @MainActor @Test("the first interrupt cancels the turn on the wire", .timeLimit(.minutes(1)))
+    func theFirstInterruptCancelsTheTurnOnTheWire() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [agentChunk(text: TurnText.firstAnswerHalf)],
+            cancelScript: [idleState(stopReason: .cancelled)]
+        )
+        let turn = Task { @MainActor in try await harness.runner.run() }
+
+        #expect(await eventually { !harness.answer.isEmpty }, "the answer chunk never arrived")
+        harness.interrupt(.cancelTurn)
+
+        let outcome = try await turn.value
+        #expect(outcome == .stopped(.cancelled))
+        #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
+        await harness.teardown()
+    }
+
+    /// §11 gives the SECOND `Ctrl-C` the end of the run at once. This stub
+    /// ignores `session/cancel` and sends no `idle` update ever, so a runner
+    /// that only cancelled and kept waiting would never come back, and the
+    /// one-minute time limit would kill this test rather than fail it.
+    ///
+    /// The sink is asserted beside the throw: §11 prints the text that
+    /// arrived, and the second press discards nothing the agent already sent.
+    @MainActor @Test("the second interrupt ends the turn at once", .timeLimit(.minutes(1)))
+    func theSecondInterruptEndsTheTurnAtOnce() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [agentChunk(text: TurnText.firstAnswerHalf)]
+        )
+        let turn = Task { @MainActor in try await harness.runner.run() }
+
+        #expect(await eventually { !harness.answer.isEmpty }, "the answer chunk never arrived")
+        harness.interrupt(.cancelTurn)
+        harness.interrupt(.endRunAtOnce)
+
+        await #expect(throws: AcpClientInterrupted.self) { try await turn.value }
         #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
         await harness.teardown()
     }

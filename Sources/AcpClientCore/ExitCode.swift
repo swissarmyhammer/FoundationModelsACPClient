@@ -16,6 +16,25 @@ struct AcpClientTimeout: Error, CustomStringConvertible {
     }
 }
 
+/// The failure the SECOND `Ctrl-C` throws, which ends the run at once.
+///
+/// It is a marker and carries nothing, in the shape ``AcpClientTimeout`` has
+/// and for the same reason: the caller is what says so on stderr, and what the
+/// type carries instead is the exit code. ``AcpClientExitCode/forError(_:)``
+/// reads this one type and answers ``AcpClientExitCode/cancelled``.
+///
+/// The FIRST press needs no error at all. It cancels the turn on the wire and
+/// waits, and the agent's own `idle` update then carries the `cancelled` stop
+/// reason that ``AcpClientExitCode/forStopReason(_:)`` already sends to 4. The
+/// second press has no such update to stand on — `cli-plan.md` §11 says it
+/// ends the run AT ONCE — so it needs a failure of its own.
+struct AcpClientInterrupted: Error, CustomStringConvertible {
+    /// A human-readable description of this error.
+    var description: String {
+        "The run was interrupted a second time, and ended without waiting for the agent."
+    }
+}
+
 /// The exit code table of `cli-plan.md` §9.
 ///
 /// The table is one value with no I/O of its own, so the outcome of a run and
@@ -145,16 +164,18 @@ enum AcpClientExitCode: Int32, Sendable, CaseIterable {
     /// parser or out of a `validate()`. Only the number changes, because §9
     /// and `EX_USAGE` disagree there.
     ///
-    /// The timeout is read first, because ArgumentParser reads an error it
-    /// does not know as a plain failure and ``AcpClientTimeout`` is one of
-    /// those.
+    /// This binary's own two markers are read first, because ArgumentParser
+    /// reads an error it does not know as a plain failure and both of them are
+    /// such an error.
     ///
     /// - Parameter error: The error the run ended with.
     /// - Returns: ``usage`` for a parsing or validation error, ``timeout`` for
-    ///   ``AcpClientTimeout``, and ``failure`` for everything else — a spawn,
-    ///   a protocol or an I/O error.
+    ///   ``AcpClientTimeout``, ``cancelled`` for ``AcpClientInterrupted``, and
+    ///   ``failure`` for everything else — a spawn, a protocol or an I/O
+    ///   error.
     static func forError(_ error: any Error) -> AcpClientExitCode {
         guard !(error is AcpClientTimeout) else { return .timeout }
+        guard !(error is AcpClientInterrupted) else { return .cancelled }
         guard AcpClient.exitCode(for: error) != .validationFailure else { return .usage }
         return .failure
     }

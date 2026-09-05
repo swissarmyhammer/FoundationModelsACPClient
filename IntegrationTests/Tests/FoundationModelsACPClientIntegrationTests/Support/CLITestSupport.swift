@@ -115,6 +115,31 @@ enum CLIStandardOutput {
     case file
 }
 
+/// The signals one bounded run receives while it is still going.
+///
+/// `cli-plan.md` §11 is about a signal that lands IN THE MIDDLE of a turn, and
+/// nothing but a real signal to a real child process can measure it. A test
+/// that merely sent the signal as fast as it could would measure the wrong
+/// thing on a loaded machine: a signal that arrived before the turn started
+/// reaches a `SIGINT` disposition this binary has not replaced yet, and one
+/// that arrived after the turn ended reaches nothing at all. So the send waits
+/// on ``readiness``, which the test points at a fact only a running turn can
+/// produce.
+struct CLISignals: Sendable {
+    /// The signal number to send.
+    let signal: Int32
+
+    /// How many times to send it, back to back.
+    ///
+    /// §11 gives one press and two presses different behaviour, so this is the
+    /// one thing that tells the two rows apart.
+    let count: Int
+
+    /// Answers whether the run has reached the point these signals mean to
+    /// catch. It is polled until it answers `true` or the run's own bound ends.
+    let readiness: @Sendable () -> Bool
+}
+
 /// One finished `acp-client` run.
 ///
 /// The two streams stay `Data` rather than `String`, so a test can assert on the
@@ -170,6 +195,8 @@ func acpClientBinaryURL() throws -> URL {
 ///     a pipe.
 ///   - environment: The whole environment for the run, or `nil` to inherit this
 ///     process's own.
+///   - signals: The signals to send the run while it goes, or `nil` to send
+///     none. The default is none.
 ///   - limit: The longest the run may take. The default is
 ///     ``TransportTestDeadline/limit``.
 /// - Returns: The finished run.
@@ -181,6 +208,7 @@ func runAcpClient(
     standardInput: CLIStandardInput = .endOfFile,
     standardOutput: CLIStandardOutput = .pipe,
     environment: [String: String]? = nil,
+    signals: CLISignals? = nil,
     within limit: Duration = TransportTestDeadline.limit
 ) async throws -> CLIResult {
     let input = try StandardInputSource(standardInput)
@@ -209,11 +237,20 @@ func runAcpClient(
     let errorPipeReader = standardErrorPipe.fileHandleForReading
     async let drainedOutput = drainedBytes(from: outputPipeReader)
     async let standardErrorData = readToEnd(errorPipeReader)
+    // The sender is a child of this call rather than a `Task` of its own, so
+    // it cannot outlive the run: an `async let` the caller never reads is
+    // cancelled and awaited when this function leaves, on the throw below as
+    // well as on the return.
+    async let signalsSent: Void = deliver(signals, to: process.processIdentifier, within: limit)
 
     guard await exited(process, within: limit) else {
         kill(process.processIdentifier, SIGKILL)
         throw CLITestSupportError.runTimedOut(arguments: arguments, limit: limit)
     }
+    // The sender has nothing left to do once the run has exited, and awaiting
+    // it here is what keeps it a child of this call rather than a task the
+    // result outlives.
+    await signalsSent
     return CLIResult(
         exitCode: process.terminationStatus,
         standardOutput: try await output.bytesWritten(drainedFromPipe: drainedOutput),
@@ -540,6 +577,35 @@ private func readToEnd(_ handle: FileHandle) throws -> Data {
 private func drainedBytes(from handle: FileHandle?) throws -> Data {
     guard let handle else { return Data() }
     return try readToEnd(handle)
+}
+
+/// The smallest pid this support will ever signal.
+///
+/// `kill(2)` reads 0 as "every process in the sender's OWN process group" and a
+/// negative number as "an other process group", so a pid that is not strictly
+/// positive would signal the TEST RUNNER rather than the run under test. A
+/// spawn that has not happened yet answers 0, which is exactly the value this
+/// guard refuses.
+private let smallestSignallablePid: pid_t = 1
+
+/// Waits for the run to reach the point `signals` means to catch, and then
+/// sends them.
+///
+/// A send that never becomes ready is not a failure of its own: the run under
+/// it then ends whichever way it was going to end, and the test that asked for
+/// the signals fails on the exit code or the bytes it asserted. That keeps the
+/// failure the test's own claim rather than a second story about the harness.
+///
+/// - Parameters:
+///   - signals: The signals to send, or `nil` to send none.
+///   - pid: The pid of the run under test.
+///   - limit: The longest to wait for readiness, which is the run's own bound.
+private func deliver(_ signals: CLISignals?, to pid: pid_t, within limit: Duration) async {
+    guard let signals, pid >= smallestSignallablePid else { return }
+    guard await eventually(within: limit, { signals.readiness() }) else { return }
+    for _ in 0..<signals.count {
+        kill(pid, signals.signal)
+    }
 }
 
 /// Waits for `process` to exit, and gives up at `limit`.

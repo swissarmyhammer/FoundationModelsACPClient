@@ -39,6 +39,12 @@
 //    IS the race, the throw is the limit and nothing else, and
 //    `withThrowingTaskGroup` cancels and drains the other children on the way
 //    out, so no task is left running behind the exit.
+//    The `Ctrl-C` handling of §11 is a child of the same group for the same
+//    reason, and its first press does one thing the limit does NOT: it sends
+//    `session/cancel` and keeps waiting. §11 asks for a turn that is CANCELLED
+//    on the wire and then reports its own `cancelled` stop reason, rather than
+//    a turn that was merely abandoned. Only the second press ends the wait,
+//    and it throws in exactly the way the limit does.
 // 6. The group's element says WHICH child finished, and never merely "with no
 //    outcome". Three children finish carrying no outcome, and they do not mean
 //    the same thing: the prompt acknowledgement and the spinner leave the turn
@@ -108,6 +114,24 @@ struct TurnEndedWithoutIdleError: Error, CustomStringConvertible {
     }
 }
 
+/// What one `Ctrl-C` asks of the running turn (`cli-plan.md` §11).
+///
+/// The two cases are the two presses that section names, and the counting that
+/// tells them apart lives in ``InterruptHandler`` rather than here: this type
+/// says what to DO, so a reader of ``TurnRunner`` sees the two behaviours
+/// spelled out and never a press number to interpret.
+enum TurnInterrupt: Sendable {
+    /// Send `session/cancel`, and keep waiting for the agent's own `idle`
+    /// update. §11 gives the first press this, so the answer that arrived
+    /// stays written and the turn ends with the `cancelled` stop reason §9
+    /// sends to code 4.
+    case cancelTurn
+
+    /// End the run at once, with no further wait on the agent. §11 gives the
+    /// second press this.
+    case endRunAtOnce
+}
+
 /// The text this file draws on standard error.
 ///
 /// It lives outside ``TurnRunner`` because the spinner runs on a task of its
@@ -147,6 +171,13 @@ struct TurnRunner {
     /// The longest the turn may run, or `nil` for no limit.
     private let limit: Duration?
 
+    /// The interrupts of the run, or `nil` for a turn that catches none.
+    ///
+    /// `nil` is the shape a caller that installed no ``InterruptHandler``
+    /// gives, and it adds no child to the task group at all — the same shape
+    /// ``limit`` takes for a run that carried no `--timeout`.
+    private let interrupts: AsyncStream<TurnInterrupt>?
+
     /// Builds the runner.
     ///
     /// - Parameters:
@@ -157,18 +188,22 @@ struct TurnRunner {
     ///   - limit: The longest the turn may run. The default is `nil`, which is
     ///     the "no limit" `cli-plan.md` §6.1 gives a run that carried no
     ///     `--timeout`.
+    ///   - interrupts: The interrupts of the run. The default is `nil`, which
+    ///     is a turn no `Ctrl-C` reaches.
     init(
         session: AgentSession,
         prompt: String,
         terminal: TerminalOutput,
         answerSink: @escaping @Sendable (Data) -> Void,
-        limit: Duration? = nil
+        limit: Duration? = nil,
+        interrupts: AsyncStream<TurnInterrupt>? = nil
     ) {
         self.session = session
         self.prompt = prompt
         output = terminal
         self.answerSink = answerSink
         self.limit = limit
+        self.interrupts = interrupts
     }
 
     /// Runs one turn: opens a session, sends the prompt, streams the answer,
@@ -224,6 +259,14 @@ struct TurnRunner {
                     throw AcpClientTimeout()
                 }
             }
+            if let interrupts {
+                group.addTask {
+                    try await self.applyInterrupts(from: interrupts, to: sessionId)
+                    // The stream ended with no second press on it, so the
+                    // interrupts are over and the turn is not.
+                    return .sideWorkFinished
+                }
+            }
             while let event = try await group.next() {
                 switch event {
                 case .turnEnded(let outcome):
@@ -255,6 +298,42 @@ struct TurnRunner {
         _ = try await session.connection.prompt(
             PromptRequest(prompt: [.text(TextContent(text: prompt))], sessionId: sessionId)
         )
+    }
+
+    /// Applies each interrupt of the run to the live turn.
+    ///
+    /// The first press sends `session/cancel` and returns to the stream: the
+    /// schema confirms a cancellation with an `idle` update carrying
+    /// `cancelled`, never with the notification returning, so the reading is
+    /// still what ends the turn and `cli-plan.md` §9 still gives that outcome
+    /// its own code. The second press has no such update to wait for, so it
+    /// throws and the group cancels every other child on the way out.
+    ///
+    /// A `session/cancel` that cannot reach a dead agent throws, and that
+    /// throw is left alone: the run really did fail on the wire, and §9 sends
+    /// it to the protocol-failure row, exactly as it sends the reader's own
+    /// ``TurnEndedWithoutIdleError`` there.
+    ///
+    /// - Parameters:
+    ///   - interrupts: The interrupts of the run.
+    ///   - sessionId: The session to cancel.
+    /// - Throws: ``AcpClientInterrupted`` on the second interrupt, or
+    ///   `ConnectionError` when the agent went away before the cancellation
+    ///   could reach it.
+    private func applyInterrupts(
+        from interrupts: AsyncStream<TurnInterrupt>,
+        to sessionId: SessionId
+    ) async throws {
+        for await interrupt in interrupts {
+            switch interrupt {
+            case .cancelTurn:
+                try await session.connection.sessionCancel(
+                    CancelSessionNotification(sessionId: sessionId)
+                )
+            case .endRunAtOnce:
+                throw AcpClientInterrupted()
+            }
+        }
     }
 
     /// Reads the session's updates until the agent reports `idle`.

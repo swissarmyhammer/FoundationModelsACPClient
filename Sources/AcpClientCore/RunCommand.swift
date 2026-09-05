@@ -12,7 +12,7 @@ import FoundationModelsACPClient
 // with the three things only a real run has: the spawn, the reap, and the exit
 // code.
 //
-// Three decisions here are not free choices.
+// Four decisions here are not free choices.
 //
 // 1. **The reap is a `defer`.** §11 lets no agent outlive the run, and a leaked
 //    agent holds gigabytes of model weights. A completed turn, a thrown error
@@ -28,6 +28,14 @@ import FoundationModelsACPClient
 //    is thrown as the parser's `ExitCode`, which prints nothing and carries the
 //    number. Standard output stays the answer text and nothing else, which is
 //    what §8 asks for.
+// 4. **The `Ctrl-C` handler is armed around the SPAWN, and torn down after the
+//    reap.** §11 gives the interrupt an agent to cancel and an agent to reap,
+//    and both facts start at the spawn. The two `defer`s run in reverse order,
+//    so the agent is gone before the `SIGINT` disposition goes back to the one
+//    that ends this process — a press in that window would otherwise kill the
+//    binary with the agent still running. Arming EARLIER would be worse in the
+//    other direction: the disposition is `SIG_IGN` while the handler is armed,
+//    so a press before there is a turn to cancel would be swallowed whole.
 //
 // One name to watch. `FoundationModelsACP` exports a `TerminalOutput` of its
 // own — the ACP model of what an agent-owned terminal printed. Inside this
@@ -159,8 +167,9 @@ struct RunCommand: AsyncParsableCommand {
     /// - Returns: Why the turn ended.
     /// - Throws: ``AgentCommandResolutionFailure`` when the command resolves to
     ///   no executable, `AgentProcessError` when the spawn fails, or whatever
-    ///   the turn itself threw — ``AcpClientTimeout`` among it, which the
-    ///   `defer` above reaps the agent on exactly as it reaps every other row.
+    ///   the turn itself threw — ``AcpClientTimeout`` and
+    ///   ``AcpClientInterrupted`` among it, which the `defer`s above reap the
+    ///   agent on exactly as they reap every other row.
     private static func runTurn(
         agent: AgentCommand,
         prompt: String,
@@ -170,7 +179,19 @@ struct RunCommand: AsyncParsableCommand {
         terminal: TerminalOutput
     ) async throws -> TurnOutcome {
         let executable = try AgentCommandResolver().resolve(agent.executable)
+        let (interrupts, interruptFeed) = AsyncStream<TurnInterrupt>.makeStream()
+        let interruptHandler = InterruptHandler(
+            onFirstInterrupt: { interruptFeed.yield(.cancelTurn) },
+            onSecondInterrupt: { interruptFeed.yield(.endRunAtOnce) }
+        )
+        interruptHandler.start()
+        defer {
+            interruptHandler.stop()
+            interruptFeed.finish()
+        }
         let process = try AgentProcess(command: executable, arguments: agent.arguments)
+        // This `defer` runs BEFORE the one above, so the agent is reaped while
+        // `SIGINT` is still ignored. See decision 4 at the head of this file.
         defer { process.shutdown() }
         terminal.event("the agent started: \(executable)")
         // The tee is bound here rather than passed inline, so it outlives the
@@ -187,6 +208,7 @@ struct RunCommand: AsyncParsableCommand {
             prompt: prompt,
             cwd: cwd,
             limit: limit,
+            interrupts: interrupts,
             terminal: terminal
         )
     }
@@ -232,12 +254,14 @@ struct RunCommand: AsyncParsableCommand {
     ///   - prompt: The prompt of the turn.
     ///   - cwd: The `--cwd` value, or `nil` for the process working directory.
     ///   - limit: The `--timeout` limit of the turn, or `nil` for no limit.
+    ///   - interrupts: The interrupts a `Ctrl-C` puts into the turn.
     ///   - terminal: The layer that owns standard error.
     /// - Returns: Why the turn ended.
     /// - Throws: `ProtocolVersionMismatchError` when the agent answered
     ///   `initialize` with an other version, ``SessionWorkingDirectoryError``
     ///   when `--cwd` does not resolve, ``AcpClientTimeout`` when the turn
-    ///   reached its limit, ``TurnEndedWithoutIdleError`` when the agent went
+    ///   reached its limit, ``AcpClientInterrupted`` when a second `Ctrl-C`
+    ///   ended the run, ``TurnEndedWithoutIdleError`` when the agent went
     ///   away in the middle of the turn, `RequestError` on a peer error, or
     ///   `ConnectionError` when the agent went away.
     @MainActor
@@ -246,6 +270,7 @@ struct RunCommand: AsyncParsableCommand {
         prompt: String,
         cwd: String?,
         limit: Duration?,
+        interrupts: AsyncStream<TurnInterrupt>,
         terminal: TerminalOutput
     ) async throws -> TurnOutcome {
         let session = await AgentSession(over: transport, terminal: terminal, cwd: cwd)
@@ -258,7 +283,8 @@ struct RunCommand: AsyncParsableCommand {
                     prompt: prompt,
                     terminal: terminal,
                     answerSink: answerSink,
-                    limit: limit
+                    limit: limit,
+                    interrupts: interrupts
                 ).run()
             )
         } catch {

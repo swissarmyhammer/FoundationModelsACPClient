@@ -14,6 +14,12 @@ import FoundationModelsACP
 /// prompts. Every other session method stays unanswered: no test needs one,
 /// and a stub that answers a method it does not model would hide a mistake.
 ///
+/// `session/cancel` sends the `cancelScript` the test chose. The default is no
+/// script at all, which is the agent that IGNORES a cancellation; a test that
+/// drives the `cli-plan.md` §11 interrupt gives it an `idle` update carrying
+/// the `cancelled` stop reason, which is how the schema confirms a
+/// cancellation.
+///
 /// `session/close` refuses with the error the test chose. The default is the
 /// `methodNotFound` refusal an agent that does not implement the optional
 /// method sends, and a test that drives the other branch of
@@ -69,6 +75,14 @@ final class ScriptedStubAgent: Agent {
     /// The updates to send after the prompt answer, one step per gate.
     private let deferredScript: [GatedUpdates]
 
+    /// The updates to send when `session/cancel` arrives, in order.
+    ///
+    /// An empty script is the agent that IGNORES a cancellation, which is a
+    /// conformant thing for an agent to be: `session/cancel` is a
+    /// notification, and the schema confirms a cancellation with an `idle`
+    /// `state_update` that this agent is free never to send.
+    private let cancelScript: [SessionUpdate]
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -78,6 +92,9 @@ final class ScriptedStubAgent: Agent {
     ///     prompt answer.
     ///   - deferredScript: The updates to send after the prompt answer, one
     ///     step per gate, in order.
+    ///   - cancelScript: The updates to send when `session/cancel` arrives.
+    ///     The default is none, which is the agent that ignores a
+    ///     cancellation.
     ///   - elicitation: The elicitation to ask for at the start of the
     ///     prompt turn, or `nil` to ask for none.
     ///   - closeSessionError: The error to answer `session/close` with.
@@ -86,6 +103,7 @@ final class ScriptedStubAgent: Agent {
         session: SessionId,
         script: [SessionUpdate],
         deferredScript: [GatedUpdates] = [],
+        cancelScript: [SessionUpdate] = [],
         elicitation: CreateElicitationRequest? = nil,
         closeSessionError: RequestError = .methodNotFound("session/close")
     ) {
@@ -93,6 +111,7 @@ final class ScriptedStubAgent: Agent {
         self.session = session
         self.script = script
         self.deferredScript = deferredScript
+        self.cancelScript = cancelScript
         self.elicitation = elicitation
         self.closeSessionError = closeSessionError
     }
@@ -132,7 +151,14 @@ final class ScriptedStubAgent: Agent {
         return PromptResponse()
     }
 
-    func sessionCancel(_ params: CancelSessionNotification) async {}
+    func sessionCancel(_ params: CancelSessionNotification) async {
+        for update in cancelScript {
+            // A notification has no answer that could carry a failure, and a
+            // client that tore its connection down right after it cancelled is
+            // a shape `cli-plan.md` §11 allows. Neither is a reason to trap.
+            try? await send(update)
+        }
+    }
 
     /// Sends one update for this stub's session.
     ///

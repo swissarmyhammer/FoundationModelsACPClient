@@ -190,11 +190,31 @@ comments:
     - The finding's checklist item is `- [x]`. Both `## Review Findings` sections are now fully checked, and every acceptance and test row stays checked.
     - next: /review
   timestamp: 2026-09-05T01:51:45.461591+00:00
+- actor: claude-code
+  id: 01m1qmcxp96vp52wck51bpb6wn
+  text: |-
+    ### review — clean
+    - evidence: `review sha a7c94d0~1..a7c94d0` — 7 validators, 0 findings, 0 confirmed, 0 refuted. 1 file reviewed; 2 `.kanban/` files excluded by `.reviewignore`. Both prior findings are checked: `Sources/AcpClientCore/TurnRunner.swift:201` (2026-09-04 20:28) and `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TimeoutTests.swift:83` (2026-09-04 20:41).
+    - next: none — task moved to `done`. Third pass, zero new findings.
+  timestamp: 2026-09-05T01:54:44.041290+00:00
+- actor: claude-code
+  id: 01m1qmdgg0dfwas0zwg4vm9qq2
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: changed — 1 file. `goingAwayRunBudget` is built from a named `goingAwayRunBudgetSeconds`, and the doc line that repeated the value in prose no longer does.
+    - test: green — root 205 passed in 15 suites, integration 67 passed in 10 suites, 0 warnings on both builds
+    - commit: a7c94d0 refactor(tests): name the going-away run budget as a constant
+    - review: clean — zero new findings, both prior items checked, task moved to done
+
+    The sweep was measured, not guessed: swiftlint's `no_magic_numbers` under the rule's own stated configuration, over all eleven files this card touched — one violation before, zero after. The other constants in the file were already clean, because a declaration NAMES its own value; line 83 differed because its `2` was an argument inside the declaration rather than the declaration's value.
+
+    This card took three rounds, and the middle one caught a real regression the card itself introduced. Worth keeping: the review's counterfactual — put one file back a commit, watch the new test fail for the old reason, restore — is what turned "the fix looks right" into "the test guards the defect and the fix removes it".
+  timestamp: 2026-09-05T01:55:03.296025+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPECJSM165NAWX5F3NKX9A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a080
 title: 'Add --timeout: end the run at the limit, exit 124, and reap the agent'
 ---
 ## What

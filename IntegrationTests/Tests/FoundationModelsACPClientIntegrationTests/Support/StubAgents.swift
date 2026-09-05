@@ -445,14 +445,23 @@ func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
 ///   - answer: The reply text to stream before the turn stops going anywhere.
 ///   - pidFile: Where the agent records its own pid before it answers anything,
 ///     or `nil` to record none.
+///   - transcript: Where the agent appends every request line it reads, or
+///     `nil` to record none.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeNeverIdleAgent(
     answer: String = stubAgentDefaultAnswer,
-    pidFile: String? = nil
+    pidFile: String? = nil,
+    transcript: String? = nil
 ) throws -> String {
     try writeAgentScript(
-        requestLoop(answer: answer, stopReason: nil, pidFile: pidFile, turnEnd: .never)
+        requestLoop(
+            answer: answer,
+            stopReason: nil,
+            pidFile: pidFile,
+            transcript: transcript,
+            turnEnd: .never
+        )
     )
 }
 
@@ -518,6 +527,45 @@ func makeSlowTurnAgent(
             stopReason: stopReason,
             pidFile: pidFile,
             turnEnd: .afterSeconds(delaySeconds)
+        )
+    )
+}
+
+/// Writes a stub agent that streams one answer chunk, waits for
+/// `session/cancel`, and only then ends its turn.
+///
+/// It is the conformant answer to the first `Ctrl-C` of `cli-plan.md` §11. The
+/// schema confirms a cancellation with an `idle` `state_update` carrying
+/// `cancelled`, never with the notification returning, so this agent sends
+/// nothing until the notification reaches it. A run that never cancelled on
+/// the wire therefore never gets an ending at all, and the bound
+/// `runAcpClient` puts on a whole run is what ends such a test.
+///
+/// The chunk goes out BEFORE the wait, so the run has answer bytes on its
+/// standard output by the time the interrupt lands. That is the half of §11 an
+/// interrupt must not break: the text that already arrived stays written.
+///
+/// - Parameters:
+///   - answer: The reply text to stream before the wait.
+///   - pidFile: Where the agent records its own pid before it answers
+///     anything, or `nil` to record none.
+///   - transcript: Where the agent appends every request line it reads, or
+///     `nil` to record none. A test reads it to learn that the turn really
+///     started before it sends the signal.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeCancelAwareAgent(
+    answer: String = stubAgentDefaultAnswer,
+    pidFile: String? = nil,
+    transcript: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: answer,
+            stopReason: .cancelled,
+            pidFile: pidFile,
+            transcript: transcript,
+            turnEnd: .afterCancel
         )
     )
 }
@@ -656,6 +704,25 @@ func recordedAgentPids(in file: URL) throws -> [pid_t] {
 ///   file holds no pid.
 func recordedAgentPid(in file: URL) throws -> pid_t {
     try #require(recordedAgentPids(in: file).first, "the pid file at \(file.path) holds no pid")
+}
+
+/// Answers whether a stub agent has already read a request naming `method`.
+///
+/// The transcript is where a stub agent appends every request line it reads,
+/// and a line naming a method is the only evidence from OUTSIDE the run that
+/// the run reached that method. A test that interrupts a LIVE turn reads it to
+/// learn that the turn really started: `cli-plan.md` §11 is about a `Ctrl-C`
+/// in the middle of a turn, and a signal that landed before the prompt went
+/// out would measure something else.
+///
+/// - Parameters:
+///   - file: The transcript file the agent appends to.
+///   - method: The wire method name to look for.
+/// - Returns: `true` when the agent has already read such a request. A
+///   transcript the agent has not created yet answers `false`.
+func transcriptHolds(_ file: URL, method: String) -> Bool {
+    guard let transcript = try? String(contentsOf: file, encoding: .utf8) else { return false }
+    return transcript.contains("\"method\":\"\(method)\"")
 }
 
 // MARK: - The script text
@@ -828,12 +895,49 @@ private func permissionExchangeStatements(asking: Bool) throws -> String {
     guard asking else { return "" }
     return """
         \(printfLine(try permissionRequest()))
-              while IFS= read -r permissionAnswer; do
-                case "$permissionAnswer" in
-                  *'"id":\(permissionRequestID)'*) break ;;
-                esac
-              done
+        \(waitForLineStatements(holding: "\"id\":\(permissionRequestID)", into: "permissionAnswer"))
         """
+}
+
+/// The line text a stub agent waits for when it waits for a cancellation.
+///
+/// It is the `method` member of `session/cancel`, spelled as it stands in the
+/// ndJSON the client writes. `MethodTable.generated.swift` of the wire package
+/// is where that name is fixed.
+private let cancelMethodMarker = "\"method\":\"session/cancel\""
+
+/// Renders the shell statements that wait for `session/cancel` and then end
+/// the turn.
+///
+/// - Parameter stopReason: The stop reason the closing `idle` update carries.
+/// - Returns: The shell statements.
+/// - Throws: A JSON-encoding failure.
+private func cancelWaitStatements(thenReporting stopReason: StopReason?) throws -> String {
+    """
+    \(waitForLineStatements(holding: cancelMethodMarker, into: "cancelLine"))
+    \(printfLine(try idleState(stopReason)))
+    """
+}
+
+/// Renders the shell statements that read incoming lines until one holds
+/// `marker`, and then stop reading.
+///
+/// The wait is a read loop rather than a single `read`, because the client may
+/// send other messages before the one this agent is waiting for.
+///
+/// - Parameters:
+///   - marker: The literal text the awaited line holds.
+///   - variable: The shell variable each read line goes into. Two waits in one
+///     script take two names, so neither can read the other's last line.
+/// - Returns: The shell statements.
+private func waitForLineStatements(holding marker: String, into variable: String) -> String {
+    """
+    while IFS= read -r \(variable); do
+      case "$\(variable)" in
+        *\(shellSingleQuoted(marker))*) break ;;
+      esac
+    done
+    """
 }
 
 /// The `session/request_permission` request this stub sends in the middle of
@@ -872,9 +976,9 @@ private func permissionRequest() throws -> String {
 /// What a stub agent does once it has streamed its answer chunk.
 ///
 /// The turn of `cli-plan.md` §8 ends on an `idle` `state_update` and on nothing
-/// else, so these three cases are the three endings a client has to tell apart:
-/// a turn that ends at once, a turn that is merely slow, and a turn that never
-/// ends at all.
+/// else, so these cases are the endings a client has to tell apart: a turn that
+/// ends at once, a turn that is merely slow, a turn that ends only when the
+/// client cancels it, and a turn that never ends at all.
 private enum StubAgentTurnEnd {
     /// The agent sends the `idle` update at once.
     case atOnce
@@ -882,6 +986,12 @@ private enum StubAgentTurnEnd {
     /// The agent waits this many whole seconds, and then sends the `idle`
     /// update.
     case afterSeconds(Int)
+
+    /// The agent waits for `session/cancel`, and then sends the `idle` update.
+    ///
+    /// It is the conformant answer to the first `Ctrl-C` of `cli-plan.md` §11,
+    /// and nothing but a cancellation on the wire moves it.
+    case afterCancel
 
     /// The agent sends no `state_update` at all, so the turn has no ending of
     /// its own. The stop reason the caller named reaches the wire nowhere.
@@ -913,6 +1023,8 @@ private func turnEndStatements(
         return printfLine(try idleState(stopReason))
     case .afterSeconds(let seconds):
         return "sleep \(seconds)\n\(printfLine(try idleState(stopReason)))"
+    case .afterCancel:
+        return try cancelWaitStatements(thenReporting: stopReason)
     case .never:
         return ""
     case .byExiting:
