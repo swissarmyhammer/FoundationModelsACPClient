@@ -75,12 +75,15 @@ private let generousTimeoutValue = "120"
 /// being killed as a hang.
 private let goingAwayTimeoutValue = "5"
 
+/// The number of seconds ``goingAwayRunBudget`` covers.
+private let goingAwayRunBudgetSeconds = 2
+
 /// The longest a run against an agent that goes away mid-turn may take.
 ///
-/// The run has nothing left to wait for the moment the agent is gone, so two
-/// seconds is generous for it. It is also far under ``goingAwayTimeoutValue``,
+/// The run has nothing left to wait for the moment the agent is gone, so this
+/// budget is generous for it. It is also far under ``goingAwayTimeoutValue``,
 /// so a run that ended only when its limit did fails here.
-private let goingAwayRunBudget: Duration = .seconds(2)
+private let goingAwayRunBudget: Duration = .seconds(goingAwayRunBudgetSeconds)
 
 /// The `--timeout` values that give the turn no time to run in.
 ///

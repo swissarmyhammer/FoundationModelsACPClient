@@ -126,6 +126,70 @@ comments:
     - The finding's checklist item is `- [x]`. The cause was removed from the whole file, not from the one line: the reported `continue` was correct for the two children that cannot end the turn and wrong only for the reader, so the element type now names which child finished.
     - next: /review
   timestamp: 2026-09-05T01:40:22.046105+00:00
+- actor: claude-code
+  id: 01m1qm042kgbzdc66r4nhsmqe1
+  text: |
+    ### review — findings
+
+    - scope: `review sha 542a777~1..542a777`, the diffs only. 7 validators ran; 1 finding, 1 confirmed, 0 refuted.
+    - evidence: `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TimeoutTests.swift:83`
+
+    Confirmations asked for by this second pass, each measured:
+
+    1. The regression is gone. `anAgentThatGoesAwayMidTurnFailsAtOnce` passes in 0.023 s: exit 1, and the elapsed time is far under the 2 s budget while `--timeout` was 5 s. The counterfactual was run also: with `Sources/AcpClientCore/TurnRunner.swift` put back to `542a777~1` and nothing else changed, the same test fails with 2 issues after 5.335 s and reports `elapsed -> 5.330151792 seconds`. So the test guards the defect, and the fix removes it. The working tree was restored and matches HEAD.
+    2. The properties of the first pass still hold. Timeout path: exit 124 after 0.546 s under `--timeout 0.5`. §8 bytes: stdout equals the one chunk that arrived before the limit. §11 pid: the agent is gone after the 124 exit. `group.cancelAll()` stands before the normal return at `Sources/AcpClientCore/TurnRunner.swift:232`, and the run that finishes inside a `--timeout 120` limit ends in 0.024 s, which no run with a sleeping child left behind could do.
+    3. `TurnEvent` adds no new fall-through. All three arms walked at `Sources/AcpClientCore/TurnRunner.swift:227` to `241`: `.turnEnded` cancels and returns; `.streamEndedWithoutIdle` throws `TurnEndedWithoutIdleError` at once; `.sideWorkFinished` continues, and only the prompt child and the spinner child send it. The switch has no `default`, so a fourth case would stop the build. The loop exit at line 245 is unreachable while the reader child always sends one of its two events, and it throws the same failure, never a success and never a limit. A throwing child, the limit among them, still propagates out of `try await group.next()` before any arm runs.
+
+    Both suites green: root 205 tests in 15 suites, integration 67 tests in 10 suites.
+
+    - next: the implementer resolves the open finding on `TimeoutTests.swift:83`, then this task goes back to review.
+  timestamp: 2026-09-05T01:47:44.595588+00:00
+- actor: claude-code
+  id: 01m1qm17jy5vejbjhyb0fgs5mm
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — 4 files. The task group's element is now a named `TurnEvent` enum, so the reader whose stream ended is told apart from the two children that legitimately finish with nothing. One `nil` could not tell three cases apart, which is what made the misreport possible.
+    - test: green — root 205 passed in 15 suites, integration 67 passed in 10 suites, 0 warnings. Red then green, measured: unit 5.238 s with the wrong error type → 0.031 s; integration exit 124 at 5.2537 s → exit 1 at 0.032 s.
+    - commit: 542a777 fix(turnrunner): tell a gone agent apart from a reached limit
+    - review: findings — IntegrationTests/.../TimeoutTests.swift:83
+
+    The review ran the COUNTERFACTUAL, which is the strongest evidence on this card: with only `TurnRunner.swift` put back one commit, the new test fails after 5.335 s with the old wrong error, and the tree was restored clean afterwards. So the test genuinely guards the defect and the fix genuinely removes it.
+
+    It also re-confirmed every property from the first pass by measurement: exit 124 after 0.546 s under `--timeout 0.5`; stdout equal to the one chunk that arrived; the agent gone after the 124 exit; and a run inside a `--timeout 120` limit ending in 0.024 s, which no run holding a sleeping child could do.
+
+    All three arms of the new enum were walked. The `switch` carries no `default`, so a fourth case would stop the build rather than fall through silently, and the loop exit is unreachable while the reader always returns one of its two events — and even if reached it throws the same conservative failure, never a success and never a limit.
+
+    The remaining finding is one magic number in the new test file.
+  timestamp: 2026-09-05T01:48:20.958857+00:00
+- actor: claude-code
+  id: 01m1qm77v6sahrhgew814pa36r
+  text: |-
+    Finding at `IntegrationTests/.../TimeoutTests.swift:83` `code-hygiene/magic-numbers-swift` — "Magic numbers should be replaced by named constants" — fixed. The checklist item is now `- [x]`.
+
+    **The cause was removed from the whole file, and the sweep was MEASURED and not guessed.** The rule is swiftlint's `no_magic_numbers`, and swiftlint 0.65.0 — the version the rule states it measured against — is on this machine. So the rule was run directly with the child configuration the rule body states: `only_rules: [no_magic_numbers]`, `severity: warning`, `test_parent_classes: ["QuickSpec", "XCTestCase"]`, `allowed_numbers: [0, 1, -1, 100]`.
+
+    Run over ALL ELEVEN Swift files this card touched — `Sources/AcpClientCore/{TurnRunner,SharedOptions,RunCommand}.swift`, `Tests/FoundationModelsACPClientTests/{TurnRunnerTests,CommandParsingTests}.swift`, and the six integration files — the run reported exactly ONE violation, `TimeoutTests.swift:83:53`. After the fix the same run over the same eleven files reports ZERO.
+
+    **Why the other numbers in the file are not the same cause.** The rule body records what `no_magic_numbers` does NOT report: a variable declaration, a stored property, a `static let`, an enumeration raw value, and a default parameter each NAME their value. That is why `timeoutSuiteTimeLimitMinutes = 5` and `slowTurnDelaySeconds = 3` were already clean, and why line 83 was not: its `2` was not the declaration's value but an ARGUMENT to `.seconds(_:)` inside the declaration. The `--timeout` values `"0.5"`, `"120"` and `"5"` are strings, so no numeric literal stands there at all. The measurement confirms the reading rather than resting on it.
+
+    **The fix follows the prevailing pattern, and no other.** `AgentCommandDoctorTests.swift` writes `shortTimeLimitSeconds = 2` then `shortTimeLimit: Duration = .seconds(shortTimeLimitSeconds)`, and `Support/TransportTestSupport.swift` writes the same pair for `limit` and `pollInterval`. `TimeoutTests.swift` now writes `goingAwayRunBudgetSeconds = 2` with the doc line `/// The number of seconds ``goingAwayRunBudget`` covers.` — word for word the doc shape `AgentCommandDoctorTests` uses — and builds `goingAwayRunBudget` from it.
+
+    One doc line changed with it: the sentence read "so two seconds is generous for it", which restated the value in prose and would go stale the moment the constant moved. It now reads "so this budget is generous for it", and the number lives in one place.
+
+    **No test was written for this change, and that is the correct call under `/tdd`.** Naming a literal that the compiler folds to the same `Duration` has no observable behavior to fail on: a test could not be made to go RED. The guard that the change is correct is the existing `anAgentThatGoesAwayMidTurnFailsAtOnce`, which reads `goingAwayRunBudget` and still passes, plus the swiftlint run above, which went from one finding to zero.
+
+    **Nothing else was touched.** The other ten files this card changed were measured clean, so none of them was edited.
+  timestamp: 2026-09-05T01:51:37.830723+00:00
+- actor: claude-code
+  id: 01m1qm7f9nbm2eejm0n9fmg9dk
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TimeoutTests.swift`. `goingAwayRunBudgetSeconds = 2` is new, and `goingAwayRunBudget` is built from it, which is the `...Seconds` Int plus `Duration` pattern `AgentCommandDoctorTests.swift` and `Support/TransportTestSupport.swift` already use.
+    - rule measured, not guessed: swiftlint 0.65.0 with the child config the rule body states (`only_rules: [no_magic_numbers]`, `allowed_numbers: [0, 1, -1, 100]`) over all 11 Swift files this card touched — 1 violation before (`TimeoutTests.swift:83:53`), 0 after. The other 10 files were clean before the change, so none was edited.
+    - tests: `timeout 420 swift test` — 205 tests in 15 suites, all passing. `timeout 600 swift test --package-path IntegrationTests` — 67 tests in 10 suites, all passing. `swift build --build-tests` on both packages: zero warnings, zero errors.
+    - The finding's checklist item is `- [x]`. Both `## Review Findings` sections are now fully checked, and every acceptance and test row stays checked.
+    - next: /review
+  timestamp: 2026-09-05T01:51:45.461591+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPECJSM165NAWX5F3NKX9A
@@ -199,3 +263,12 @@ the doctor's own time limit. Do not share one constant between them.
 > not from a validator.
 
 - [x] `Sources/AcpClientCore/TurnRunner.swift:201` `review/judgement` — With a limit set, an agent that goes away in the middle of the turn reports the limit instead of the protocol failure, and only after the full limit has passed. The fourth child is always pending, so the loop at lines 207 to 212 can never fall through to `throw TurnEndedWithoutIdleError()`: a `nil` from the reader goes to `continue`, and the sleeping child is then the only child that is left. Measured with a stub agent that streams one chunk, answers the prompt, and then exits with no `state_update`. With no `--timeout` the run exits 1 after 0.04 s, and stderr reads "The agent's update stream ended before the agent reported that it was idle." With `--timeout 5` the same agent gives exit 124 after 5.25 s, and stderr reads "The run reached the limit --timeout gave it, and ended." No limit was reached — the agent went away — so a protocol failure goes to the timeout row of §9, and the run waits the full limit for no reason. End the turn when the reader gives `nil`: make that `nil` throw `TurnEndedWithoutIdleError`, or count the children that can still end the turn and stop when no such child is left.
+
+## Review Findings (2026-09-04 20:41)
+
+> Scope: `review sha 542a777~1..542a777` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TimeoutTests.swift:83` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
