@@ -326,8 +326,8 @@ public struct AgentProcess: Sendable {
         for descriptor in descriptors {
             guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
                 let failure = errno
-                for open in descriptors {
-                    close(open)
+                for descriptor in descriptors {
+                    close(descriptor)
                 }
                 throw AgentProcessError.pipeCreationFailed(errno: failure)
             }

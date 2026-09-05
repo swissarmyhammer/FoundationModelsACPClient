@@ -38,6 +38,59 @@ comments:
     - evidence: `swift test`: 224 tests in 20 suites passed, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests`: 87 tests in 12 suites passed, 0 failures, 0 warnings, 0 skipped. `swift package clean && swift build --build-tests` gave a clean build with no warning lines. `pgrep -fl 'sleep 300'` and `pgrep -fl cat` found no live child process after both runs.
     - next: /review
   timestamp: 2026-09-05T13:50:17.271718+00:00
+- actor: claude-code
+  id: 01m1rxcrnqbw7egyrn94qykfr7
+  text: |-
+    ### commit — changed
+    - evidence: caf0531 fix(process): set FD_CLOEXEC on pipe ends to stop cross-agent fd leaks
+    - next: proceed to review
+  timestamp: 2026-09-05T13:51:10.519678+00:00
+- actor: claude-code
+  id: 01m1rxkew23efdtawzdjwmqkd5
+  text: |-
+    ### review — findings
+    - evidence: 1 finding — Sources/FoundationModelsACPClient/AgentProcess.swift:329 (swift/naming-clarity). Scope: review sha HEAD~1..HEAD (commit caf0531).
+    - next: Rename the loop variable `open` in the cleanup path of `AgentProcess.spawn` to `descriptor`. Then run the review again.
+  timestamp: 2026-09-05T13:54:49.858782+00:00
+- actor: claude-code
+  id: 01m1rxkzqq2xz0be1pvej7t073
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 5 files: `Sources/FoundationModelsACPClient/AgentProcess.swift` (`FD_CLOEXEC` in `createPipe()`, internal `init(command:arguments:registry:)`), `Tests/.../AgentProcessPipeInheritanceTests.swift` (new), `Tests/.../StdioChild.swift` (new), `Tests/.../AgentProcessTeardownTests.swift`, `Tests/.../TransportTestSupport.swift`. Red: the new test failed after 10.5 s with `endedAtEndOfFile` false; green in 0.03 s after the flag.
+    - test: green — root 224/224 in 20 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped; no child process outlived the runs
+    - commit: caf0531
+    - review: findings — `Sources/FoundationModelsACPClient/AgentProcess.swift:329` (`swift/naming-clarity`: loop variable `open` shadows the global `open()`; rename to `descriptor`)
+  timestamp: 2026-09-05T13:55:07.127165+00:00
+- actor: claude-code
+  id: 01m1rxrjh61198jstn83cmhrna
+  text: |-
+    Implement, second pass, for the one review finding.
+
+    - The finding: `Sources/FoundationModelsACPClient/AgentProcess.swift:329` `swift/naming-clarity` — Loop variable `open` does not clarify its role and shadows the global `open()` function. In this cleanup path, the variable represents a file descriptor to close, not a state or property. The name should reflect its actual role. Rename to `fd` or `descriptor` to clarify the loop variable represents a file descriptor, not a descriptor state. For consistency with the outer loop, `descriptor` is preferred: `for descriptor in descriptors { close(descriptor) }`.
+    - The change: the cleanup loop in `createPipe()` is now `for descriptor in descriptors { close(descriptor) }`, the shape the finding gives. `fd` was not an option, because the `swift/naming-clarity` rule forbids an abbreviation.
+    - The whole file was read for the same cause. No other local name in `AgentProcess.swift` shadows a global C function. The local names are `descriptor`, `descriptors`, `failure`, `pid`, `status`, `count`, `buffer`, `offset`, `written`, `raw`, `base`, `taken`, `recorded`, `current`, `clock`, `deadline`, `argv`, `attributes`, `fileActions`, `spawnResult`, `pointer`, `spawned`, `stream`, `continuation`, `state`, `thread`, and the four pipe ends. None of them is a C function. The public API is unchanged.
+    - No new test: a rename of a local variable changes no behavior, and no test can observe a local name. The existing test `AgentProcessPipeInheritanceTests` covers `createPipe()` and stays green.
+    - `swift test` (root): 224 tests in 20 suites passed, 0 failures, 0 skipped. The build recompiled `FoundationModelsACPClient` and printed no warning line. `swift test --package-path IntegrationTests`: 87 tests in 12 suites passed, 0 failures, 0 skipped, no warning line. `pgrep` finds no `cat` and no `sleep 300` after the runs.
+  timestamp: 2026-09-05T13:57:37.446375+00:00
+- actor: claude-code
+  id: 01m1rxrvqshxd2vbhkd6qpe1m2
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — `Sources/FoundationModelsACPClient/AgentProcess.swift`: in `createPipe()`, the cleanup loop `for open in descriptors { close(open) }` is now `for descriptor in descriptors { close(descriptor) }`. No other local name in the file shadows a global C function. The public API is unchanged. The finding in `## Review Findings (2026-09-05 08:51)` is checked. `swift test` (root): 224 tests in 20 suites passed, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests`: 87 tests in 12 suites passed, 0 failures, 0 warnings, 0 skipped. `pgrep` finds no `cat` and no `sleep 300` after the runs.
+    - next: /review
+  timestamp: 2026-09-05T13:57:46.873591+00:00
+- actor: claude-code
+  id: 01m1rxy7pkr7he7wx4b9dpn9kc
+  text: |-
+    ### test — green
+    - The test team ran a clean rebuild of both suites.
+    - Root suite: `swift test` — 224 tests, 20 suites, 0 failures, 0 warnings, 0 skipped.
+    - Nested suite: `swift test --package-path IntegrationTests` — 87 tests, 12 suites, 0 failures, 0 warnings, 0 skipped.
+    - The test team ran `swift package clean` on both packages first, so each build was a full rebuild, not a cached one. No warning lines and no error lines appeared in either build log.
+    - The test team checked for leftover `sleep 300` probe processes after both runs. None were found.
+    - No worktree was made. No push. No commit.
+    - next: send the card to review.
+  timestamp: 2026-09-05T14:00:42.963685+00:00
 position_column: doing
 position_ordinal: '80'
 title: AgentProcess.spawn lets a second agent inherit the first agent's pipe ends
@@ -61,3 +114,12 @@ Two agents spawned in one host at the same time can each hold the other's stdin 
 
 - `Sources/FoundationModelsACPClient/AgentProcess.swift`, `AgentProcess.spawn(command:arguments:)` and `AgentProcess.createPipe()`
 - `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift` has the `FD_CLOEXEC` shape for the test helper.
+
+## Review Findings (2026-09-05 08:51)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/AgentProcess.swift:329` `swift/naming-clarity` — Loop variable `open` does not clarify its role and shadows the global `open()` function. In this cleanup path, the variable represents a file descriptor to close, not a state or property. The name should reflect its actual role. Rename to `fd` or `descriptor` to clarify the loop variable represents a file descriptor, not a descriptor state. For consistency with the outer loop, `descriptor` is preferred: `for descriptor in descriptors { close(descriptor) }`.
