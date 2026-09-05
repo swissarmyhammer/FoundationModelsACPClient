@@ -41,8 +41,31 @@ comments:
     - After the integration run, the check of the temporary directory (`$TMPDIR`) did find 0 files with the name `acp-agent-*`. The suite did leave no script file and no pid file.
     - The outcome is green.
   timestamp: 2026-09-05T14:25:25.225160+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rzcmtpv37bphj0cftxed3n
+  text: |-
+    ### commit — changed
+    - evidence: 754cd8c test(integration): remove leaked temp files from AgentProcess tests
+    - next: none
+  timestamp: 2026-09-05T14:26:03.734046+00:00
+- actor: claude-code
+  id: 01m1rzfap8rrxpv807mkxmse90
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 754cd8c). 1 file reviewed, 7 validator runs, 0 findings, 0 confirmed, 0 refuted. The 4 files under `.kanban/` were not reviewed because of `.reviewignore`.
+    - next: none. The task moved from `review` to `done`.
+  timestamp: 2026-09-05T14:27:31.656965+00:00
+- actor: claude-code
+  id: 01m1rzfxmj1r3ea61k83v8rdeh
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — `IntegrationTests/.../AgentProcessTests.swift`: private `writeScript(_:)` deleted; the four tests use `writeAgentScript(_:)` with `defer { removeAgentScript }`; the child pid file uses `temporaryFileURL(prefix:)` with a `defer` removal. Leak measured: 5 `acp-agent-*` files per run before, 0 after.
+    - test: green — root 225/225 in 20 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped; `acp-agent-*` count 0 before and after the run
+    - commit: 754cd8c
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T14:27:51.058766+00:00
+position_column: done
+position_ordinal: ad80
 title: Fold AgentProcessTests onto the shared temporary-file writer, and remove the scripts it leaves
 ---
 ## What
