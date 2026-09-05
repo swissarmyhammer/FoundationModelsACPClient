@@ -108,6 +108,89 @@ comments:
     ### commit — changed
     - evidence: 249dd32 fix(process): bound the teardown wait to a deadline
   timestamp: 2026-09-05T11:22:06.540220+00:00
+- actor: claude-code
+  id: 01m1rn5nqdn1qd7b0qpjzyyaac
+  text: |-
+    ### review — findings
+    - evidence: `review sha HEAD~1..HEAD` (commit 249dd32) — 3 findings, 3 confirmed, 0 refuted: Sources/FoundationModelsACPClient/AgentProcess.swift:595, Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:64, Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:113
+    - next: implement step corrects the three `swift/fluent-usage` items in the `## Review Findings (2026-09-05 06:22)` section, then runs the tests and a new review
+  timestamp: 2026-09-05T11:27:29.517987+00:00
+- actor: claude-code
+  id: 01m1rn6etybffgpmgcrpg5594e
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 2 files: `Sources/FoundationModelsACPClient/AgentProcess.swift`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift` (new). Counterfactual: both new tests hung 75 s and more on the unfixed teardown, then passed 5/5 after the fix.
+    - test: green — root 223/223 in 19 suites, integration 77/77 in 12 suites, 0 warnings, 0 skipped
+    - commit: 249dd32
+    - review: findings — `Sources/FoundationModelsACPClient/AgentProcess.swift:595`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:64`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:113` (all `swift/fluent-usage`: label the first parameter)
+  timestamp: 2026-09-05T11:27:55.230410+00:00
+- actor: claude-code
+  id: 01m1rn8cw56j8x8xh3gn5zf700
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (a57cdd1). 0 findings, 0 confirmed, 0 refuted, 7 validator runs, 0 failed. 2 files reviewed. 4 files in .kanban/ not reviewed (excluded by .reviewignore). No prior findings section. All 3 checklist items are checked.
+    - next: done
+  timestamp: 2026-09-05T11:28:58.757804+00:00
+- actor: claude-code
+  id: 01m1rn9wwhxh83dj2hcfd8p1j1
+  text: |-
+    ### review — findings
+    - correction: the step record above this one ("review — clean") is withdrawn. The card read at the start of this pass did not show the `## Review Findings (2026-09-05 06:22)` section. The section was written between that read and the move. The three items in it are not checked, so the task must stay in `review`. The task is moved back from `done` to `review`.
+    - evidence: review sha HEAD~1..HEAD. 0 new findings, 0 confirmed, 0 refuted, 7 validator runs, 0 failed. 2 files reviewed. 4 files in .kanban/ not reviewed (excluded by .reviewignore). The clean section `## Review Findings (2026-09-05 06:27)` is appended to the description. 3 prior findings stay open: Sources/FoundationModelsACPClient/AgentProcess.swift:595, Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:64, Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:113.
+    - next: implement. Correct the three `swift/fluent-usage` items in the `## Review Findings (2026-09-05 06:22)` section, mark them, run the tests, then run a new review.
+  timestamp: 2026-09-05T11:29:47.921581+00:00
+- actor: claude-code
+  id: 01m1rnafrvtfxeyrfyq1tphqm1
+  text: |-
+    ### Research (findings pass)
+
+    - The rule `swift/fluent-usage` says: "Omit the first argument label only for value-preserving conversions. Otherwise, label it."
+    - Commit 249dd32 added one function to `AgentProcess.swift`: `reap(_ pid:)`. Its one caller is `terminateCurrent()`.
+    - The test file has four functions with an unlabeled first parameter. Three are in the findings: `spawnInThisProcessGroup(_ command:arguments:)`, `killAndReap(_ pid:)`. The fourth, `isInProcessTable(_ pid:)`, is a predicate and not a conversion, so it has the same cause. It gets the same correction.
+    - All four functions are `private`. Each caller is in the same file, so no file outside the two named files changes.
+    - `AgentProcess.swift` has four other functions with an unlabeled first parameter: `freePointers(_:)`, `write(_:)`, `writeToStdin(_:)` and `fullyWrite(_:_:)`. Commit 249dd32 did not add them, so they are out of the scope of this card. `write(_:)` is also the `ACPTransport` protocol signature, so a label there would not compile.
+
+    ### Changes
+
+    - `Sources/FoundationModelsACPClient/AgentProcess.swift`: `reap(_ pid:)` is now `reap(pid:)`, and `terminateCurrent()` calls `reap(pid: taken.pid)`.
+    - `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift`: `spawnInThisProcessGroup(command:arguments:)`, `isInProcessTable(pid:)` and `killAndReap(pid:)`, with all six call sites labeled.
+
+    ### implement — changed
+    - evidence: 2 files — Sources/FoundationModelsACPClient/AgentProcess.swift (1 signature, 1 call site), Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift (3 signatures, 6 call sites). `swift test` (root): 223 tests in 19 suites passed, 0 failed, 0 skipped, 0 warnings. `swift test --package-path IntegrationTests`: 77 tests in 12 suites passed, 0 failed, 0 skipped, 0 warnings. The three items in `## Review Findings (2026-09-05 06:22)` are checked. No probe changes are in the tree.
+    - next: review
+  timestamp: 2026-09-05T11:30:07.259617+00:00
+- actor: claude-code
+  id: 01m1rncnvjqfb7by0t8sjyaf83
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — 2 files: `Sources/FoundationModelsACPClient/AgentProcess.swift`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift` (new). Counterfactual: both new tests hung 75 s and more on the unfixed teardown, then passed 5/5 after the fix.
+    - test: green — root 223/223 in 19 suites, integration 77/77 in 12 suites, 0 warnings, 0 skipped, diagnostics 0 warnings
+    - commit: a57cdd1 (249dd32 amended with the kanban state written after it; same tree, same message)
+    - review: findings — 0 new findings on a57cdd1; 3 prior findings open at review time: `Sources/FoundationModelsACPClient/AgentProcess.swift:595`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:64`, `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:113` (all `swift/fluent-usage`: label the first parameter)
+    - note: the `finish iteration 1` entry above was written by a parallel actor for the same change (249dd32). A parallel implement pass then labeled the parameters and checked the three findings; its edits are in the tree and not committed. The next iteration tests, commits and reviews that tree.
+  timestamp: 2026-09-05T11:31:19.026788+00:00
+- actor: claude-code
+  id: 01m1rnd875qwmntsbs5kqjk52e
+  text: |-
+    ### implement — no-change
+    - evidence: the three checked items in `## Review Findings (2026-09-05 06:22)` are compared with `git diff`: `reap(pid:)` at AgentProcess.swift:595 and its call at line 575; `spawnInThisProcessGroup(command:arguments:)` at AgentProcessTeardownTests.swift:63; `killAndReap(pid:)` at line 113; `isInProcessTable(pid:)` at line 104 has the same correction; all six call sites are labeled. The edits are in the tree and not committed. This pass modified no file.
+    - next: test, commit, review
+  timestamp: 2026-09-05T11:31:37.829360+00:00
+- actor: claude-code
+  id: 01m1rndj793v4akktxb7kkm7x0
+  text: |-
+    ### test — green
+    - command: `swift test` (root). result: 223 tests in 19 suites passed. 0 failed. 0 warnings. 0 skipped.
+    - command: `swift test --package-path IntegrationTests`. result: 77 tests in 12 suites passed. 0 failed. 0 warnings. 0 skipped.
+    - No leftover agent process after the run. No probe change is in the tree.
+    - next: review
+  timestamp: 2026-09-05T11:31:48.073473+00:00
+- actor: claude-code
+  id: 01m1rnfjrpz7053v22raw88qg8
+  text: |-
+    ### commit — changed
+    - evidence: bc52417 style(process): label the first parameter of action functions
+  timestamp: 2026-09-05T11:32:54.166574+00:00
 position_column: review
 position_ordinal: '80'
 title: AgentProcess teardown blocks forever when the group kill misses
@@ -154,3 +237,14 @@ as the named claim it makes.
 
 - `Sources/FoundationModelsACPClient/AgentProcess.swift`,
   `AgentProcessState.terminateCurrent()`
+
+## Review Findings (2026-09-05 06:22)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 2 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/AgentProcess.swift:595` `swift/fluent-usage` — First parameter of function should be labeled. The rule states to omit the first argument label only for value-preserving conversions; this function performs an action (reaping a process), not a conversion. Change `_ pid:` to `pid:` so calls read as `reap(pid: taken.pid)` instead of `reap(taken.pid)`.
+- [x] `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:64` `swift/fluent-usage` — First parameter of function should be labeled. This is not a value-preserving conversion; it spawns a process. Change `_ command:` to `command:` so calls read as `spawnInThisProcessGroup(command: readingChildCommand, arguments: [])` instead of `spawnInThisProcessGroup(readingChildCommand, arguments: [])`.
+- [x] `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift:113` `swift/fluent-usage` — First parameter of function should be labeled. This function performs an action (killing and reaping), not a value-preserving conversion. Change `_ pid:` to `pid:` so calls read as `killAndReap(pid: child.pid)` instead of `killAndReap(child.pid)`.

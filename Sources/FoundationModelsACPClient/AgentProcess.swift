@@ -572,7 +572,7 @@ final class AgentProcessState: Sendable {
         if let descriptor = taken.stdinWriteDescriptor {
             close(descriptor)
         }
-        reap(taken.pid)
+        reap(pid: taken.pid)
         registry.deregister(taken.pid)
     }
 
@@ -592,7 +592,7 @@ final class AgentProcessState: Sendable {
     /// Only the first answer is a reason to poll again.
     ///
     /// - Parameter pid: The pid to collect.
-    private func reap(_ pid: pid_t) {
+    private func reap(pid: pid_t) {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: reapTimeLimit)
         var status: Int32 = 0
