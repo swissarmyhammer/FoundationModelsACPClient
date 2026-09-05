@@ -67,6 +67,21 @@ private let shortTimeoutValue = "0.5"
 /// that test fails as a wrong exit code rather than as a limit reached.
 private let generousTimeoutValue = "120"
 
+/// The `--timeout` value the run against an agent that goes away carries.
+///
+/// Five seconds is far longer than that whole run — a spawn, a handshake and
+/// one chunk — and shorter than the bound `runAcpClient` puts on a run, so a
+/// run that waited this limit out fails on ``goingAwayRunBudget`` rather than
+/// being killed as a hang.
+private let goingAwayTimeoutValue = "5"
+
+/// The longest a run against an agent that goes away mid-turn may take.
+///
+/// The run has nothing left to wait for the moment the agent is gone, so two
+/// seconds is generous for it. It is also far under ``goingAwayTimeoutValue``,
+/// so a run that ended only when its limit did fails here.
+private let goingAwayRunBudget: Duration = .seconds(2)
+
 /// The `--timeout` values that give the turn no time to run in.
 ///
 /// Zero is a limit that has already passed at the moment the turn starts, and a
@@ -220,6 +235,35 @@ struct TimeoutTests {
         )
 
         #expect(result.exitCode == SectionNineExitCode.refusal)
+        #expect(result.standardOutput == Data(timeoutAnswer.utf8))
+    }
+
+    /// An agent that goes away in the middle of the turn reached NO limit, so
+    /// §9 owes that run the protocol-failure row and never the timeout row. The
+    /// agent streams one chunk, answers the prompt, and then exits with no
+    /// `state_update` at all.
+    ///
+    /// The elapsed time is asserted beside the exit code, because the two
+    /// halves are one defect: a run that reported the limit here also WAITED
+    /// the whole limit out, with nothing left that could ever arrive.
+    @Test("an agent that goes away mid-turn fails at once, and does not wait out the limit")
+    func anAgentThatGoesAwayMidTurnFailsAtOnce() async throws {
+        let script = try makeExitingMidTurnAgent(answer: timeoutAnswer)
+        defer { removeAgentScript(script) }
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let result = try await runAcpClient(
+            runArguments(
+                prompt: timeoutPrompt,
+                options: timeoutOption(goingAwayTimeoutValue),
+                script: script
+            )
+        )
+        let elapsed = clock.now - started
+
+        #expect(result.exitCode == SectionNineExitCode.failure)
+        #expect(elapsed < goingAwayRunBudget, "the run took \(elapsed)")
         #expect(result.standardOutput == Data(timeoutAnswer.utf8))
     }
 }

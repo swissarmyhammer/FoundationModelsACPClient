@@ -456,6 +456,37 @@ func makeNeverIdleAgent(
     )
 }
 
+/// Writes a stub agent that streams one answer chunk, answers the prompt, and
+/// then EXITS with no `state_update` at all.
+///
+/// It is the agent that GOES AWAY in the middle of a turn, and it is what tells
+/// the two failures of `cli-plan.md` §9 apart. The turn of §8 ends on `idle`
+/// and on nothing else, so this run gets no ending of its own either — but no
+/// limit was reached here, and the agent is gone, so the run owes the
+/// protocol-failure row AT ONCE. A run that reported the limit instead would
+/// both name the wrong failure and wait out a limit nothing reached.
+///
+/// ``makeNeverIdleAgent(answer:pidFile:)`` is the other half of that pair: it
+/// stays alive and says nothing, so its run really does run out of time.
+///
+/// The chunk goes out BEFORE the exit, so the run has answer bytes on its
+/// standard output whichever failure it reports.
+///
+/// - Parameters:
+///   - answer: The reply text to stream before the agent goes away.
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeExitingMidTurnAgent(
+    answer: String = stubAgentDefaultAnswer,
+    pidFile: String? = nil
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(answer: answer, stopReason: nil, pidFile: pidFile, turnEnd: .byExiting)
+    )
+}
+
 /// Writes a stub agent that streams one answer chunk, waits, and only then ends
 /// its turn.
 ///
@@ -855,6 +886,14 @@ private enum StubAgentTurnEnd {
     /// The agent sends no `state_update` at all, so the turn has no ending of
     /// its own. The stop reason the caller named reaches the wire nowhere.
     case never
+
+    /// The agent EXITS, and sends no `state_update` first.
+    ///
+    /// It is not the same ending as ``never``: that agent stays alive and says
+    /// nothing, while this one goes away. The client sees its incoming bytes
+    /// end, so the turn has a definite protocol failure to report at once, and
+    /// no limit has been reached.
+    case byExiting
 }
 
 /// Renders the shell statements that end one stub agent's turn.
@@ -876,8 +915,17 @@ private func turnEndStatements(
         return "sleep \(seconds)\n\(printfLine(try idleState(stopReason)))"
     case .never:
         return ""
+    case .byExiting:
+        return "exit \(stubAgentGoingAwayExitStatus)"
     }
 }
+
+/// The exit status the agent of ``StubAgentTurnEnd/byExiting`` ends with.
+///
+/// It ends CLEANLY. The run must fail on the `state_update` that never came,
+/// and a non-zero status here would give a client a second reason to fail with,
+/// which is one reason too many for a test that names the first.
+private let stubAgentGoingAwayExitStatus = 0
 
 /// How a stub agent answers `initialize`.
 private enum StubAgentInitializeAnswer {

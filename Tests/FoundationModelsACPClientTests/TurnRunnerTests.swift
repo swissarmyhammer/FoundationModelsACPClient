@@ -74,6 +74,9 @@ private enum TurnText {
     /// The number of seconds ``generousLimit`` covers.
     private static let generousLimitSeconds = 60
 
+    /// The number of seconds ``unreachedLimit`` covers.
+    private static let unreachedLimitSeconds = 5
+
     /// A `--timeout` limit the turn under it cannot reach.
     ///
     /// The stub on the far end of an in-memory pair answers as fast as the
@@ -86,6 +89,16 @@ private enum TurnText {
     /// It stands far beyond the suite's own time limit, so a test that runs
     /// under it fails as a failed expectation rather than as a limit reached.
     static let generousLimit: Duration = .seconds(generousLimitSeconds)
+
+    /// A `--timeout` limit that no turn in this file reaches, and that the
+    /// suite's own time limit outlives.
+    ///
+    /// The turn whose agent goes away in the middle rests on both halves. Five
+    /// seconds is far longer than every turn this file scripts, so a run that
+    /// ends AT this limit read a protocol failure as a limit reached; and it
+    /// is far shorter than the one-minute time limit of that test, so such a
+    /// run fails as the wrong error rather than as a killed test.
+    static let unreachedLimit: Duration = .seconds(unreachedLimitSeconds)
 
     /// Makes a tool-call update that carries a title and nothing else.
     ///
@@ -147,6 +160,14 @@ private struct TurnRunnerHarness {
     /// outlives the test body.
     let agentConnection: AgentSideConnection
 
+    /// The agent's end of the in-memory pair.
+    ///
+    /// It is held so a test can make the agent GO AWAY in the middle of a
+    /// turn. No scripted update can stand in for that: an agent that exits
+    /// sends nothing at all, and what the client sees is its incoming bytes
+    /// ending.
+    private let agentTransport: InMemoryTransport
+
     /// The answer bytes the sink received, end to end.
     var answer: Data {
         answerWrites.elements.reduce(into: Data()) { $0.append($1) }
@@ -172,6 +193,7 @@ private struct TurnRunnerHarness {
         limit: Duration? = nil
     ) async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        agentTransport = agentEnd
         agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
             ScriptedStubAgent(
                 connection: connection,
@@ -198,6 +220,16 @@ private struct TurnRunnerHarness {
             answerSink: { answerWrites.append($0) },
             limit: limit
         )
+    }
+
+    /// Makes the agent go away in the middle of the turn.
+    ///
+    /// Closing the agent's end of the pair finishes the client's incoming
+    /// bytes, which is what an agent process that exits does to a run. The
+    /// client's read loop then ends, and every session update stream behind it
+    /// finishes with no `idle` on it.
+    func sendAgentAway() {
+        agentTransport.close()
     }
 
     /// Tears the connection down, as every exit path of the binary does.
@@ -419,6 +451,35 @@ struct TurnRunnerTests {
         let outcome = try await harness.runner.run()
 
         #expect(outcome == .stopped(.endTurn))
+        #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
+        await harness.teardown()
+    }
+
+    /// An agent that goes away in the middle of a turn reached NO limit, so the
+    /// turn owes ``TurnEndedWithoutIdleError`` even under `--timeout`. §9 sends
+    /// that error to the protocol-failure row, and the limit's own row belongs
+    /// to a run that really ran out of time.
+    ///
+    /// The limit here is far longer than the turn, so the throw also pins WHEN
+    /// the turn ends: a run that waited for a limit nothing reached would carry
+    /// ``AcpClientTimeout`` instead, five seconds later.
+    ///
+    /// The chunk is awaited before the agent goes away, so the prompt has been
+    /// answered by then and the failure is the reader's alone. The sink is
+    /// asserted beside the throw, because §8 keeps the bytes that already
+    /// arrived whichever way the turn ended.
+    @MainActor @Test("an agent that goes away under a limit is a protocol failure", .timeLimit(.minutes(1)))
+    func anAgentThatGoesAwayUnderALimitIsAProtocolFailure() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [agentChunk(text: TurnText.firstAnswerHalf)],
+            limit: TurnText.unreachedLimit
+        )
+        let turn = Task { @MainActor in try await harness.runner.run() }
+
+        #expect(await eventually { !harness.answer.isEmpty }, "the answer chunk never arrived")
+        harness.sendAgentAway()
+
+        await #expect(throws: TurnEndedWithoutIdleError.self) { try await turn.value }
         #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
         await harness.teardown()
     }

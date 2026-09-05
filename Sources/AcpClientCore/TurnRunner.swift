@@ -7,7 +7,7 @@
 // `InMemoryTransport.pair()`: no binary is started, and no test waits on a
 // pipe.
 //
-// Five decisions here are not free choices.
+// Six decisions here are not free choices.
 //
 // 1. The turn ends on a `state_update` that reports `idle`, and NOT on the
 //    prompt answer. In v2 `PromptResponse` carries only `meta`: it says the
@@ -39,6 +39,15 @@
 //    IS the race, the throw is the limit and nothing else, and
 //    `withThrowingTaskGroup` cancels and drains the other children on the way
 //    out, so no task is left running behind the exit.
+// 6. The group's element says WHICH child finished, and never merely "with no
+//    outcome". Three children finish carrying no outcome, and they do not mean
+//    the same thing: the prompt acknowledgement and the spinner leave the turn
+//    running, while the reader's stream ending means the agent went away and
+//    no `idle` can ever arrive. An element type that folded those three into
+//    one `nil` made the reader's ending look like nothing at all — and with a
+//    limit set, the sleeping child was then the only child left, so the run
+//    waited out a limit nothing had reached and reported that limit in place
+//    of ``TurnEndedWithoutIdleError``. ``TurnEvent`` keeps the three apart.
 //
 // The spinner is the third child of the group, and a stream of tool names
 // joins it to the reading. ``TerminalOutput/withSpinner(_:_:)`` draws for
@@ -172,6 +181,12 @@ struct TurnRunner {
     /// at the head of this file for why the limit is a child and not a race
     /// from outside.
     ///
+    /// Only the reading can end the turn. The prompt and the spinner report
+    /// ``TurnEvent/sideWorkFinished``, which leaves the turn running, and the
+    /// reader reports the end of the turn one way or the other: the outcome an
+    /// `idle` carried, or the stream ending with no `idle` on it at all. See
+    /// rule 6 at the head of this file for what a shared "no outcome" cost.
+    ///
     /// - Returns: Why the turn ended.
     /// - Throws: ``AcpClientTimeout`` when the turn reached its limit,
     ///   ``TurnEndedWithoutIdleError`` when the stream ended first,
@@ -181,11 +196,11 @@ struct TurnRunner {
     func run() async throws -> TurnOutcome {
         let (sessionId, updates) = try await session.openSession()
         let (toolNames, toolNameFeed) = AsyncStream<String>.makeStream()
-        return try await withThrowingTaskGroup(of: TurnOutcome?.self) { group in
+        return try await withThrowingTaskGroup(of: TurnEvent.self) { group in
             group.addTask {
                 try await self.sendPrompt(for: sessionId)
                 // The acknowledgement never ends the turn.
-                return nil
+                return .sideWorkFinished
             }
             group.addTask { [output] in
                 try await output.withSpinner(TurnRunnerText.spinnerLabel) { reportToolName in
@@ -193,10 +208,15 @@ struct TurnRunner {
                         reportToolName(name)
                     }
                 }
-                return nil
+                return .sideWorkFinished
             }
             group.addTask {
-                await self.readTurn(from: updates, reportingToolNamesTo: toolNameFeed)
+                let outcome = await self.readTurn(
+                    from: updates,
+                    reportingToolNamesTo: toolNameFeed
+                )
+                guard let outcome else { return .streamEndedWithoutIdle }
+                return .turnEnded(outcome)
             }
             if let limit {
                 group.addTask {
@@ -204,11 +224,24 @@ struct TurnRunner {
                     throw AcpClientTimeout()
                 }
             }
-            while let result = try await group.next() {
-                guard let outcome = result else { continue }
-                group.cancelAll()
-                return outcome
+            while let event = try await group.next() {
+                switch event {
+                case .turnEnded(let outcome):
+                    // The return leaves the children running, and a limit that
+                    // is still sleeping would hold the group open until it ends.
+                    group.cancelAll()
+                    return outcome
+                case .streamEndedWithoutIdle:
+                    // The throw cancels and drains every other child on its way
+                    // out, the sleeping limit among them.
+                    throw TurnEndedWithoutIdleError()
+                case .sideWorkFinished:
+                    continue
+                }
             }
+            // Every child finished and none of them ended the turn, which the
+            // reader's two events leave no room for. The turn still has no
+            // outcome, so it owes the same failure rather than an invented one.
             throw TurnEndedWithoutIdleError()
         }
     }
@@ -289,6 +322,24 @@ struct TurnRunner {
         answerSink(Data(text.text.utf8))
         return .answerWritten
     }
+}
+
+/// What one child of the turn's task group reported when it finished.
+///
+/// Only ``turnEnded`` and ``streamEndedWithoutIdle`` end the turn, and the
+/// reading is the only child that reports either. See rule 6 at the head of
+/// this file for why the three cases are kept apart.
+private enum TurnEvent: Sendable {
+    /// The agent reported `idle`, and this is the outcome that update carried.
+    case turnEnded(TurnOutcome)
+
+    /// The agent's update stream ended with no `idle` on it, so the turn has no
+    /// outcome and can never get one. The agent went away.
+    case streamEndedWithoutIdle
+
+    /// A child that cannot end the turn finished: the prompt was acknowledged,
+    /// or the spinner stopped.
+    case sideWorkFinished
 }
 
 /// What one update did to the turn.
