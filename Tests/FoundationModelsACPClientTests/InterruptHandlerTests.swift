@@ -1,3 +1,5 @@
+import Darwin
+import Dispatch
 import Testing
 
 @testable import AcpClientCore
@@ -5,7 +7,7 @@ import Testing
 // These tests cover `InterruptHandler`, the `Ctrl-C` half of `cli-plan.md` §11:
 // the first interrupt cancels the turn, the second ends the run at once.
 //
-// Every test here drives ``InterruptHandler/deliver(times:)`` rather than a
+// The counting tests drive ``InterruptHandler/deliver(times:)`` rather than a
 // real `SIGINT`. Two reasons, and both are about the test process rather than
 // about convenience. A signal disposition is PROCESS-WIDE, so a suite that
 // installed one would take `Ctrl-C` away from the test runner it happens to be
@@ -15,10 +17,16 @@ import Testing
 // is the one entry the source's event handler calls, so driving it drives
 // everything the counting decides.
 //
-// What a real signal buys — that the disposition is installed, that the source
-// is armed, and that the run ends with the exit code §9 gives it — is the
-// integration suite's `InterruptTests`, which sends `SIGINT` to a real
-// `acp-client` process.
+// The disposition tests, in `InterruptDispositionTests`, DO install a
+// disposition, because the claim they measure is about the disposition itself:
+// ``InterruptHandler`` says it leaves no global state behind, and only the
+// process-wide `SIGINT` disposition can answer whether it does. Each of those
+// rows pins the starting disposition, runs, and hands the host its own back,
+// so the runner keeps its `Ctrl-C` outside the microseconds a row is armed.
+//
+// What a real signal buys — that the run ends with the exit code §9 gives it,
+// and that no agent outlives it — is the integration suite's `InterruptTests`,
+// which sends `SIGINT` to a real `acp-client` process.
 
 /// What one press of `Ctrl-C` stands for, as the handler counts them.
 ///
@@ -118,5 +126,139 @@ struct InterruptHandlerTests {
         }
 
         #expect(record.elements == [.first, .second])
+    }
+}
+
+/// The signal `Ctrl-C` sends, which the handler arms itself against.
+private let interruptSignalNumber = SIGINT
+
+/// The pointer value `SIG_DFL` carries, which Swift imports as `nil`.
+private let defaultDispositionPointer = 0
+
+/// How many workers the interleaving row arms and disarms at one time.
+///
+/// The split this row measures is a race between two workers that both want a
+/// second lock after one of them has released the first, so the row needs more
+/// than one runnable worker and gains little from a great many. Eight keeps
+/// every core of an ordinary machine busy and keeps the waiting queue short
+/// enough that the losing side is still scheduled promptly.
+private let interleavedWorkerCount = 8
+
+/// How many arm-and-disarm rounds each worker of the interleaving row runs.
+private let interleavedRoundsPerWorker = 5000
+
+/// The pointer value of one signal disposition, so two can be compared.
+///
+/// `sig_t` is a C function pointer, and Swift makes no function type
+/// `Equatable`. `SIG_DFL` reaches Swift as `nil`, which is the zero pointer the
+/// C header spells it as.
+///
+/// - Parameter disposition: The disposition to read, or `nil` for `SIG_DFL`.
+/// - Returns: The pointer value, which is comparable.
+private func pointerValue(of disposition: sig_t?) -> Int {
+    disposition.map { unsafeBitCast($0, to: Int.self) } ?? defaultDispositionPointer
+}
+
+/// The `SIGINT` disposition that stands right now.
+///
+/// `signal` cannot answer this on its own, because it installs whatever it is
+/// given and so would change the thing it was asked to read. `sigaction` with
+/// no new action reads and installs nothing.
+///
+/// - Returns: The pointer value of the standing disposition.
+private func standingInterruptDisposition() -> Int {
+    var standing = sigaction()
+    sigaction(interruptSignalNumber, nil, &standing)
+    return pointerValue(of: standing.__sigaction_u.__sa_handler)
+}
+
+/// Runs `body` with `SIGINT` at `SIG_DFL`, and hands the host its own
+/// disposition back afterwards.
+///
+/// A real `acp-client` starts with `SIGINT` at `SIG_DFL`, and that is the case
+/// the restore has to hold for. It is also the case a test cannot assume: a
+/// runner is free to have installed a handler of its own, and a row that
+/// measured whatever it happened to find would measure a different claim on
+/// every host. So the starting disposition is pinned rather than read.
+///
+/// - Parameter body: The work to run while `SIGINT` stands at `SIG_DFL`.
+private func withDefaultInterruptDisposition(_ body: () -> Void) {
+    let host = signal(interruptSignalNumber, SIG_DFL)
+    defer { signal(interruptSignalNumber, host) }
+    body()
+}
+
+/// What ``InterruptHandler`` does to the process-wide `SIGINT` disposition.
+///
+/// ``InterruptHandler`` says it leaves no global state behind, and the
+/// disposition is the whole of that global state. These rows install it, so
+/// they are serialized against each other: two rows arming at one time would
+/// each measure the other's disposition rather than their own.
+@Suite("acp-client interrupt disposition", .serialized)
+struct InterruptDispositionTests {
+    /// Arming has to replace the disposition, or the source watches beside a
+    /// default that ends the process and the first press kills the run with
+    /// the answer bytes unflushed and the agent unreaped.
+    @Test("start installs SIG_IGN over the disposition that stood")
+    func startInstallsIgnoreOverTheDispositionThatStood() {
+        let record = ThreadSafeBuffer<InterruptCallback>()
+        let interrupts = handler(recordingInto: record)
+
+        withDefaultInterruptDisposition {
+            interrupts.start()
+            defer { interrupts.stop() }
+
+            #expect(standingInterruptDisposition() == pointerValue(of: SIG_IGN))
+        }
+    }
+
+    /// ``InterruptHandler`` leaves no global state behind, so the disposition
+    /// that stood before ``InterruptHandler/start()`` stands again after
+    /// ``InterruptHandler/stop()``.
+    ///
+    /// `SIG_DFL` is the disposition every real run arms over, and Swift
+    /// imports it as `nil`. A handler that read a saved `nil` as "nothing was
+    /// saved" would restore NOTHING on exactly that path, and `SIGINT` would
+    /// stay ignored for the life of the process.
+    @Test("stop puts back the SIG_DFL that stood before start")
+    func stopPutsBackTheDefaultDispositionThatStoodBeforeStart() {
+        let record = ThreadSafeBuffer<InterruptCallback>()
+        let interrupts = handler(recordingInto: record)
+
+        withDefaultInterruptDisposition {
+            interrupts.start()
+            interrupts.stop()
+
+            #expect(standingInterruptDisposition() == pointerValue(of: SIG_DFL))
+        }
+    }
+
+    /// The armed source and the disposition it displaced carry one invariant
+    /// between them — an armed handler owes the process a restore — so they
+    /// have to move together under one lock.
+    ///
+    /// Two locks let a ``InterruptHandler/stop()`` and a
+    /// ``InterruptHandler/start()`` interleave between them: `stop()` clears
+    /// the source and releases, `start()` then saves the `SIG_IGN` that is
+    /// still standing, and the restore that follows installs `SIG_IGN` for the
+    /// life of the process. That leak is STICKY — every later arming reads
+    /// `SIG_IGN` back as the disposition to save — so one hit anywhere in the
+    /// hammering below stands at the end of it.
+    @Test("arming and disarming from many workers still puts the disposition back")
+    func armingAndDisarmingFromManyWorkersStillPutsTheDispositionBack() {
+        let record = ThreadSafeBuffer<InterruptCallback>()
+        let interrupts = handler(recordingInto: record)
+
+        withDefaultInterruptDisposition {
+            DispatchQueue.concurrentPerform(iterations: interleavedWorkerCount) { _ in
+                for _ in 0..<interleavedRoundsPerWorker {
+                    interrupts.start()
+                    interrupts.stop()
+                }
+            }
+            interrupts.stop()
+
+            #expect(standingInterruptDisposition() == pointerValue(of: SIG_DFL))
+        }
     }
 }

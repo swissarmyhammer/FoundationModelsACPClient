@@ -193,12 +193,20 @@ struct InterruptTests {
     /// the exit code, because §11 asks the same thing of this path as of every
     /// other.
     ///
-    /// The standard-output bytes are NOT asserted here, and that is §11's own
-    /// division rather than a gap in the test. "Prints the text that arrived"
-    /// belongs to the FIRST press, which waits for the agent; the second press
-    /// "ends the run at once", so a chunk still in flight when it lands has no
-    /// moment left in which to be written. The row that owns the byte claim is
+    /// Standard output is measured here as a PREFIX of the answer rather than
+    /// as the whole of it, because §11 divides the two claims. "Prints the
+    /// text that arrived" belongs to the FIRST press, which waits for the
+    /// agent; the second press "ends the run at once", so a chunk still in
+    /// flight when it lands has no moment left in which to be written, and a
+    /// byte equality here would turn that race into a flaky row. The row that
+    /// owns the whole-answer claim is
     /// ``theAnswerThatArrivedBeforeTheInterruptIsStillWritten()``.
+    ///
+    /// A prefix is still a deterministic §8 claim on this path, and it is the
+    /// one §8 actually makes: standard output carries the answer bytes and
+    /// nothing else. Empty and whole both pass, whichever side of the race the
+    /// chunk lands on; a cursor escape, a spinner frame or a trailing newline
+    /// fails, whichever side it lands on.
     @Test("two SIGINTs end a run whose agent ignores the cancellation, and still exit 4")
     func twoInterruptsEndARunWhoseAgentIgnoresTheCancellation() async throws {
         let transcript = temporaryFileURL(prefix: Self.transcriptNamePrefix)
@@ -219,6 +227,10 @@ struct InterruptTests {
         )
 
         #expect(result.exitCode == SectionNineExitCode.cancelled)
+        #expect(
+            Data(interruptAnswer.utf8).starts(with: result.standardOutput),
+            "stdout was \"\(String(decoding: result.standardOutput, as: UTF8.self))\""
+        )
         // §8 leaves a default run silent on stderr UNTIL it fails, and a run
         // that was cut short without a word is a run nobody can debug.
         #expect(!result.standardError.isEmpty, "an interrupted run must say so on stderr")

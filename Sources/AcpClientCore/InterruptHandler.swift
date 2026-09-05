@@ -6,7 +6,7 @@ import Synchronization
 // cancels the turn and waits; the second ends the run at once. Both paths reap
 // the agent, and both exit 4.
 //
-// Four decisions here are not free choices.
+// Six decisions here are not free choices.
 //
 // 1. **The default disposition is set to IGNORE before the source is made.**
 //    A `DispatchSourceSignal` does not replace the disposition: it watches the
@@ -30,6 +30,22 @@ import Synchronization
 //    built a handler which installed on its own would take `Ctrl-C` away from
 //    whatever process is hosting it. Driving ``deliver(times:)`` is what the
 //    tests do, and it is the same entry the source's own event handler calls.
+// 5. **The armed source and the disposition it displaced are ONE value under
+//    ONE lock.** They carry a single invariant between them — an armed handler
+//    owes the process a restore — and two locks let a ``stop()`` and a
+//    ``start()`` interleave between them: `stop()` clears the source and
+//    releases, `start()` then saves the `SIG_IGN` that is still standing, and
+//    the restore that follows installs `SIG_IGN` for the life of the process.
+//    ``ArmedInterrupts`` under one `Mutex` makes that split unwritable rather
+//    than merely absent.
+// 6. **`SIG_DFL` reaches Swift as `nil`, so `nil` cannot also mean "nothing
+//    was saved".** A binary starts with `SIGINT` at `SIG_DFL`, so `signal`
+//    answers `nil` at the arming of every ordinary run. A saved disposition of
+//    `nil` that stood for an absence would restore NOTHING on exactly that
+//    path, and `SIGINT` would stay ignored for the life of the process.
+//    Whether a restore is owed is answered by whether ``ArmedInterrupts``
+//    stands at all, and the disposition it carries is restored whatever its
+//    value is.
 
 /// How many interrupts have arrived when the FIRST callback is owed.
 private let firstInterruptCount = 1
@@ -45,6 +61,28 @@ private let interruptSignal = SIGINT
 /// `DispatchSourceSignal.data` counts the signals since the last event, and a
 /// handler always owes at least the one signal that woke it.
 private let smallestDeliveryCount = 1
+
+/// Everything one armed handler owns, and owes back.
+///
+/// The source and the disposition it displaced carry a single invariant
+/// between them — a handler that holds this value owes the process a restore —
+/// so they are one value under one lock. See decision 5 at the head of this
+/// file for what two locks let a caller write.
+private struct ArmedInterrupts {
+    /// The resumed signal source.
+    ///
+    /// It is held so that ``InterruptHandler/stop()`` can cancel it, and
+    /// because a dispatch source that nothing holds is torn down and stops
+    /// watching.
+    let source: any DispatchSourceSignal
+
+    /// The `SIGINT` disposition that stood before this arming installed
+    /// `SIG_IGN`.
+    ///
+    /// `nil` is `SIG_DFL`, which is how Swift imports it, and NOT an absence.
+    /// See decision 6 at the head of this file.
+    let displacedDisposition: sig_t?
+}
 
 /// The `Ctrl-C` handling of one run: the first press, and the second.
 ///
@@ -67,16 +105,13 @@ final class InterruptHandler: Sendable {
     /// What the run does about the second interrupt.
     private let onSecondInterrupt: @Sendable () -> Void
 
-    /// The armed signal source, or `nil` while this handler is not armed.
+    /// What this handler armed, or `nil` while it is not armed.
     ///
-    /// It is held so that ``stop()`` can cancel it, and because a dispatch
-    /// source that nothing holds is torn down and stops watching.
-    private let source = Mutex<(any DispatchSourceSignal)?>(nil)
-
-    /// The `SIGINT` disposition that stood before ``start()`` replaced it.
-    ///
-    /// ``stop()`` puts it back, so this type leaves no global state behind.
-    private let previousDisposition = Mutex<sig_t?>(nil)
+    /// The source and the disposition it displaced are one value under this
+    /// one lock, so that no ``start()`` can run between a ``stop()`` clearing
+    /// the source and the same ``stop()`` putting the disposition back. See
+    /// decision 5 at the head of this file.
+    private let armed = Mutex<ArmedInterrupts?>(nil)
 
     /// Builds the handler. It installs nothing: run ``start()`` to arm it.
     ///
@@ -100,11 +135,11 @@ final class InterruptHandler: Sendable {
     /// further and changes nothing, so a caller cannot lose the disposition it
     /// owes the process.
     func start() {
-        source.withLock { armed in
-            guard armed == nil else { return }
+        armed.withLock { state in
+            guard state == nil else { return }
             // The disposition goes first. See decision 1 at the head of this
             // file for what an armed source alone would still do.
-            previousDisposition.withLock { $0 = signal(interruptSignal, SIG_IGN) }
+            let displaced = signal(interruptSignal, SIG_IGN)
             let created = DispatchSource.makeSignalSource(
                 signal: interruptSignal,
                 queue: .global()
@@ -116,7 +151,7 @@ final class InterruptHandler: Sendable {
                 deliver(times: Int(created.data))
             }
             created.resume()
-            armed = created
+            state = ArmedInterrupts(source: created, displacedDisposition: displaced)
         }
     }
 
@@ -124,15 +159,16 @@ final class InterruptHandler: Sendable {
     ///
     /// Running this on a handler that was never armed changes nothing, so
     /// every exit path can run it.
+    ///
+    /// The cancel and the restore are one step under one lock, and the
+    /// disposition is put back whatever its value is. See decisions 5 and 6 at
+    /// the head of this file.
     func stop() {
-        source.withLock { armed in
-            armed?.cancel()
-            armed = nil
-        }
-        previousDisposition.withLock { stored in
-            guard let previous = stored else { return }
-            signal(interruptSignal, previous)
-            stored = nil
+        armed.withLock { state in
+            guard let standing = state else { return }
+            standing.source.cancel()
+            signal(interruptSignal, standing.displacedDisposition)
+            state = nil
         }
     }
 

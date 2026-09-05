@@ -56,6 +56,78 @@ comments:
     - evidence: 9 files — new `Sources/AcpClientCore/InterruptHandler.swift`, new `Tests/FoundationModelsACPClientTests/InterruptHandlerTests.swift`, new `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/InterruptTests.swift`; edited `Sources/AcpClientCore/TurnRunner.swift`, `Sources/AcpClientCore/RunCommand.swift`, `Sources/AcpClientCore/ExitCode.swift`, `Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift`, `Tests/FoundationModelsACPClientTests/TurnRunnerTests.swift`, `IntegrationTests/.../Support/CLITestSupport.swift`, `IntegrationTests/.../Support/StubAgents.swift`. `timeout 420 swift test`: 212 tests in 16 suites passed, 0 warnings. `timeout 600 swift test --package-path IntegrationTests`: 72 tests in 11 suites passed, 0 warnings. Every acceptance row and every test row is ticked.
     - next: ready for `/review`.
   timestamp: 2026-09-05T02:20:28.784913+00:00
+- actor: claude-code
+  id: 01m1qqfp24wbr2ccckj470vrdp
+  text: |
+    ### review — findings
+    - scope: `review sha f8ad776~1..f8ad776`, diffs only. 10 files reviewed, 4 skipped by `.reviewignore`.
+    - engine: 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed.
+    - directed pass: 2 findings — `Sources/AcpClientCore/InterruptHandler.swift:127`, `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/InterruptTests.swift:202`.
+    - clean: the disposition restore on every path out of `run`; the spawn/reap defer ordering with no orphan window; the §11 pid claim on both paths against a real pid.
+    - reasoned, not measured: §8 holds structurally on both paths because `RunCommand.answerSink` is the only writer of descriptor 1; the `--timeout` and `Ctrl-C` children cannot double-report or hang, and a true tie picks one non-zero row with no §9 rule against it.
+    - no source file was changed and no test was run in this pass.
+    - next: fix the two findings, then re-review.
+  timestamp: 2026-09-05T02:48:40.260662+00:00
+- actor: claude-code
+  id: 01m1qqgtrry6enz3nq2cxzcxek
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 10 files. A new `InterruptHandler` watches `SIGINT`; the interrupts are a fifth child of `TurnRunner`'s task group. The first press sends `session/cancel` and keeps waiting, so the turn ends on its own `cancelled` stop reason; the second press throws. Both reach exit 4.
+    - test: green — root 212 passed in 16 suites, integration 72 passed in 11 suites, 0 warnings
+    - commit: f8ad776 feat(acp-client): handle Ctrl-C to cancel the turn, reap, and exit 4
+    - review: findings — Sources/AcpClientCore/InterruptHandler.swift:127, IntegrationTests/.../InterruptTests.swift:202
+
+    Two design facts the implementer measured, and the review re-measured by probe:
+    - A `DispatchSourceSignal` armed WITHOUT `SIG_IGN` does not save the process. A probe exited 130, and its handler never ran. So `SIG_IGN` first is required, not decorative.
+    - The source COALESCES. Three signals delivered `.data` of 1 then 2. So the handler must deliver `source.data` times, or a fast double press reads as one.
+
+    Three points came back clean:
+    - The disposition is restored on every path out of `run`. The `stop` defer is registered right after `start()` and before every throwing call that follows.
+    - No orphan window. LIFO puts the reap before the restore, so the agent is reaped while `SIGINT` is still ignored. Before `start()` there is no agent to orphan; between `start()` and the spawn the press is buffered in an unbounded stream, so it is neither fatal nor lost.
+    - §11 holds on both paths against a real pid.
+
+    The review also reasoned the `--timeout` interaction: the group rethrows the FIRST child error and cancels the rest, so exactly one error escapes and one code is reported. A true tie is nondeterministic between 124 and 4, but §9 states no tie-break and both rows are non-zero and both reap, so neither is wrong.
+
+    **A process note that cost real time.** The first review of this card mutated `TurnRunner.swift` to test the wire cancel. The mutation made a one-press test wait for ever, its 900-second bounded run hung, and the tree was left with a mutated source file and two wedged `swift-test` processes. I cleaned it up, verified f8ad776 green at 212 and 72, and re-ran the review with mutation forbidden. For a card whose failure mode is "waits for ever", a mutation that removes the thing that ends the wait is not a safe probe.
+  timestamp: 2026-09-05T02:49:17.848167+00:00
+- actor: claude-code
+  id: 01m1qr9br8y8jnjtyyfcz5ytvg
+  text: |-
+    Both review findings are fixed. Notes for the next reader, because the first finding hid a SECOND defect of the same cause.
+
+    **`SIG_DFL` reaches Swift as `nil`.** A probe settled it rather than a guess: `SIG_DFL == nil` is `true`, and `SIG_IGN` is the pointer 1. The old code held the saved disposition in `Mutex<sig_t?>(nil)` and read `nil` as "nothing was saved" — so the sentinel COLLIDED with a real value. A real `acp-client` starts with `SIGINT` at `SIG_DFL`, so `start()` saved `nil` at the arming of every ordinary run, and `stop()`'s `guard let previous = stored else { return }` restored NOTHING. `SIGINT` stayed `SIG_IGN` for the life of the process, with no race at all. The finding named the concurrent path; this is the same cause on the sequential one, and the instruction was to remove the cause from the whole file.
+
+    **The fix removes the cause rather than reordering it.** The review suggested moving the restore inside the `source.withLock` block. That works, but it leaves two mutexes holding one invariant, so a later edit can split them again. Both pieces of state are now ONE value under ONE lock — a private `ArmedInterrupts` struct holding the source and the disposition it displaced, in a single `Mutex<ArmedInterrupts?>`. Two things follow, and neither is a matter of care:
+
+    - The split is UNWRITABLE, not merely absent. `stop()` cancels and restores inside the one `withLock` it takes; no `start()` can run between them.
+    - "Is a restore owed" is answered by whether the value stands, never by whether the disposition is `nil`. So the disposition is put back whatever its value is, and `SIG_DFL` restores correctly.
+
+    Decisions 5 and 6 at the head of the file record both, so the next reader does not have to re-derive them.
+
+    **Three new unit rows, and each was watched to fail first.**
+
+    - `start installs SIG_IGN over the disposition that stood` — passed already; it pins the arming half so the restore rows cannot pass by never installing.
+    - `stop puts back the SIG_DFL that stood before start` — DETERMINISTIC red on the old code. This is the sentinel collision, and it needs no threads.
+    - `arming and disarming from many workers still puts the disposition back` — the concurrent split. Eight `concurrentPerform` workers each arm and disarm 5000 times. The leak is STICKY: once `SIGINT` is left at `SIG_IGN`, every later arming reads `SIG_IGN` back as the disposition to save, so one hit anywhere in the hammering still stands at the end of it. That is what makes a race testable at all here.
+
+    Each row pins the starting disposition to `SIG_DFL` and hands the host its own back, so the test runner keeps its `Ctrl-C` outside the microseconds a row is armed. The disposition is READ with `sigaction` and a null new action, because `signal` installs whatever it is given and so would change the thing it was asked to read.
+
+    **Both findings were proven by mutation, each restored in the SAME shell command.**
+
+    - Finding 1: `stop()` re-split (the saved value taken under the lock, the `signal` call moved after it) with the sentinel fix KEPT, so only the split could fail. The hammer row failed 3 runs out of 3; the two sequential rows passed all three. That is the discriminator — the row bites the split itself, not just the sentinel.
+    - Finding 2: `RunCommand.answerSink` mutated to append a newline to descriptor 1. The new assertion caught it at `InterruptTests.swift:230`. The integration target depends on the `acp-client` executable product, so the mutated binary really was rebuilt and run.
+
+    **A process note, since the last pass on this card was burned by exactly this.** My first mutation probe used `trap 'git checkout -- "$F"' EXIT`. It restored the file to HEAD, which threw away my own fix along with the mutation. The second probe saved a copy of the FIXED file first and restored from that copy. `git checkout` is not an undo for a mutation applied on top of uncommitted work. Neither mutation touched anything that ends a wait, so nothing hung; `git status` was verified clean of unintended changes after each.
+
+    **What did NOT work, so nobody repeats it.** There is no sequential test that separates the atomicity split on its own. Single-threaded, `start()` and `stop()` always move both pieces of state together, and a stop/start/stop sequence passes on the split code. Interleaving is the only discriminator, which is why the hammer row exists beside the two deterministic ones.
+  timestamp: 2026-09-05T03:02:41.672844+00:00
+- actor: claude-code
+  id: 01m1qr9jeqxfaw74d5c0mfc2k0
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — `Sources/AcpClientCore/InterruptHandler.swift`, `Tests/FoundationModelsACPClientTests/InterruptHandlerTests.swift`, `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/InterruptTests.swift`. `timeout 420 swift test`: 215 tests in 17 suites passed, 0 warnings (was 212 in 16). `timeout 600 swift test --package-path IntegrationTests`: 72 tests in 11 suites passed, 0 warnings. Finding 1 proven by mutation: `stop()` re-split with the sentinel fix kept failed the new interleaving row 3 runs of 3, while the two sequential rows passed; the deterministic `stop puts back the SIG_DFL that stood before start` row was red on the unfixed code and is green now. Finding 2 proven by mutation: a stray newline added to `RunCommand.answerSink` failed the new `Data(interruptAnswer.utf8).starts(with: result.standardOutput)` assertion at `InterruptTests.swift:230`. Both mutations were restored inside the same shell command that ran them, and `git status` was verified clean of unintended changes after each. Both `## Review Findings` checkboxes are ticked.
+    - next: ready for `/review`.
+  timestamp: 2026-09-05T03:02:48.535651+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPECJSM165NAWX5F3NKX9A
@@ -125,3 +197,31 @@ prints the text that arrived.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 21:52)
+
+> Scope: `review sha f8ad776~1..f8ad776` — reviewed the diffs only — lines this
+> change added or modified. 10 file(s) reviewed, 4 not reviewed (`.kanban/`,
+> from `.reviewignore`).
+
+The validator fleet returned 0 findings. The two items below come from the
+five directed questions this pass had to answer. Both name lines this commit
+added.
+
+- [x] `Sources/AcpClientCore/InterruptHandler.swift:127` `correctness/atomicity` — `stop()` releases the `source` lock BEFORE it restores the `SIGINT` disposition, while `start()` holds that same lock ACROSS the save. The two mutexes hold one invariant between them — "armed means a restore is owed" — and splitting the critical section breaks it. Interleave `stop()` and `start()`: `stop()` sets `armed = nil` and releases; `start()` then sees `nil`, arms, and overwrites `previousDisposition` with the `SIG_IGN` that is standing; the first `stop()` then consumes that saved value and clears it; the second `stop()` finds `nil` and restores NOTHING, so `SIGINT` stays `SIG_IGN` for the life of the process. The type is `Sendable` and its doc says it leaves no global state behind, so the contract is the concurrent one. Move the `previousDisposition` restore inside the same `source.withLock` block that `stop()` already takes, mirroring `start()`.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/InterruptTests.swift:202` `tests/coverage` — the two-press row asserts the exit code, a non-empty stderr and the reaped pid, and asserts NOTHING about standard output, so §8 ("the answer bytes and nothing else") is measured on the one-press path alone. The row's own comment is right that a full byte equality would be flaky here — the readiness gate fires when the agent READS `session/prompt`, before it streams the chunk — but a deterministic claim is still available: standard output must be a PREFIX of the answer bytes on this path, empty or whole and never anything more. Assert `Data(interruptAnswer.utf8).starts(with: result.standardOutput)`, which holds whichever side of the race the chunk lands on and still fails on a stray cursor escape or a newline.
+
+### The three questions that came back clean
+
+- The `SIGINT` disposition IS restored on every path out of `run`. `runTurn` registers `defer { interruptHandler.stop(); interruptFeed.finish() }` immediately after `start()` and before every throwing call that follows, so a normal return, a spawn failure, `AcpClientTimeout`, `AcpClientInterrupted`, a protocol failure and a task cancellation all run it. `run()` calls `runTurn` inside a `do`/`catch` and throws its own `ExitCode` only after `runTurn` has returned, so the disposition is already back by then.
+- The spawn ordering IS correct, and NO window orphans the agent. `start()`, then the `stop` defer, then `AgentProcess(...)`, then `defer { process.shutdown() }`. The defers run LIFO, so `shutdown()` reaps while `SIGINT` is still `SIG_IGN`, and only then does `stop()` hand the signal back to a disposition that ends this process. Before `start()` only `AgentCommandResolver.resolve` runs, and there is no agent to orphan; between `start()` and the spawn the signal is already ignored and the press is buffered into the unbounded `AsyncStream`, so it is neither fatal nor lost; a throwing `AgentProcess(...)` still runs the `stop` defer.
+- The §11 pid claim IS measured on both paths, against a real pid read from a file the agent wrote itself: `InterruptTests.swift:163` for one press and `InterruptTests.swift:225` for two.
+
+### §8 on the second path, and the timeout race
+
+- §8 holds STRUCTURALLY on both paths regardless of the test gap above. The run path has exactly one writer of descriptor 1 — `RunCommand.answerSink` at `Sources/AcpClientCore/RunCommand.swift:92`, an unbuffered `FileHandle.standardOutput.write($0)` of the chunk verbatim. Every spinner frame, event and error goes through `TerminalOutput`, which owns standard error. No cursor escape and no newline can reach descriptor 1 on either interrupt path.
+- `--timeout` and `Ctrl-C` are children of one `withThrowingTaskGroup`, and neither can be double-reported or lost. The group rethrows the FIRST child error and cancels the rest, so exactly one error escapes and `run()` maps exactly one error to one exit code. Whichever throws first unwinds the group, the group drains the other children, and `runTurn`'s defers reap the agent and restore the disposition on both. A true tie is nondeterministic in WHICH code it reports — `AcpClientTimeout` to the §9 timeout row, `AcpClientInterrupted` to 4 — but §9 states no tie-break, both rows are non-zero and both reap, so no row is wrong. The FIRST press deliberately does not throw: it sends `session/cancel` and keeps reading, so a limit that fires during that wait wins, which is what stops a first press against an agent that never answers the cancellation from waiting forever. `applyInterrupts` returns `.sideWorkFinished`, which the loop `continue`s on, so a finished interrupt stream never ends the turn by itself.
+
+### Not verified
+
+- The wire behaviour of a real `SIGINT` reaching a real binary was NOT re-measured in this pass. Settling it needs a source mutation, which this pass was told not to make, so it is recorded here as taken from the commit's own green run rather than as measured now.
