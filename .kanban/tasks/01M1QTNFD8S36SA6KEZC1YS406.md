@@ -191,8 +191,46 @@ comments:
     ### commit — changed
     - evidence: bc52417 style(process): label the first parameter of action functions
   timestamp: 2026-09-05T11:32:54.166574+00:00
-position_column: review
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rnk4k5yghv1v2dz4vjmn7w
+  text: |-
+    ### commit — changed
+    - evidence: d1fcb13 style(process): label the first parameter of action functions (bc52417 amended with the kanban state written after it; same tree, same message)
+  timestamp: 2026-09-05T11:34:50.725372+00:00
+- actor: claude-code
+  id: 01m1rnk4q2n97d66253235y8rh
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit bc52417). 0 findings, 0 confirmed, 0 refuted, 7 validator runs, 0 failed. 2 files reviewed. 2 files in .kanban/ not reviewed (excluded by .reviewignore). All 3 items in `## Review Findings (2026-09-05 06:22)` are checked.
+    - next: done. The task is moved from `review` to `done`.
+  timestamp: 2026-09-05T11:34:50.850212+00:00
+- actor: claude-code
+  id: 01m1rnksyzmmg5cbyqzzar2v87
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — `Sources/FoundationModelsACPClient/AgentProcess.swift` (`reap(pid:)`), `Tests/FoundationModelsACPClientTests/AgentProcessTeardownTests.swift` (`spawnInThisProcessGroup(command:arguments:)`, `isInProcessTable(pid:)`, `killAndReap(pid:)`); 3 of 3 findings checked
+    - test: green — root 223/223 in 19 suites, integration 77/77 in 12 suites, 0 warnings, 0 skipped
+    - commit: bc52417, amended to d1fcb13 with the same tree
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T11:35:12.607396+00:00
+- actor: claude-code
+  id: 01m1rnp0f7k1mv2hpkqrxx0wbx
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit d1fcb13). 0 findings, 0 confirmed, 0 refuted, 7 validator runs, 0 failed. 2 files reviewed. 2 files in .kanban/ not reviewed (excluded by .reviewignore). All 3 items in `## Review Findings (2026-09-05 06:22)` are checked.
+    - next: done. The card was already in `done` at the start of this pass and at the re-read before the verdict. No column move was made. The description is unchanged.
+  timestamp: 2026-09-05T11:36:24.807794+00:00
+- actor: claude-code
+  id: 01m1rnppcw81hbcrtt81at0chk
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: no-change — the three checked `swift/fluent-usage` items were already applied in the tree by the parallel implement pass (`reap(pid:)`, `spawnInThisProcessGroup(command:arguments:)`, `killAndReap(pid:)`, `isInProcessTable(pid:)`, six call sites); this pass modified no file
+    - test: green — swift build 0 warnings; root 223/223 in 19 suites; integration 77/77 in 12 suites; diagnostics 0 warnings; 0 skipped; no leftover child process
+    - commit: d1fcb13 (bc52417 from the parallel actor, amended with the kanban state written after it; same tree, same message)
+    - review: clean — review sha HEAD~1..HEAD (d1fcb13): 0 findings, 0 confirmed, 0 refuted, 7 validator runs; 3 of 3 prior items checked; the card is in `done`
+  timestamp: 2026-09-05T11:36:47.260741+00:00
+position_column: done
+position_ordinal: a480
 title: AgentProcess teardown blocks forever when the group kill misses
 ---
 ## What
