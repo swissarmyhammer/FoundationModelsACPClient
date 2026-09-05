@@ -201,7 +201,12 @@ Every option of the table above shapes `run`:
 | Subcommand | The inert options | Why |
 |---|---|---|
 | `probe` | `--timeout` | `probe` runs no turn, and the limit bounds a turn. |
-| `doctor` | `--cwd`, `--frames`, `--timeout`, `--verbose`, `--quiet` | `doctor` opens no session, so `--cwd` names nothing. It writes its whole report to stdout and nothing to stderr, so `--verbose` and `--quiet` shape nothing. Each of its rows keeps a time limit of its own, so `--timeout` is not that limit. And `--frames` needs a seam through the check runner, which owns the frame tee its rows read. |
+| `doctor` | `--cwd`, `--timeout`, `--verbose`, `--quiet` | `doctor` opens no session, so `--cwd` names nothing. It writes its whole report to stdout, and nothing of its own to stderr, so `--verbose` and `--quiet` shape nothing. Each of its rows keeps a time limit of its own, so `--timeout` is not that limit. |
+
+`--frames` shapes all three. The check runner of `doctor` owns the frame
+tee its rows read, so `doctor` hands it a sink for those frames, and the
+runner calls the sink beside its own readings. The frames then reach
+stderr, and the report on stdout is the same as without the flag.
 
 An inert option is still parsed, and it is still checked. A `--timeout`
 of zero or less gives the turn no time at all, so it is a usage error on

@@ -25,6 +25,14 @@
 import Foundation
 import FoundationModelsACP
 
+/// Receives one line of the exchange per call, marked with its direction and
+/// carrying no terminator.
+///
+/// ``FrameTeeTransport`` calls it from its forwarding task and from
+/// ``FrameTeeTransport/write(_:)``, so a value of this type must tolerate calls
+/// from more than one task.
+typealias FrameLineSink = @Sendable (String) -> Void
+
 /// A pass-through transport that copies the ndJSON exchange to a sink, one
 /// line per call.
 ///
@@ -69,7 +77,7 @@ final class FrameTeeTransport: ACPTransport, Sendable {
 
     /// Receives one line of the exchange per call, marked with its direction
     /// and carrying no terminator.
-    private let sink: @Sendable (String) -> Void
+    private let sink: FrameLineSink
 
     /// The forwarding task; cancelled on stream teardown and on `deinit`.
     private let forwarder: Task<Void, Never>
@@ -81,7 +89,7 @@ final class FrameTeeTransport: ACPTransport, Sendable {
     ///   - sink: Receives one marked line per call, without its terminator.
     ///     It is called from the forwarding task and from ``write(_:)``, so it
     ///     must tolerate calls from more than one task.
-    init(wrapping inner: any ACPTransport, sink: @escaping @Sendable (String) -> Void) {
+    init(wrapping inner: any ACPTransport, sink: @escaping FrameLineSink) {
         self.inner = inner
         self.sink = sink
         let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()

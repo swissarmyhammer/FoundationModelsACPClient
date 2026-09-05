@@ -66,26 +66,6 @@ private let outboundFrameMark = ">> "
 /// the whole claim of §6.1: the exchange is visible in both directions.
 private let initializeMethodMember = #""method":"initialize""#
 
-/// Renders one captured stream as text.
-///
-/// The assertions compare BYTES; this is for the line splitting a few of them
-/// do, and for the failure message that says what the stream really held.
-///
-/// - Parameter stream: The captured bytes.
-/// - Returns: The bytes as text, with invalid UTF-8 replaced rather than
-///   dropped.
-private func text(_ stream: Data) -> String {
-    String(decoding: stream, as: UTF8.self)
-}
-
-/// Splits one captured stream into its non-empty lines.
-///
-/// - Parameter stream: The captured bytes.
-/// - Returns: The lines, without their terminators.
-private func lines(of stream: Data) -> [String] {
-    text(stream).split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-}
-
 /// `acp-client run` and the two file descriptors: what reaches standard output,
 /// and what reaches standard error under each option of `cli-plan.md` §6.1.
 ///

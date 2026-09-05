@@ -186,6 +186,17 @@ struct AgentCommandDoctor: Doctorable {
     /// The longest time one row of this doctor may take.
     let timeLimit: Duration
 
+    /// Receives every line of the exchange the rows read, or `nil` for none.
+    ///
+    /// This is the seam `--frames` reaches the doctor through. The rows read
+    /// the exchange off a tee of their own, and the sink of that tee feeds the
+    /// two readings rows three to six rest on. A caller that wants to SEE the
+    /// exchange gets each teed line here, marked with its direction, beside
+    /// those two readings. It never gets it through the terminal the
+    /// connection holds: that one stays silent, so that no check can write on
+    /// the report a caller is rendering.
+    let frameSink: FrameLineSink?
+
     /// Creates a doctor over one agent command.
     ///
     /// - Parameters:
@@ -196,16 +207,21 @@ struct AgentCommandDoctor: Doctorable {
     ///     command into.
     ///   - timeLimit: The longest time one row may take. The default is
     ///     ``defaultTimeLimit``.
+    ///   - frameSink: Receives each line the tee copies, marked with its
+    ///     direction and without its terminator, or `nil` for none. The tee
+    ///     calls it from more than one task, so it must tolerate that.
     init(
         command: String,
         arguments: [String] = [],
         resolver: AgentCommandResolver = AgentCommandResolver(),
-        timeLimit: Duration = AgentCommandDoctor.defaultTimeLimit
+        timeLimit: Duration = AgentCommandDoctor.defaultTimeLimit,
+        frameSink: FrameLineSink? = nil
     ) {
         self.command = command
         self.arguments = arguments
         self.resolver = resolver
         self.timeLimit = timeLimit
+        self.frameSink = frameSink
     }
 
     /// What this doctor is called in the report: the command as it was typed.
@@ -303,7 +319,9 @@ struct AgentCommandDoctor: Doctorable {
     /// The connection reads the agent's stdout through a ``FrameTeeTransport``,
     /// which copies each whole line to a sink BEFORE it hands the chunk on. So
     /// every line that reached the handshake has already reached both readings,
-    /// and neither needs a wait of its own.
+    /// and neither needs a wait of its own. The same sink hands each line to
+    /// ``frameSink``, so a caller that asked to see the exchange sees exactly
+    /// the lines the readings judged.
     ///
     /// The teardown row runs before the connection closes. See rule 5.
     ///
@@ -315,12 +333,14 @@ struct AgentCommandDoctor: Doctorable {
     private func connectedChecks(of agent: AgentProcess, pid: pid_t) async -> [HealthCheck] {
         let reading = AgentStandardOutputReading()
         let answer = AgentInitializeAnswerReading()
+        let frameSink = frameSink
         // The tee is bound here rather than passed inline, so it outlives the
         // exchange: `FrameTeeTransport.deinit` cancels the forwarding task that
         // copies the agent's lines.
         let tee = FrameTeeTransport(wrapping: agent.transport) { line in
             reading.record(line)
             answer.record(line)
+            frameSink?(line)
         }
         let session = await AgentSession(over: tee, terminal: Self.silentTerminal, cwd: nil)
         let outcome = await initializeOutcome(of: session)

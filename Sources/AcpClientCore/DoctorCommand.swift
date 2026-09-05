@@ -13,30 +13,37 @@ import FoundationModelsExtras
 //
 // Four decisions here are not free choices.
 //
-// 1. **The report goes to stdout, and nothing goes to stderr.** §8 keeps stdout
-//    for the answer text alone and then names `probe` and `doctor` as its
-//    exceptions: their report IS their output. `run` and `probe` each put a
-//    line on stderr when they fail, because a failure ends those commands with
-//    no output of their own. A doctor has no such failure: `runHealthChecks()`
-//    does not throw, and every defect it meets — a command that resolves to
-//    nothing included — becomes a ROW of the report. A second copy on stderr
-//    would say what the report already says.
+// 1. **The report goes to stdout, and the doctor writes nothing of its own to
+//    stderr.** §8 keeps stdout for the answer text alone and then names `probe`
+//    and `doctor` as its exceptions: their report IS their output. `run` and
+//    `probe` each put a line on stderr when they fail, because a failure ends
+//    those commands with no output of their own. A doctor has no such failure:
+//    `runHealthChecks()` does not throw, and every defect it meets — a command
+//    that resolves to nothing included — becomes a ROW of the report. A second
+//    copy on stderr would say what the report already says. The one thing that
+//    reaches stderr is the exchange itself, under `--frames` (decision 4), and
+//    those are the agent's words and this client's, not the doctor's.
 // 2. **The exit code comes from ``AcpClientExitCode/forDoctorStatus(_:)``, and
 //    never from `DoctorReport.exitCode`.** The two answer the same three
 //    numbers today. They are still two tables: the Extras one is that library's
 //    own convention, and §9 is this binary's, which also has to hold `refusal`,
 //    `cancelled`, a timeout and a usage error apart. Reading the §9 table here
 //    is what keeps every outcome of this binary in one place.
-// 3. **`--timeout` never reaches the doctor.** See ``doctor(for:)``.
-// 4. **The §6.1 option group is declared, and the rows read none of it.** §6.1
-//    gives those options to every subcommand, so `doctor` has to PARSE them or
-//    the grammar of the three subcommands would differ. What each one shapes is
-//    another matter, and for a diagnosis it is nothing: `--cwd` names the
-//    working directory of a SESSION, and the rows open none — they send one
-//    `initialize` and stop; `--quiet` and `--verbose` shape standard error,
-//    which decision 1 leaves empty; `--timeout` is decision 3; and `--frames`
-//    would need a seam through `AgentCommandDoctor`, which owns the tee its
-//    rows read. So the group is the grammar of §6.1 and nothing more.
+// 3. **`--timeout` never reaches the doctor.** See ``doctor(for:frameSink:)``.
+// 4. **The §6.1 option group is declared, and one option of it shapes the
+//    diagnosis.** §6.1 gives those options to every subcommand, so `doctor`
+//    has to PARSE them or the grammar of the three subcommands would differ.
+//    What each one shapes is another matter. `--frames` shapes this one: it is
+//    the reason the binary exists, and the defect §10 catches best — an agent
+//    that writes a banner to stdout — is the one a person then wants to SEE
+//    on the wire. `AgentCommandDoctor` owns the tee its rows read, so the flag
+//    reaches it through ``frameSink(frames:)``: a sink the doctor calls for
+//    each teed line, beside the two readings its rows rest on, and nothing
+//    when the flag is absent. The other four shape nothing here: `--cwd` names
+//    the working directory of a SESSION, and the rows open none — they send
+//    one `initialize` and stop; `--quiet` and `--verbose` shape standard
+//    error, where decision 1 lets nothing but those frames through; and
+//    `--timeout` is decision 3.
 
 /// What closes the JSON form of the report.
 ///
@@ -82,7 +89,8 @@ struct DoctorCommand: AsyncParsableCommand {
     ///   report that is not wholly `ok`.
     func run() async throws {
         let agent = try invocation.command()
-        let findings = await DoctorRunner(components: [Self.doctor(for: agent)]).run()
+        let doctor = Self.doctor(for: agent, frameSink: Self.frameSink(frames: options.frames))
+        let findings = await DoctorRunner(components: [doctor]).run()
         try Self.write(findings, asJSON: report.json)
 
         // §9 and not `DoctorReport.exitCode`: see decision 2 at the head of this
@@ -107,10 +115,40 @@ struct DoctorCommand: AsyncParsableCommand {
     /// would collapse the settle interval and the initialize race alike, and
     /// every row resting on them would report a defect the agent does not have.
     ///
-    /// - Parameter agent: The agent executable and its own arguments.
+    /// - Parameters:
+    ///   - agent: The agent executable and its own arguments.
+    ///   - frameSink: Where each line of the exchange goes, or `nil` for a run
+    ///     that asked for no frames. See ``frameSink(frames:)``.
     /// - Returns: The doctor over that command.
-    private static func doctor(for agent: AgentCommand) -> AgentCommandDoctor {
-        AgentCommandDoctor(command: agent.executable, arguments: agent.arguments)
+    private static func doctor(
+        for agent: AgentCommand,
+        frameSink: FrameLineSink?
+    ) -> AgentCommandDoctor {
+        AgentCommandDoctor(
+            command: agent.executable,
+            arguments: agent.arguments,
+            frameSink: frameSink
+        )
+    }
+
+    /// The sink `--frames` hands the doctor, or `nil` when the command line
+    /// carried no flag.
+    ///
+    /// The sink writes through ``TerminalOutput/frame(_:)``, for the reason
+    /// ``RunCommand/sessionTransport(over:frames:terminal:)`` gives: `--frames`
+    /// is a debugging switch and not a verbosity level, so that member writes
+    /// at every verbosity and whether or not stderr is a terminal. The layer is
+    /// built at `.quiet`, because the doctor writes the frames through it and
+    /// nothing else — decision 4 at the head of this file — and `frame(_:)`
+    /// reads no verbosity at all. Without the flag no layer is built, so a
+    /// default run pays nothing for a switch it did not ask for.
+    ///
+    /// - Parameter frames: Whether the command line carried `--frames`.
+    /// - Returns: The sink, or `nil` for a run that asked for no frames.
+    private static func frameSink(frames: Bool) -> FrameLineSink? {
+        guard frames else { return nil }
+        let terminal = TerminalOutput(verbosity: .quiet)
+        return { terminal.frame($0) }
     }
 
     /// Writes one report to standard output.

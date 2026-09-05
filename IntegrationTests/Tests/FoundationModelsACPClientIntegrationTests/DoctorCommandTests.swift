@@ -9,9 +9,10 @@ import Testing
 //
 // `AgentCommandDoctorTests` asserts each ROW of the check table, over the
 // `Doctorable` directly. This file asserts what the SUBCOMMAND adds: the report
-// reaches standard output, `--json` writes the same findings as JSON, and the
-// worst finding decides the exit code. Nothing here re-asserts a row's status,
-// which is that file's work.
+// reaches standard output, `--json` writes the same findings as JSON,
+// `--frames` puts the handshake on standard error and leaves the report alone,
+// and the worst finding decides the exit code. Nothing here re-asserts a row's
+// status, which is that file's work.
 //
 // The exit codes are spelled again below rather than read from
 // `AcpClientExitCode`, for the reason `ProbeCommandTests` states: a test that
@@ -76,6 +77,21 @@ private let errorStatusValue = "error"
 /// The `status` value of a check whose subject works.
 private let okStatusValue = "ok"
 
+/// The `method` member of the one request `doctor` sends, as it stands on the
+/// wire.
+///
+/// A `--frames` run must show it under `FrameTeeTransport.outboundMark`. The
+/// doctor sends `initialize` and nothing else, so that request is the whole
+/// handshake a person asked to see.
+private let initializeMethodMember = #""method":"initialize""#
+
+/// The text that stands in for the agent's pid when two reports are compared.
+///
+/// The process row names the pid of the agent that run started. Two runs start
+/// two agents, so the pid is the one part of the report that changes from run
+/// to run while the report stays the same.
+private let agentPidPlaceholder = "<pid>"
+
 /// `acp-client doctor` end to end: the report, the JSON form, and the verdict.
 ///
 /// Serialized and time-limited, in the same way as every other suite in this
@@ -86,6 +102,9 @@ private let okStatusValue = "ok"
     .timeLimit(.minutes(doctorSuiteTimeLimitMinutes))
 )
 struct DoctorCommandTests {
+    /// The text that stands before the unique part of a pid file's name.
+    private static let pidFileNamePrefix = "acp-client-doctor-frames-agent-pid-"
+
     /// Runs one `doctor` against a stub-agent script, and gives back its report.
     ///
     /// - Parameters:
@@ -127,6 +146,34 @@ struct DoctorCommandTests {
         try #require(entry[key] as? String, "the check entry \(entry) carries no \(key)")
     }
 
+    /// Runs one `doctor` over a well-behaved agent that records its pid, and
+    /// gives back the report with that pid replaced by ``agentPidPlaceholder``.
+    ///
+    /// Each call writes its own script and its own pid file, because the stub
+    /// writes the file whole and a second run over the same script would
+    /// replace the first pid.
+    ///
+    /// - Parameter options: The options of §6.1 to put before the separator.
+    /// - Returns: The finished run, and its report with the pid replaced.
+    /// - Throws: A run failure, the bound of ``doctorRunBound``, or a
+    ///   requirement failure when the report does not name the pid at all.
+    private static func doctorReportWithoutAgentPid(
+        options: [String]
+    ) async throws -> (result: CLIResult, report: String) {
+        let pidFile = temporaryFileURL(prefix: pidFileNamePrefix)
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let script = try makeWellBehavedAgent(pidFile: pidFile.path)
+        defer { removeAgentScript(script) }
+
+        let (result, report) = try await doctor(over: script, options: options)
+
+        // The replacement means something only when the report names the
+        // pid, so a report that does not is a failure of this helper.
+        let pid = "\(try recordedAgentPid(in: pidFile))"
+        try #require(report.contains(pid), "the report names no pid: \"\(report)\"")
+        return (result, report.replacingOccurrences(of: pid, with: agentPidPlaceholder))
+    }
+
     @Test("a well-behaved agent gets a report on stdout, nothing on stderr, and exit 0")
     func aWellBehavedAgentPassesAndExitsZero() async throws {
         let script = try makeWellBehavedAgent()
@@ -155,6 +202,45 @@ struct DoctorCommandTests {
         for name in AgentCommandDoctor.checkNamesInOrder {
             #expect(report.contains(name), "the report holds no \(name) row: \"\(report)\"")
         }
+    }
+
+    @Test("--frames writes the marked initialize request and answer to standard error")
+    func framesWritesTheHandshakeToStandardError() async throws {
+        let script = try makeWellBehavedAgent()
+        defer { removeAgentScript(script) }
+
+        let (result, _) = try await Self.doctor(over: script, options: ["--frames"])
+
+        #expect(result.exitCode == doctorPassedExitCode)
+        let reported = lines(of: result.standardError)
+        let outbound = reported.filter { $0.hasPrefix(FrameTeeTransport.outboundMark) }
+        let inbound = reported.filter { $0.hasPrefix(FrameTeeTransport.inboundMark) }
+        #expect(
+            outbound.contains { $0.contains(initializeMethodMember) },
+            "no outbound line carried the initialize request: \(reported)"
+        )
+        #expect(
+            inbound.contains { $0.contains(stubAgentName) },
+            "no inbound line carried the initialize answer: \(reported)"
+        )
+        // Every line carried a direction mark, so the report reached standard
+        // error not at all: the frames are the one thing the flag adds there.
+        #expect(outbound.count + inbound.count == reported.count, "stderr held \(reported)")
+    }
+
+    @Test("the report on stdout is the same with --frames and without, apart from the pid")
+    func framesLeavesTheReportOnStandardOutputUnchanged() async throws {
+        let plain = try await Self.doctorReportWithoutAgentPid(options: [])
+        let framed = try await Self.doctorReportWithoutAgentPid(options: ["--frames"])
+
+        #expect(plain.result.exitCode == doctorPassedExitCode)
+        #expect(framed.result.exitCode == doctorPassedExitCode)
+        // Byte equality is what pins "the frames reach stdout not at all": one
+        // teed line on the wrong descriptor fails this.
+        #expect(
+            Data(framed.report.utf8) == Data(plain.report.utf8),
+            "the --frames report was \"\(framed.report)\", the plain report \"\(plain.report)\""
+        )
     }
 
     @Test("an agent that writes a banner to stdout is reported as an error, and exits 1")

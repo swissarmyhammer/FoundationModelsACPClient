@@ -36,8 +36,30 @@ comments:
     - evidence: `swift test` (clean build) — 223 tests, 19 suites, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests` (clean build) — 85 tests, 12 suites, 0 failures, 0 warnings, 0 skipped.
     - next: ready for review.
   timestamp: 2026-09-05T13:05:55.874070+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rtvvf6w3rhjdd031bryadd
+  text: |-
+    ### commit — changed
+    - evidence: f0f6eb3 refactor(integration-tests): fold makeNewSessionRefusingAgent onto the shared stub-agent factory
+  timestamp: 2026-09-05T13:06:59.174028+00:00
+- actor: claude-code
+  id: 01m1rtz476fj0zv3te6t5t6494
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit f0f6eb3). 0 findings, 7 validator runs attempted, 0 failed. 1 file reviewed. The 4 `.kanban/` files were excluded by `.reviewignore`.
+    - next: none. The task moved from `review` to `done`.
+  timestamp: 2026-09-05T13:08:46.438186+00:00
+- actor: claude-code
+  id: 01m1rtzks859w6tnvp1y0kzdp4
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — `IntegrationTests/.../Support/StubAgents.swift`: `makeAgent(pidFile:initialize:newSession:)` with defaults; `makeNewSessionRefusingAgent` calls it with `newSession: .refuses`. Counterfactual: the integration build failed at the call site before the widening.
+    - test: green — root 223/223 in 19 suites, integration 85/85 in 12 suites, 0 warnings, 0 skipped, on a clean build
+    - commit: f0f6eb3
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T13:09:02.376285+00:00
+position_column: done
+position_ordinal: a880
 title: Fold makeNewSessionRefusingAgent onto the shared stub-agent factory
 ---
 ## What
