@@ -108,6 +108,25 @@ struct CLITestSupportTests {
     /// `AcpClientVersionTests` pins the constant to.
     private static let semanticVersionComponentCount = 3
 
+    /// The text the two drain tests put through their pipe.
+    private static let drainedText = "one line of standard error\n"
+
+    /// How many milliseconds ``openWriterGrace`` runs for.
+    private static let openWriterGraceMilliseconds = 200
+
+    /// The grace the still-open-writer drain test waits out in full.
+    ///
+    /// Short on purpose: that test spends the whole of it, and a suite must not
+    /// pay the runner's own grace for one negative assertion.
+    private static let openWriterGrace: Duration = .milliseconds(openWriterGraceMilliseconds)
+
+    /// The grace the closed-writer drain test must NOT wait out.
+    ///
+    /// Long on purpose: the claim there is that the drain ends at the end of
+    /// file rather than at its deadline, and a short grace would make a weak
+    /// claim of it.
+    private static let closedWriterGrace: Duration = TransportTestDeadline.limit
+
     /// The locator finds an executable file, which is what proves that the
     /// test target's dependency on the `acp-client` product made SwiftPM build
     /// the binary beside this test bundle.
@@ -133,6 +152,54 @@ struct CLITestSupportTests {
             "stdout was \"\(reported)\""
         )
         #expect(result.standardError.isEmpty)
+    }
+
+    /// The drain hands back what arrived while a writer still holds the pipe.
+    ///
+    /// This is the claim the whole runner rests on. A run that LEAKED a process
+    /// leaves that process holding the harness's own stderr write end open, and
+    /// a blocking read of that pipe never returns: the leak would then read as a
+    /// wedged suite rather than as the failed expectation the test came to make.
+    @Test func theDrainGivesBackWhatArrivedWhileAWriterStillHoldsThePipe() async throws {
+        let pipe = Pipe()
+        let drain = PipeDrain(pipe.fileHandleForReading)
+        defer { drain.tearDown() }
+        defer { try? pipe.fileHandleForWriting.close() }
+        try pipe.fileHandleForWriting.write(contentsOf: Data(Self.drainedText.utf8))
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let drained = await drain.bytes(waitingUpTo: Self.openWriterGrace)
+        let elapsed = clock.now - started
+
+        #expect(String(decoding: drained, as: UTF8.self) == Self.drainedText)
+        #expect(
+            elapsed >= Self.openWriterGrace,
+            "the drain gave up after \(elapsed), before its grace of \(Self.openWriterGrace) ended"
+        )
+    }
+
+    /// The drain ends the moment the last writer closes, and waits out no grace.
+    ///
+    /// It is the other half of the claim above: the deadline is what a leak
+    /// costs, and a run that left nothing behind pays none of it.
+    @Test func theDrainEndsWhenTheLastWriterCloses() async throws {
+        let pipe = Pipe()
+        let drain = PipeDrain(pipe.fileHandleForReading)
+        defer { drain.tearDown() }
+        try pipe.fileHandleForWriting.write(contentsOf: Data(Self.drainedText.utf8))
+        try pipe.fileHandleForWriting.close()
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let drained = await drain.bytes(waitingUpTo: Self.closedWriterGrace)
+        let elapsed = clock.now - started
+
+        #expect(String(decoding: drained, as: UTF8.self) == Self.drainedText)
+        #expect(
+            elapsed < Self.closedWriterGrace,
+            "the drain waited \(elapsed), the whole grace of \(Self.closedWriterGrace)"
+        )
     }
 }
 

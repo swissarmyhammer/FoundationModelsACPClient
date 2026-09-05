@@ -142,6 +142,135 @@ comments:
       reachable failure) and ^c1ys406 (the teardown blocks when the group kill
       misses). ^cen6s76 was narrowed by a comment.
   timestamp: 2026-09-05T03:45:38.456412+00:00
+- actor: claude-code
+  id: 01m1qv8651yep6adv27dkff62v
+  text: |
+    ### review — findings
+    - scope: `review sha d08d44b~1..d08d44b`, 3 source files, `.kanban/` excluded
+    - engine: 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed
+    - directed verification raised 3 findings, all on added lines of `NoLeakedAgentTests.swift`: lines 39, 85 and 63
+    - verified TRUE: the `waitpid`/`ECHILD` reasoning; `kill(pid, 0)` reaches a zombie; all 12 "already covered" rows exist by name; `--cwd` cannot fail from a command line; no usage error can follow a spawn
+    - verified FALSE: that the zombie row bites. A parent that exits hands its unreaped children to `launchd`, which reaps them at once, so a reading taken after `acp-client` exits cannot tell a reap from a leak
+    - ^c1ys406 is correctly separate work: `Sources/FoundationModelsACPClient/AgentProcess.swift` is not in this delta, and a defect on an unchanged line is not a finding under a diff op
+    - evidence left clean: no file under `Sources/`, `Tests/` or `IntegrationTests/` was modified, and no `swift-test` process runs
+    - next: correct the three claims, then re-review
+  timestamp: 2026-09-05T03:54:28.897453+00:00
+- actor: claude-code
+  id: 01m1qv9hmbdyf5w7kf8b41ye8e
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 3 files. 11 new §11 rows; 12 already-covered rows deliberately not repeated; two paths proven not to exist.
+    - test: green — root 215 passed in 17 suites, integration 75 passed in 12 suites, 0 warnings
+    - commit: d08d44b test(integration): prove no agent process outlives the run
+    - review: findings — NoLeakedAgentTests.swift:39, :63, :85
+
+    The review verified the map: all 12 "already covered" rows exist by name elsewhere, the 11 added rows are present, and no exit path is missing from both lists. Both "does not exist" claims are true — `sessionWorkingDirectory(for:)` always builds an absolute path, and the prompt resolves at RunCommand.swift:105 while the spawn is at :192, so no usage error can follow a spawn.
+
+    The finding that matters is a measured one. The implementer's `waitpid` reasoning is right — the stub agent is a grandchild, so `waitpid` from the test answers the same either way — but the conclusion does not follow. The reading is taken AFTER `acp-client` exits, and a parent that exits hands its unreaped children to `launchd`, which reaps them at once. Measured:
+    - while the parent still runs, the unreaped child is REACHABLE
+    - after the parent exited, the same pid is GONE (ESRCH)
+
+    So `processExists` is sound for "still alive" and CANNOT FAIL for "was reaped" — the same defect the file header raises against `waitpid`. The acceptance row "is reaped, not left as a zombie" is asserted by nothing.
+
+    The second finding explains something this session already paid for. `killpg`→`kill` did not make a test FAIL; it made one hang for 240 s. `runAcpClient` SIGKILLs only `acp-client` on its bound, and `AgentProcess.spawnChild` redirects only descriptors 0 and 1, so a surviving agent inherits and holds open the harness's stderr write end, and `FileHandle.readToEnd()` never returns. A leaked agent WEDGES the suite instead of failing it — which is exactly the wedged `swift-test` processes an earlier review left behind on this board.
+
+    ^c1ys406 is genuinely separate: `AgentProcess.swift` is outside this commit's delta.
+  timestamp: 2026-09-05T03:55:13.419189+00:00
+- actor: claude-code
+  id: 01m1qvygak3crc5d447jqdbf5n
+  text: |
+    ### Picked the card back up from `review`, and measured both findings
+
+    **Baseline.** `swift test --package-path IntegrationTests --filter NoLeakedAgentTests`
+    — 3 tests in 1 suite, passed, 10.5 s.
+
+    **Finding at :63 reproduced (the harness wedge).** The `killpg`→`kill` mutation
+    of `AgentProcessState.terminateCurrent()` was applied again, and the suite was
+    run under `timeout 180`. It printed NOT ONE test line and `timeout` killed it at
+    180 s (exit 124). So the leak really does read as a hang and not as a row. The
+    file was restored from a copy saved in the same shell command, and
+    `git status --porcelain` showed no source file changed.
+
+    **Finding at :39 and :85 confirmed, and the seam that DOES carry the reap was
+    found.** `AgentProcessTests.killingAgentSurfacesDisconnectedState` is the test
+    that bites: `AgentProcess` spawns the agent from the TEST process, so the test
+    is the agent's parent and it stays alive to take the reading. Measured with a
+    second mutation — `waitpid` removed from `terminateCurrent()`, the `killpg`
+    left in place:
+
+        killingAgentSurfacesDisconnectedState ... failed at AgentProcessTests.swift:140
+        spawnedAgentLeavesNoStrayPidAfterTeardown ... failed at :157
+        agentChildProcessIsCleanedUpWithTheGroup ... failed at :181
+        fullSessionOverStdioToForeignAgent ... failed
+        4 tests, 4 issues, 40.1 s
+
+    Every one of those four is `!processExists(pid)` on a pid that the mutation
+    leaves as a ZOMBIE. So the reap claim is carried, and it is carried where it can
+    be: inside the parent. Restored from a copy in the same command; `git status`
+    clean.
+
+    **What follows for the mid-turn row.** The reap cannot be asserted from
+    `NoLeakedAgentTests` at all. `AgentProcess` reaps on the EOF branch of its
+    reader thread, which runs microseconds before `acp-client` exits, so there is no
+    window a poll from outside can catch. Holding the binary open longer does not
+    help either: the only way to keep it open past the agent's death is a grandchild
+    holding the stdout pipe, and on that path a zombie is the CORRECT behaviour
+    until teardown. So the row changes to name the seam that proves it.
+  timestamp: 2026-09-05T04:06:40.211290+00:00
+- actor: claude-code
+  id: 01m1qwaph3bmvw8s8trh6snj2w
+  text: |
+    ### What each finding got, and how each was proven
+
+    **:63, the harness wedge.** The finding offered two ways. The FIRST is not open
+    to this harness: `Process` gives `acp-client` the TEST RUNNER's own process
+    group, so a `killpg` on the bound would kill the test runner. The second way is
+    taken. `Support/CLITestSupport.swift` now holds `PipeDrain`, which installs a
+    readability handler on each of the run's two pipes and takes the bytes as they
+    arrive, and `bytes(waitingUpTo:)`, which waits for the end of file and gives up
+    at `pipeDrainGrace` (2 s) after the run ended. `readToEnd(_:)` and
+    `drainedBytes(from:)` are deleted. `exited(_:within:)` now goes through one new
+    `polled(within:until:)`, so the file keeps ONE poll loop rather than two.
+    `DrainedPipe` carries the shared state in a `Mutex`, for the reason
+    `AgentProcessState` does: a readability handler cannot await.
+
+    Two new tests in `CLITestSupportTests` hold the two halves:
+    `theDrainGivesBackWhatArrivedWhileAWriterStillHoldsThePipe` (the bytes come
+    back, and the drain really waited out its grace) and
+    `theDrainEndsWhenTheLastWriterCloses` (the bytes come back BEFORE the grace
+    ends, so a healthy run pays none of it).
+
+    **:39 and :85, the zombie claim.** The reap cannot be measured while the binary
+    runs. `AgentProcess` reaps on the EOF branch of its reader thread, which runs
+    microseconds before `acp-client` exits, and the only way to hold the binary open
+    past the agent's death is a grandchild holding the stdout pipe — on that path a
+    zombie is the CORRECT state until teardown, so nothing honest can be asserted
+    there either. So the card takes the other option the finding names. The file
+    header now opens "**This file claims no reap, and it cannot.**" and states the
+    `launchd` reparenting, the measurement, and the seam that does carry the reap.
+    The case doc of `runReachesAnAgentThatGoesAwayMidTurn` no longer claims a
+    `waitpid` the row cannot see. The acceptance row and the Tests row on the card
+    changed to match.
+
+    ### The re-run mutation, which is the proof for :63
+
+    `killpg`→`kill` in `AgentProcessState.terminateCurrent()`, the same mutation as
+    before:
+
+    - BEFORE the fix: no test line printed at all, and `timeout` killed the run at
+      180 s (exit 124).
+    - AFTER the fix: **failed in 16.5 s with 3 issues**, each naming its pid —
+      `the process with pid 66357 outlived run, against an agent that leaves a child behind`.
+
+    The file was saved and restored in the same shell command both times, and
+    `git status --porcelain` after each restore showed no change under `Sources/`.
+    `pgrep -fl "swift-test|swiftpm-testing-helper|xctest|acp-stub-agent|acp-client"`
+    answered `none` after each.
+  timestamp: 2026-09-05T04:13:19.779754+00:00
+- actor: claude-code
+  id: 01m1qwc05v48hv26tz8f7k7y52
+  text: "### implement — changed\n- evidence: 3 files —\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/CLITestSupport.swift`\n  (the bounded `PipeDrain`, `DrainedPipe`, `pipeDrainGrace`, the one\n  `polled(within:until:)`; `readToEnd(_:)` and `drainedBytes(from:)` deleted),\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/CLITestSupportTests.swift`\n  (two new drain tests),\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/NoLeakedAgentTests.swift`\n  (the header, the `noLeakRunBound` doc, and the mid-turn case doc).\n  `swift test` — 215 tests in 17 suites, passed. \n  `swift test --package-path IntegrationTests` — 77 tests in 12 suites, passed,\n  19.1 s. No warnings in either package.\n  Finding :63 proven fixed by the re-run mutation: `killpg`→`kill` now FAILS in\n  16.5 s with 3 named issues, where before the fix it printed nothing and was\n  killed at 180 s.\n  Findings :39 and :85 proven by the second mutation: `waitpid` removed from\n  `terminateCurrent()` reds 4 `AgentProcessTests` rows, which is the seam the\n  card now names for the reap.\n  All three review findings are checked, and the acceptance row and the Tests\n  row that carried the unassertable zombie claim were changed.\n- next: `/review`.\n"
+  timestamp: 2026-09-05T04:14:02.427696+00:00
 depends_on:
 - 01M1MPG0WT31XJVP37C3CAT35C
 - 01M1MPJRCZKG9CEZ7N5TDX6EDK
@@ -196,33 +325,55 @@ the CLI source, so nothing here needed a correction.
 
 - [x] Each of the six exit paths leaves no agent process.
 - [x] A grandchild of the agent is gone too.
-- [x] An agent that dies in the middle of a turn gives exit 1 and is reaped,
-      not left as a zombie.
+- [x] An agent that dies in the middle of a turn gives exit 1, and no process
+      outlives the run.
+      **The row changed, because the old wording claimed what nothing checks.**
+      It read "and is reaped, not left as a zombie". That cannot be asserted
+      from outside the run at all: every reading of `NoLeakedAgentTests` is
+      taken AFTER `acp-client` exits, and a parent that exits hands its
+      unreaped children to `launchd`, which reaps them at once — so the pid is
+      gone whether or not `acp-client` reaped it. Measured: while the parent
+      still runs, an unreaped child is REACHABLE; after the parent exits, the
+      same pid answers `ESRCH`. The reap is proven where the reader IS the
+      parent and stays alive to take the reading:
+      `AgentProcessTests.killingAgentSurfacesDisconnectedState`. See the Tests
+      section.
 - [x] The suite fails loudly, naming the pid and the exit path, when a process
-      is still alive.
+      is still alive. Proven by mutation, twice: see the Tests section.
 
 ## Tests
 
 - [x] `NoLeakedAgentTests.swift`, one test per acceptance row above.
-- [x] One test asserts the zombie case directly: after the binary exits,
-      `waitpid` for the agent pid reports no such process, so the pid was
-      reaped and not merely killed.
-      **The instrument changed, and the row stands.** `waitpid` answers
-      `ECHILD` for every pid that is not a child of the caller. The stub agent
-      is a child of `acp-client` and a GRANDCHILD of the test, so `waitpid`
-      from the test answers the same whether the agent is alive or dead: such
-      an assertion cannot fail. `processExists(_:)` is the instrument that
-      bites, because `kill(pid, 0)` still reaches a ZOMBIE, so a pid that is
-      gone is a pid that was reaped. The zombie claim is carried by
-      `runReachesAnAgentThatGoesAwayMidTurn` (the agent dies while the binary
-      still runs, so the binary is what owes the `waitpid`) beside
-      `runReachesAnAgentThatLeftAChild`. The file header states the whole
-      argument.
+- [x] The reap is asserted where it can be:
+      `AgentProcessTests.killingAgentSurfacesDisconnectedState` kills the agent
+      that `AgentProcess` spawned from the TEST process and then asserts the
+      pid is gone. The test is the agent's parent and it stays alive to take
+      the reading, so a pid left as a ZOMBIE fails the assertion.
+      **Measured with the `waitpid` taken out of
+      `AgentProcessState.terminateCurrent()`**: that row and its three
+      neighbours in `AgentProcessTests` all go red — 4 tests, 4 issues, 40.1 s.
+      `waitpid` was refused as the instrument, and the reasoning stands:
+      `waitpid` answers `ECHILD` for every pid that is not a child of the
+      caller, and the stub agent is a child of `acp-client` and a GRANDCHILD of
+      the test process. `processExists(_:)` reads `kill(pid, 0)`, which is
+      sound for "is anything STILL ALIVE" and cannot fail for the reap. The
+      file header of `NoLeakedAgentTests.swift` states the whole argument and
+      names the seam that carries the reap.
 - [x] One test runs the whole set twice in a row and asserts the second run is
       unaffected by the first, which catches a leaked descriptor.
+- [x] A LEAKED agent fails the suite as a leak, and never wedges it.
+      `AgentProcess` redirects only descriptors 0 and 1, so a surviving agent
+      holds the harness's own stderr write end open, and
+      `FileHandle.readToEnd()` waits for every write end to close with no
+      cancellation reaching it. `runAcpClient` reads both pipes as the bytes
+      ARRIVE — `PipeDrain` in `Support/CLITestSupport.swift` — and gives up at
+      `pipeDrainGrace` (2 s) after the run ended. Two tests in
+      `CLITestSupportTests` hold the two halves of that claim: a drain whose
+      writer still holds the pipe hands back what arrived, and a drain whose
+      writer closed ends before its grace.
 - [x] Run `swift test --package-path IntegrationTests`. Every assertion
-      passes. 75 tests in 12 suites, 19.1 s. The root `swift test` also passes:
-      215 tests in 17 suites.
+      passes. 77 tests in 12 suites, 19.1 s. The root `swift test` also passes:
+      215 tests in 17 suites. No warnings in either.
 
 ## The complete §11 map
 
@@ -244,12 +395,13 @@ Every exit path of every subcommand, and where its pid is read.
 | `doctor` CHECKS — the agent lingers | `anAgentThatIgnoresAClosedStdinWarnsOnTheTeardownRow` |
 | `doctor` CHECKS — the agent leaves a child | `anAgentThatLeavesAChildWarnsOnTheTeardownRow` |
 | `AgentProcess` (the library) — a grandchild | `AgentProcessTests.agentChildProcessIsCleanedUpWithTheGroup` |
+| `AgentProcess` (the library) — the REAP of a dead agent | `AgentProcessTests.killingAgentSurfacesDisconnectedState` |
 
 ### Added by this card, in `NoLeakedAgentTests.swift`
 
 | The path | Exit code | Row |
 |---|---|---|
-| `run` — the agent goes away in the middle of the turn (the zombie row) | 1 | `runReachesAnAgentThatGoesAwayMidTurn` |
+| `run` — the agent goes away in the middle of the turn | 1 | `runReachesAnAgentThatGoesAwayMidTurn` |
 | `run` — the agent refuses `session/new` | 1 | `runReachesAnAgentThatRefusesTheSession` |
 | `run` — the agent leaves a child, through the BINARY | 0 | `runReachesAnAgentThatLeftAChild` |
 | `probe` — the agent refuses `session/new` | 1 | `probeReachesAnAgentThatRefusesTheSession` |
@@ -278,3 +430,18 @@ Every exit path of every subcommand, and where its pid is read.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-09-04 22:47)
+
+> Scope: `review sha d08d44b~1..d08d44b` — reviewed the diffs only — lines this change added or modified. 3 file(s) reviewed, 10 not reviewed (`.kanban/`, from `.reviewignore`).
+
+The validator fleet returned zero findings. The rows below come from the
+directed verification of the four judgement points, and each one lands on a
+line this commit added.
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/NoLeakedAgentTests.swift:39` `tests/assertion-cannot-fail` — the header states "`kill(pid, 0)` still reaches a ZOMBIE, so a pid that is gone is a pid that was reaped and not merely killed". The reading is taken AFTER `acp-client` has exited. When a parent exits, its unreaped children are reparented to `launchd` and reaped at once, so the pid is gone whether or not `acp-client` reaped it. Measured on this machine: while the parent still runs, an unreaped child is REACHABLE; after the parent exits, the same pid is GONE (ESRCH). The instrument is right for "still alive" and cannot fail for "was reaped" — the same defect the header raises against `waitpid`. Correct the header to claim only what the instrument measures, or move the reading to a moment when `acp-client` is still alive.
+      **FIXED.** The header now opens "**This file claims no reap, and it cannot.**", states the `launchd` reparenting and the measurement, says `processExists(_:)` is sound only for "is anything STILL ALIVE", and names the seam that does carry the reap.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/NoLeakedAgentTests.swift:85` `tests/assertion-cannot-fail` — `runReachesAnAgentThatGoesAwayMidTurn` is documented as the zombie row: "a binary that killed without reaping would leave the pid in the table". It would not: the pid leaves the table when `acp-client` exits, whatever `acp-client` did. So the acceptance row "An agent that dies in the middle of a turn gives exit 1 and is reaped, not left as a zombie" is asserted by no test in this suite. Either assert the reap while the binary still runs, or state on the card that the reap is proven by `AgentProcess`'s own unit seam and not by this sweep.
+      **FIXED.** The reap cannot be asserted while the binary runs: `AgentProcess` reaps on the EOF branch of its reader thread, microseconds before `acp-client` exits, and the only way to hold the binary open past the agent's death is a grandchild holding the stdout pipe — on which path a zombie is the CORRECT state until teardown. So the card takes the other option: the acceptance row and the Tests row above now say the reap is proven by `AgentProcessTests.killingAgentSurfacesDisconnectedState`, and the case doc of `runReachesAnAgentThatGoesAwayMidTurn` no longer claims it.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/NoLeakedAgentTests.swift:63` `tests/harness-hang` — the doc of `noLeakRunBound` states "a run that hangs fails as the hang it is". It does not, in the one failure this suite exists to detect. On the bound, `runAcpClient` sends `SIGKILL` to `acp-client` ALONE, and `AgentProcess.spawnChild` redirects only descriptors 0 and 1, so a surviving agent inherits and holds open the harness's stderr write end. `async let standardErrorData = readToEnd(...)` wraps the synchronous, non-cancellable `FileHandle.readToEnd()`, so the implicit await at scope exit never returns. A leaked agent WEDGES the test instead of failing it — which is what the implementer saw as "one test unreturned after 240 s", and what left wedged `swift-test` processes on an earlier review. Make the bound kill the agent's process group as well as the binary, or drain stderr with a cancellable read, so the guard reports a leak rather than hanging on it.
+      **FIXED, by the second of the two ways.** The first is not open: `Process` puts `acp-client` in the TEST RUNNER's own process group, so a `killpg` there would kill the test runner. `runAcpClient` now drains both pipes through `PipeDrain`, which reads them as the bytes arrive and gives up `pipeDrainGrace` after the run ended; `readToEnd(_:)` and `drainedBytes(from:)` are gone. Proven by re-running the `killpg`→`kill` mutation: before the fix the suite printed nothing and `timeout` killed it at 180 s; after the fix it FAILS in 16.5 s with 3 named issues, "the process with pid 66357 outlived run, against an agent that leaves a child behind".

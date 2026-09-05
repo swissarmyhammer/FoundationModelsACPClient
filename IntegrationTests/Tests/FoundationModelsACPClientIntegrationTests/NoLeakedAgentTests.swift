@@ -9,8 +9,8 @@ import Testing
 // Every row here drives the real `acp-client` binary against a real foreign
 // agent, reads the agent's own pid out of a file the agent wrote, and asks
 // `kill(pid, 0)` whether anything is still there. The reading is taken from
-// OUTSIDE the finished run, which is the only place the claim can be measured
-// at all.
+// OUTSIDE the finished run, which is the only place the no-leak claim can be
+// measured at all.
 //
 // This file holds the paths no other suite proves, and it repeats none of
 // them. The rest of the sweep lives where the behaviour it belongs to is
@@ -32,14 +32,25 @@ import Testing
 // ends the moment it starts, the `doctor` SUBCOMMAND, and a spawn that fails
 // before there is an agent at all.
 //
-// Two instruments were considered and one was refused. `waitpid` cannot state
-// the reap here: it answers `ECHILD` for every pid that is not a child of the
-// caller, and the stub agent is a child of `acp-client` and a GRANDCHILD of
-// this process, so `waitpid` answers the same whether the agent is alive or
-// dead. ``processExists(_:)`` is the instrument that bites: `kill(pid, 0)`
-// still reaches a ZOMBIE, so a pid that is gone is a pid that was reaped and
-// not merely killed. The row that carries the zombie claim is the agent that
-// dies in the middle of a turn, beside the row whose agent leaves a child.
+// **This file claims no reap, and it cannot.** Two instruments were weighed,
+// and neither states the reap from out here. `waitpid` answers `ECHILD` for
+// every pid that is not a child of the caller, and the stub agent is a child of
+// `acp-client` and a GRANDCHILD of this process, so `waitpid` from here answers
+// the same whether the agent is alive or dead. ``processExists(_:)`` reads
+// `kill(pid, 0)`, which still reaches a ZOMBIE, so it is sound for the one
+// question this file asks — is anything STILL ALIVE — and it cannot fail for
+// the reap either: every reading here is taken after `acp-client` has exited,
+// and a parent that exits hands its unreaped children to `launchd`, which reaps
+// them at once. Measured on this machine: while the parent still runs, an
+// unreaped child is REACHABLE; after the parent exited, the same pid answers
+// `ESRCH`. So the pid is gone whether or not `acp-client` reaped it.
+//
+// The reap is proven where the reader IS the parent and stays alive to take the
+// reading: `AgentProcessTests.killingAgentSurfacesDisconnectedState` kills the
+// agent that `AgentProcess` spawned from THIS process and then asserts the pid
+// is gone, which a zombie fails. Measured with the `waitpid` taken out of
+// `AgentProcessState.terminateCurrent()`: that row and its three neighbours all
+// go red.
 //
 // Nothing here can import the binary's own types: SwiftPM builds an executable
 // product for this test bundle to spawn, and it publishes no module to an other
@@ -61,6 +72,12 @@ private let noLeakRunBoundSeconds = 30
 /// It stands well over the slowest row — a `doctor` run, which pays the
 /// doctor's own settle interval and its teardown watch — and far under the
 /// suite's own backstop, so a run that hangs fails as the hang it is.
+///
+/// That holds for the failure this file exists to detect, and not by accident.
+/// A LEAKED agent inherits the harness's stderr write end, so a blocking read of
+/// that pipe would outlast this bound and wedge the suite. `runAcpClient` reads
+/// both pipes as the bytes arrive and gives up at a grace of its own instead, so
+/// a leak comes back here as a row that names its pid.
 private let noLeakRunBound: Duration = .seconds(noLeakRunBoundSeconds)
 
 /// The prompt every `run` row of this file sends.
@@ -82,9 +99,11 @@ enum NoLeakScenario: CaseIterable, Sendable, CustomStringConvertible {
     /// `run` against an agent that streams a chunk and then EXITS, with no
     /// `idle` update at all.
     ///
-    /// It is the zombie row. The agent dies while the binary is still running,
-    /// so the binary is the process that owes the `waitpid`, and a binary that
-    /// killed without reaping would leave the pid in the table.
+    /// The agent dies while the binary is still running, so this is the path on
+    /// which `AgentProcess` reaps from the EOF branch of its reader. The reap
+    /// itself is NOT what this row states — the file header says why, and names
+    /// the seam that does state it. What stands here is the §9 exit code, and
+    /// that no process outlived the run.
     case runReachesAnAgentThatGoesAwayMidTurn
 
     /// `run` against an agent that answers `initialize` and refuses

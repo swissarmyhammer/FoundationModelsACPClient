@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // The built `acp-client` binary, and the bounded runner the CLI suites drive it
 // with.
@@ -19,6 +20,20 @@ import Foundation
 // `isatty(3)` says about that one descriptor. A test process cannot make its
 // OWN standard input a terminal, so the terminal row is reached by opening a
 // pseudo-terminal and handing the child its slave end.
+//
+// The runner reads the child's two output pipes as the bytes ARRIVE, and gives
+// up on each at a deadline of its own. `FileHandle.readToEnd()` waits until
+// every write end of the pipe is closed, and no cancellation reaches it, so one
+// leaked process turns the whole call into a hang. That process is exactly what
+// the §11 suites exist to catch: `AgentProcess` redirects only descriptors 0
+// and 1, so an agent that outlived its run still holds THIS harness's stderr
+// write end open, and a blocking read of that pipe never returns. The bound on
+// the run cannot rescue it, because the bound may only signal `acp-client`
+// itself: `Process` puts the child in this process's own process group, so a
+// `killpg` there would kill the test runner. So the drain carries a bound
+// instead. It hands back whatever arrived once ``pipeDrainGrace`` has passed
+// with no end of file, and the test that asked then fails on the pid it came to
+// read rather than wedging the suite that asked it.
 
 /// The product name of the CLI these suites run, as `../Package.swift` declares
 /// it.
@@ -108,7 +123,7 @@ enum CLIStandardInput {
 /// run and then read back, and they differ in the ways a program that decided
 /// by descriptor kind would notice: a pipe cannot seek and a regular file can.
 enum CLIStandardOutput {
-    /// A pipe, drained on a task of its own while the run goes.
+    /// A pipe, drained as its bytes arrive while the run goes.
     case pipe
 
     /// A regular file, read back once the run has exited.
@@ -187,6 +202,12 @@ func acpClientBinaryURL() throws -> URL {
 /// races `initialize` against a limit of its own — states a longer one, so that
 /// the run this suite MEANS to take that long is not killed as a hang.
 ///
+/// The two streams are drained as their bytes arrive, and each is given up on
+/// ``pipeDrainGrace`` after the run ended. That is what keeps a LEAKED process a
+/// failed expectation rather than a wedged suite; the file header carries the
+/// whole argument. A run that leaked nothing reaches the end of file the moment
+/// it exits, so it spends none of that grace.
+///
 /// - Parameters:
 ///   - arguments: The command-line arguments for `acp-client`.
 ///   - standardInput: What the run gets on its standard input. The default is
@@ -228,15 +249,13 @@ func runAcpClient(
     process.standardError = standardErrorPipe
 
     try process.run()
-    // Every pipe drains on a child task that starts before the wait. A full
-    // pipe buffer blocks the child, so a run that wrote more than one buffer
-    // would never exit if the reads came after. The handles are bound out of
-    // the sink first: an `async let` sends whatever its expression touches, and
-    // the sink itself is read again below, after the wait.
-    let outputPipeReader = output.pipeReader
-    let errorPipeReader = standardErrorPipe.fileHandleForReading
-    async let drainedOutput = drainedBytes(from: outputPipeReader)
-    async let standardErrorData = readToEnd(errorPipeReader)
+    // Both pipes start draining before the wait. A full pipe buffer blocks the
+    // child, so a run that wrote more than one buffer would never exit if the
+    // reads came after.
+    let outputDrain = PipeDrain(output.pipeReader)
+    defer { outputDrain.tearDown() }
+    let errorDrain = PipeDrain(standardErrorPipe.fileHandleForReading)
+    defer { errorDrain.tearDown() }
     // The sender is a child of this call rather than a `Task` of its own, so
     // it cannot outlive the run: an `async let` the caller never reads is
     // cancelled and awaited when this function leaves, on the throw below as
@@ -251,10 +270,11 @@ func runAcpClient(
     // it here is what keeps it a child of this call rather than a task the
     // result outlives.
     await signalsSent
+    let drainedOutput = await outputDrain.bytes(waitingUpTo: pipeDrainGrace)
     return CLIResult(
         exitCode: process.terminationStatus,
-        standardOutput: try await output.bytesWritten(drainedFromPipe: drainedOutput),
-        standardError: try await standardErrorData
+        standardOutput: try output.bytesWritten(drainedFromPipe: drainedOutput),
+        standardError: await errorDrain.bytes(waitingUpTo: pipeDrainGrace)
     )
 }
 
@@ -447,10 +467,9 @@ private struct StandardOutputSink {
     /// The read end of the pipe behind ``destination``, or `nil` when the run
     /// writes a file.
     ///
-    /// It is the handle rather than the whole `Pipe`, because the caller binds
-    /// it out before it starts the draining task: an `async let` sends whatever
-    /// its expression touches, and the sink itself is read again after the
-    /// wait.
+    /// It is the handle rather than the whole `Pipe`, because a ``PipeDrain``
+    /// takes the read end alone: it installs a readability handler on that one
+    /// handle, and it needs nothing else the `Pipe` holds.
     let pipeReader: FileHandle?
 
     /// The file behind ``destination``, or `nil` when the run writes a pipe.
@@ -488,8 +507,8 @@ private struct StandardOutputSink {
 
     /// Everything the finished run wrote to its standard output.
     ///
-    /// - Parameter drained: What ``drainedBytes(from:)`` read off ``pipeReader``
-    ///   while the run went, which is empty for a file.
+    /// - Parameter drained: What ``PipeDrain`` read off ``pipeReader`` while the
+    ///   run went, which is empty for a file.
     /// - Returns: The bytes, whichever descriptor carried them.
     /// - Throws: The read failure of the file.
     func bytesWritten(drainedFromPipe drained: Data) throws -> Data {
@@ -553,30 +572,112 @@ private func openPseudoTerminal() throws -> (master: Int32, slave: Int32) {
     }
 }
 
-/// Reads one file handle to its end.
+// MARK: - Draining a pipe
+
+/// The number of seconds ``pipeDrainGrace`` covers.
+private let pipeDrainGraceSeconds = 2
+
+/// How long one finished run's pipes are given to reach their end of file.
 ///
-/// - Parameter handle: The handle to read.
-/// - Returns: Every byte the handle carried, which is empty at an immediate end
-///   of file.
-/// - Throws: The read failure of the handle.
-private func readToEnd(_ handle: FileHandle) throws -> Data {
-    try handle.readToEnd() ?? Data()
+/// A run that left nothing behind closes every write end as it exits, so the end
+/// of file lands at once and none of this grace is spent. A run that LEAKED a
+/// process reaches no end of file at all, and this is how long the harness waits
+/// before it takes what arrived and lets the test say so.
+private let pipeDrainGrace: Duration = .seconds(pipeDrainGraceSeconds)
+
+/// The bytes one pipe has carried, and whether its end of file came.
+///
+/// It stands between the queue Foundation calls a readability handler on and the
+/// task that waits for the reading. It is a `final class` with a `Mutex` rather
+/// than an `actor` for the reason `AgentProcessState` is one: the handler side
+/// is a callback that cannot await, so the state it writes must be reachable
+/// synchronously.
+private final class DrainedPipe: Sendable {
+    /// What one pipe has carried so far.
+    private struct Arrival {
+        /// Every byte read off the pipe.
+        var bytes = Data()
+
+        /// Whether a zero-length read reported the end of file.
+        var reachedEndOfFile = false
+    }
+
+    /// The arrival so far, under the lock both sides take.
+    private let arrival = Mutex(Arrival())
+
+    /// Every byte the pipe has carried so far.
+    var bytes: Data { arrival.withLock { $0.bytes } }
+
+    /// Whether the end of file has come.
+    var reachedEndOfFile: Bool { arrival.withLock { $0.reachedEndOfFile } }
+
+    /// Records one readability event.
+    ///
+    /// - Parameter chunk: What the event made available. Foundation reports the
+    ///   end of file as an empty chunk.
+    func record(_ chunk: Data) {
+        arrival.withLock { current in
+            if chunk.isEmpty {
+                current.reachedEndOfFile = true
+            } else {
+                current.bytes.append(chunk)
+            }
+        }
+    }
 }
 
-/// Drains one run's standard-output pipe, where the run was given a pipe at
-/// all.
+/// One run's pipe, read as its bytes arrive and given up on at a deadline.
 ///
-/// A `nil` handle is a run whose standard output went to a regular file, and a
-/// file needs no draining: nothing can block on it, and
-/// ``StandardOutputSink/bytesWritten(drainedFromPipe:)`` reads it once the run
-/// has exited.
-///
-/// - Parameter handle: The read end of the pipe, or `nil` for a file.
-/// - Returns: Every byte the pipe carried, or nothing for a file.
-/// - Throws: The read failure of the pipe.
-private func drainedBytes(from handle: FileHandle?) throws -> Data {
-    guard let handle else { return Data() }
-    return try readToEnd(handle)
+/// It is a value of its own because a blocking `FileHandle.readToEnd()` on a
+/// pipe a leaked process still holds open never returns, and no cancellation
+/// reaches it. The file header carries the whole argument.
+struct PipeDrain {
+    /// The read end being drained, or `nil` when the run wrote a regular file.
+    private let handle: FileHandle?
+
+    /// What has arrived off ``handle``.
+    private let drained = DrainedPipe()
+
+    /// Starts draining `handle`.
+    ///
+    /// - Parameter handle: The read end to drain, or `nil` for a run whose
+    ///   standard output went to a regular file. A file needs no draining —
+    ///   nothing can block on it — so an absent handle is an immediate end of
+    ///   file.
+    init(_ handle: FileHandle?) {
+        self.handle = handle
+        guard let handle else {
+            drained.record(Data())
+            return
+        }
+        let arriving = drained
+        handle.readabilityHandler = { source in
+            let chunk = source.availableData
+            arriving.record(chunk)
+            if chunk.isEmpty {
+                // Foundation goes on calling the handler after the end of file,
+                // and a handler left installed would spin on it.
+                source.readabilityHandler = nil
+            }
+        }
+    }
+
+    /// Every byte the pipe carried, once its end of file came or `grace` ended.
+    ///
+    /// - Parameter grace: The longest to wait for the end of file.
+    /// - Returns: Every byte that arrived, whether or not the end of file came.
+    func bytes(waitingUpTo grace: Duration) async -> Data {
+        _ = await polled(within: grace) { drained.reachedEndOfFile }
+        return drained.bytes
+    }
+
+    /// Stops the draining and gives the read end back.
+    ///
+    /// The teardown is best effort, for the reason
+    /// ``StandardInputSource/tearDown()`` states.
+    func tearDown() {
+        handle?.readabilityHandler = nil
+    }
 }
 
 /// The smallest pid this support will ever signal.
@@ -619,10 +720,24 @@ private func deliver(_ signals: CLISignals?, to pid: pid_t, within limit: Durati
 ///   - limit: The longest time to wait.
 /// - Returns: `true` when the process exited before the limit ended.
 private func exited(_ process: Process, within limit: Duration) async -> Bool {
+    await polled(within: limit) { !process.isRunning }
+}
+
+/// Polls `condition` until it holds, and gives up at `limit`.
+///
+/// This is the one poll loop of this file. ``eventually(within:_:)`` cannot
+/// stand in for it: that helper takes a `@MainActor` condition, and neither the
+/// process this file waits on nor the pipe it drains belongs to that actor.
+///
+/// - Parameters:
+///   - limit: The longest time to wait.
+///   - condition: The condition to poll.
+/// - Returns: `true` when the condition held before the limit ended.
+private func polled(within limit: Duration, until condition: () -> Bool) async -> Bool {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: limit)
-    while process.isRunning && clock.now < deadline {
+    while !condition() && clock.now < deadline {
         try? await Task.sleep(for: TransportTestDeadline.pollInterval)
     }
-    return !process.isRunning
+    return condition()
 }
