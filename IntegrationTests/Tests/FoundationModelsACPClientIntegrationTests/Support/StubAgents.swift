@@ -72,18 +72,31 @@ let stubAgentBannerLine = "stub-agent 1.0.0 — ready"
 /// refusal line quotes back.
 let stubAgentPermissionTitle = "Run the stub tool?"
 
+/// The one authentication method a stub agent advertises beside an element
+/// this build cannot read.
+///
+/// It is an `agent` method, for the reason ``stubAgentAuthMethods`` states.
+let stubAgentReadableAuthMethod: AuthMethod = .agent(
+    AuthMethodAgent(
+        methodId: AuthMethodId(rawValue: "stub-oauth"),
+        name: "Sign in with the stub"
+    )
+)
+
+/// The number of elements ``makeUnreadableAuthMethodAgent(pidFile:)`` puts in
+/// its `authMethods` array that this build cannot read.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 reports this count,
+/// so the test that drives that agent reads it from here.
+let stubAgentUnreadableAuthMethodCount = 1
+
 /// The authentication methods a probe stub agent advertises.
 ///
 /// Both are `agent` methods. An agent may advertise the `terminal` method only
 /// when the client enabled terminal authentication, and this client does not:
 /// commit 3f30444 pinned that decision.
 let stubAgentAuthMethods: [AuthMethod] = [
-    .agent(
-        AuthMethodAgent(
-            methodId: AuthMethodId(rawValue: "stub-oauth"),
-            name: "Sign in with the stub"
-        )
-    ),
+    stubAgentReadableAuthMethod,
     .agent(
         AuthMethodAgent(
             methodId: AuthMethodId(rawValue: "stub-token"),
@@ -487,6 +500,34 @@ func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
             stopReason: .endTurn,
             pidFile: pidFile,
             initialize: .reportsUnreadableCapabilities
+        )
+    )
+}
+
+/// Writes a stub agent that answers `initialize` with an `authMethods` array
+/// that holds one method this build can read beside one element it cannot.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 is what this one is
+/// for. `InitializeResponse` reads `authMethods` with
+/// `forgivingDecodeArrayIfPresent`, which drops each element it cannot read and
+/// keeps the rest. The client then sees one method where the agent advertised
+/// two, and a person who tries the other one is told it does not exist. Only a
+/// real agent that sends this shape can prove the row counts what was dropped.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeUnreadableAuthMethodAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .reportsUnreadableAuthMethod
         )
     )
 }
@@ -1223,6 +1264,11 @@ private enum StubAgentInitializeAnswer {
     /// cannot read.
     case reportsUnreadableCapabilities
 
+    /// The agent answers with an `authMethods` array that holds
+    /// ``stubAgentReadableAuthMethod`` beside
+    /// ``stubAgentUnreadableAuthMethodCount`` elements this build cannot read.
+    case reportsUnreadableAuthMethod
+
     /// The agent answers with a JSON-RPC error, and the handshake fails.
     case fails
 }
@@ -1249,6 +1295,23 @@ private func readableStubAgentCapabilities() -> [String: Any] {
 /// - Returns: The member, as the untyped JSON `JSONSerialization` writes.
 private func unreadableStubAgentCapabilities() -> [String: Any] {
     ["session": "yes"]
+}
+
+/// One element of the `authMethods` array
+/// ``makeUnreadableAuthMethodAgent(pidFile:)`` answers `initialize` with, and
+/// this build cannot read.
+///
+/// The `type` member says `agent`, and the schema states `methodId` and `name`
+/// for that shape. This element carries `id` in place of `methodId`, so
+/// `AuthMethodAgent(from:)` throws. `InitializeResponse` reads the array with
+/// `forgivingDecodeArrayIfPresent`, which drops the element and throws nothing:
+/// the client silently believes the agent advertised one method fewer. That
+/// silence is what the sixth row of the check table of `cli-plan.md` §10
+/// reports.
+///
+/// - Returns: The element, as the untyped JSON `JSONSerialization` writes.
+private func unreadableStubAgentAuthMethod() -> [String: Any] {
+    ["type": "agent", "id": "stub-broken", "name": "Sign in with the broken stub"]
 }
 
 /// The JSON-RPC code an agent answers with when it will not serve a request it
@@ -1314,6 +1377,15 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
             protocolVersion: ACPClient.supportedProtocolVersion,
             capabilities: unreadableStubAgentCapabilities()
         )
+    case .reportsUnreadableAuthMethod:
+        try initializeResult(
+            reporting: [stubAgentReadableAuthMethod],
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            unreadableAuthMethods: Array(
+                repeating: unreadableStubAgentAuthMethod(),
+                count: stubAgentUnreadableAuthMethodCount
+            )
+        )
     case .fails:
         try requestError(
             id: initializeAnswerID,
@@ -1328,20 +1400,25 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
 /// chose.
 ///
 /// - Parameters:
-///   - authMethods: The authentication methods to advertise. An empty list
-///     leaves the member out, which is what an agent that advertises none sends.
+///   - authMethods: The authentication methods to advertise. An empty list,
+///     beside no unreadable element, leaves the member out, which is what an
+///     agent that advertises none sends.
 ///   - protocolVersion: The protocol version to answer with. It reaches the wire
 ///     as a bare integer, which is the only form `ProtocolVersion` takes. `nil`
 ///     leaves the member out altogether, which is one of only two ways to make
 ///     that answer undecodable at all.
 ///   - capabilities: The `capabilities` member to answer with. The default is the
 ///     baseline session surface every conformant stub advertises.
+///   - unreadableAuthMethods: Elements of the `authMethods` array this build
+///     cannot read, as the untyped JSON `JSONSerialization` writes. They stand
+///     after the readable methods. The default sends none.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
 private func initializeResult(
     reporting authMethods: [AuthMethod],
     protocolVersion: ProtocolVersion?,
-    capabilities: [String: Any] = readableStubAgentCapabilities()
+    capabilities: [String: Any] = readableStubAgentCapabilities(),
+    unreadableAuthMethods: [Any] = []
 ) throws -> String {
     var result: [String: Any] = [
         "capabilities": capabilities,
@@ -1350,8 +1427,9 @@ private func initializeResult(
     if let protocolVersion {
         result["protocolVersion"] = protocolVersion.rawValue
     }
-    if !authMethods.isEmpty {
-        result["authMethods"] = try jsonValue(of: authMethods)
+    let advertised = try authMethods.map { try jsonValue(of: $0) } + unreadableAuthMethods
+    if !advertised.isEmpty {
+        result["authMethods"] = advertised
     }
     return try ndjsonLine([
         "id": initializeAnswerID,

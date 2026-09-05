@@ -72,8 +72,30 @@ comments:
     - No file was changed by this test step. `git status` shows the same 5 changed files as before this step started.
     - next: /review
   timestamp: 2026-09-05T11:46:24.350892+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rp9n1a0pm2cjncyps03zrb
+  text: |-
+    ### commit — changed
+    - evidence: d9758a7 refactor(integration-tests): use the shared command builders
+  timestamp: 2026-09-05T11:47:08.458229+00:00
+- actor: claude-code
+  id: 01m1rpcsw6718f5kn6qxhve6yz
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit d9758a7), 5 files reviewed, 7 validator runs attempted, 0 findings, 0 confirmed, 0 refuted
+    - next: none. The task moved from `review` to `done`.
+  timestamp: 2026-09-05T11:48:51.718480+00:00
+- actor: claude-code
+  id: 01m1rpdhppsnqsmgzfcc69d4wm
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files under `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/`: `Support/StubAgents.swift` (`agentArguments` on the shared builders), `RunCommandExitTests.swift`, `StreamRulesTests.swift`, `ProbeCommandTests.swift`, `DoctorCommandTests.swift` (four private builders deleted, 22 call sites moved). Counterfactual: the build failed at every call site with the private builders deleted and the call sites not yet moved.
+    - test: green — root 223/223 in 19 suites, integration 77/77 in 12 suites, 0 warnings, 0 skipped, on a clean build
+    - commit: d9758a7
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T11:49:16.118811+00:00
+position_column: done
+position_ordinal: a580
 title: Fold the two private runArguments builders onto the shared one
 ---
 ## What

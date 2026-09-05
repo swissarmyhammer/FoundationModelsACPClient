@@ -19,9 +19,11 @@ import Testing
 //
 // The sixth row is the one row a test can make pass by accident. `capabilities`
 // and `authMethods` both decode forgivingly, so a check that read the DECODED
-// answer would report `ok` against every agent, malformed ones included. The
-// two tests below drive agents that send an answer this build cannot read, and
-// they are what state that the row can fail at all.
+// answer would report `ok` against every agent, malformed ones included. Three
+// tests below drive agents that send an answer this build cannot read in full,
+// and they are what state that the row can fail at all. Two more drive agents
+// whose `authMethods` the row must accept: one that advertises only readable
+// methods, and one that sends no member at all.
 //
 // The suite lives in the nested `IntegrationTests` package because every row
 // after the first spawns a real agent. The root `swift test` never sees this
@@ -373,6 +375,56 @@ struct AgentCommandDoctorTests {
             "the row did not name the member the decode dropped: \(capabilities.message)"
         )
         #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("an authentication method this build cannot read warns on the capabilities row, with the count")
+    func unreadableAuthMethodWarnsOnTheCapabilitiesRow() async throws {
+        let script = try makeUnreadableAuthMethodAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The handshake SUCCEEDED. `authMethods` decodes forgivingly, so the
+        // client is left believing the agent advertised one method fewer than
+        // it sent, and a person who tries the dropped one is told it does not
+        // exist. This row is the only one that says so.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .warning)
+        // The count, and never the content: `AuthMethod` is the wire's own
+        // union, and this package must not spell what a readable one looks like.
+        #expect(
+            capabilities.message.contains("dropped \(stubAgentUnreadableAuthMethodCount) of"),
+            "the row did not say how many methods the decode dropped: \(capabilities.message)"
+        )
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("an agent that advertises only readable authentication methods passes the capabilities row")
+    func readableAuthMethodsPassTheCapabilitiesRow() async throws {
+        let script = try makeProbeAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The decode kept every element the agent sent, so the two counts the
+        // row compares are equal and the row has nothing to report.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .ok)
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .ok, .ok])
+    }
+
+    @Test("an agent that sends no authMethods member passes the capabilities row")
+    func noAuthMethodsMemberPassesTheCapabilitiesRow() async throws {
+        let script = try makeWellBehavedAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // `authMethods` is optional on the wire. An agent that advertises no
+        // method leaves the member out, and a row that read that absence as a
+        // loss would warn against every such agent.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .ok)
     }
 
     @Test("an agent that ignores a closed stdin warns on the teardown row, and asks for exit 5")

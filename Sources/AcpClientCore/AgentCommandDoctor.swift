@@ -44,7 +44,12 @@ import Synchronization
 //    compares what the agent SENT with what the decode kept. Only `info` and
 //    `protocolVersion` can make that decode throw at all, and those two are
 //    what the row reports as an error; every member the decode silently
-//    dropped is what it reports as a warning.
+//    dropped is what it reports as a warning. The `capabilities` members are
+//    compared by NAME, and the `authMethods` elements by COUNT alone:
+//    `AuthMethod` is the wire's own union, and this package must not spell
+//    what a readable element looks like. An element the raw array held and
+//    the decoded array does not is a dropped one, and the arithmetic is the
+//    whole test.
 // 5. **The teardown row runs BEFORE the connection closes.** Closing the
 //    connection cancels the tee's forwarding task, which ends the transport's
 //    byte stream, which runs `AgentProcess`'s own teardown and group-kills the
@@ -497,6 +502,10 @@ struct AgentCommandDoctor: Doctorable {
     /// See rule 4 at the head of this file for why the row reads the raw answer
     /// and never the decoded one.
     ///
+    /// The row collects one loss for each kind it can find — the `capabilities`
+    /// members by name, the `authMethods` elements by count — and names them
+    /// all on one row, so a person repairs the agent in one pass.
+    ///
     /// An agent that answered nothing at all, and one that answered a JSON-RPC
     /// error, both leave this row nothing to read. That is not a defect of its
     /// own, so the row is reported as one that did not run, which rule 1 makes
@@ -523,15 +532,44 @@ struct AgentCommandDoctor: Doctorable {
                     """
             )
         }
-        let dropped = membersTheDecodeDropped(from: result, keeping: response.capabilities)
-        guard !dropped.isEmpty else {
+        // The decode above read this `result` as a JSON object, so the members
+        // are there; the empty default only keeps the read total.
+        let answer = jsonMembers(of: result) ?? [:]
+        let losses = [
+            capabilityMembersLoss(in: answer, keeping: response.capabilities),
+            authMethodsLoss(in: answer, keeping: response.authMethods),
+        ].compactMap { $0 }
+        guard !losses.isEmpty else {
             return passed(
                 capabilitiesCheckName,
-                message: "every capability member the agent sent was read"
+                message: """
+                    every capability member and every authentication method the \
+                    agent sent was read
+                    """
             )
         }
         return warned(
             capabilitiesCheckName,
+            message: losses.map(\.message).joined(separator: "; "),
+            fix: losses.map(\.fix).joined(separator: " ")
+        )
+    }
+
+    /// The `capabilities` members the agent sent and the decode did not keep,
+    /// as one loss.
+    ///
+    /// - Parameters:
+    ///   - answer: The members of the raw initialize answer, untyped.
+    ///   - capabilities: What the decode made of that answer's `capabilities`.
+    /// - Returns: The loss, naming each dropped member, or `nil` when the
+    ///   decode kept every member the agent sent.
+    private static func capabilityMembersLoss(
+        in answer: [String: Any],
+        keeping capabilities: AgentCapabilities
+    ) -> DecodeLoss? {
+        let dropped = membersTheDecodeDropped(from: answer, keeping: capabilities)
+        guard !dropped.isEmpty else { return nil }
+        return DecodeLoss(
             message: """
                 the agent sent capability members this build cannot read, and the \
                 decode dropped them: \(dropped.joined(separator: ", "))
@@ -541,6 +579,42 @@ struct AgentCommandDoctor: Doctorable {
                 version states. A member this client cannot read becomes an \
                 unsupported one, so the agent loses the capability rather than \
                 the handshake.
+                """
+        )
+    }
+
+    /// The `authMethods` elements the agent sent and the decode did not keep,
+    /// as one loss.
+    ///
+    /// The comparison is a COUNT, and never a reading of what an element looks
+    /// like. `AuthMethod` is an enumeration over the wire's own union, and this
+    /// package must not spell what a readable element is. The decode drops an
+    /// element it cannot read and keeps the rest, so an element the raw array
+    /// held and the decoded array does not is a dropped one, and the
+    /// arithmetic is the whole test.
+    ///
+    /// - Parameters:
+    ///   - answer: The members of the raw initialize answer, untyped.
+    ///   - authMethods: What the decode made of that answer's `authMethods`.
+    /// - Returns: The loss, naming how many elements were dropped, or `nil`
+    ///   when the agent sent no `authMethods` array or the decode kept every
+    ///   element of it.
+    private static func authMethodsLoss(
+        in answer: [String: Any],
+        keeping authMethods: [AuthMethod]?
+    ) -> DecodeLoss? {
+        guard let sent = answer[authMethodsKey] as? [Any] else { return nil }
+        let dropped = sent.count - (authMethods?.count ?? 0)
+        guard dropped > 0 else { return nil }
+        return DecodeLoss(
+            message: """
+                the decode dropped \(dropped) of the \(sent.count) authentication \
+                methods the agent advertised, because this build cannot read them
+                """,
+            fix: """
+                Send each authentication method in the shape the negotiated \
+                protocol version states. A method this client cannot read is \
+                dropped, so a person cannot log in with it.
                 """
         )
     }
@@ -558,14 +632,14 @@ struct AgentCommandDoctor: Doctorable {
     /// its own to go stale against the schema.
     ///
     /// - Parameters:
-    ///   - result: The raw `result` member of the agent's initialize answer.
+    ///   - answer: The members of the raw initialize answer, untyped.
     ///   - capabilities: What the decode made of that answer's `capabilities`.
     /// - Returns: The names of the lost members, sorted, or an empty array.
     private static func membersTheDecodeDropped(
-        from result: Data,
+        from answer: [String: Any],
         keeping capabilities: AgentCapabilities
     ) -> [String] {
-        guard let sent = jsonMembers(of: result)?[capabilitiesKey] else {
+        guard let sent = answer[capabilitiesKey] else {
             return []
         }
         guard let sentMembers = sent as? [String: Any] else {
@@ -771,8 +845,25 @@ private enum InitializeOutcome {
     case failed(any Error)
 }
 
+/// One thing the agent sent in its `initialize` answer that the forgiving
+/// decode dropped.
+///
+/// The sixth row collects one of these for each kind of loss it can find, so
+/// one row names every loss rather than the first alone.
+private struct DecodeLoss {
+    /// What was lost, for the row's message.
+    let message: String
+
+    /// The action that repairs it, for the row's fix.
+    let fix: String
+}
+
 /// The member of an `initialize` answer that carries what the agent supports.
 private let capabilitiesKey = "capabilities"
+
+/// The member of an `initialize` answer that carries the authentication
+/// methods the agent advertises.
+private let authMethodsKey = "authMethods"
 
 /// The member of a JSON-RPC answer that carries what the call produced.
 private let jsonRPCResultKey = "result"
