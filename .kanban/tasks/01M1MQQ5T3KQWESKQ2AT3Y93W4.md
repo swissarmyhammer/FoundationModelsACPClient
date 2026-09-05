@@ -130,11 +130,54 @@ comments:
 
     - next: `/review`.
   timestamp: 2026-09-05T00:32:27.283964+00:00
+- actor: claude-code
+  id: 01m1qfrnrnfn4ybpdnf4crrpb8
+  text: |-
+    ### commit — changed
+    - evidence: 6f2432f fix(doctor): read raw initialize answer for row 6, watch process group for row 7
+    - next: none
+  timestamp: 2026-09-05T00:33:46.261790+00:00
+- actor: claude-code
+  id: 01m1qg157851f8b0rwf3n6a0rj
+  text: |-
+    ### review — clean
+    - evidence: `review sha 6f2432f~1..6f2432f` — 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. 4 files reviewed.
+    - judgement points verified by hand:
+      - Row 6 round trip is sound. `AgentCapabilities` uses ONE `CodingKeys` enum for both directions (`auth`, `session`, `_meta`), decodes each with `forgivingDecodeIfPresent` and encodes each with `encodeIfPresent`. So key ordering cannot matter (the test is `Set<String>` membership on names), an encoding that differs from the wire form cannot matter (the comparison reads key NAMES and never values), and a deliberate `null` is excluded by the `!(sentMembers[$0] is NSNull)` filter. A legal empty `{}` names no keys and gives `ok`. The only key the row names for a legal answer is one the schema does not define for the negotiated version, which is what the warning says it is.
+      - Row 7 both claims hold. `runHealthChecks` calls `teardownCheck` BEFORE `await session.teardown()`; the teardown closes the connection, which ends the transport stream, which group-kills and reaps the agent, so a row after it reads an empty group for every agent. `killpg(pid, 0)` is right because `AgentProcess` makes the agent its own group leader, so one call answers for the live agent, for a zombie beside a live child, and for an emptied group.
+      - No double-close and no use-after-close. `closeStandardInput()` takes and nils `stdinWriteDescriptor` inside `live.withLock`; `terminateCurrent()` takes the whole `Live` under the same lock and closes only `if let descriptor`; `writeToStdin` reads the descriptor and writes inside that same lock, so a write never races the close. The §11 reap is unweakened: `terminateCurrent()` still runs `killpg(SIGKILL)` + `waitpid` + `registry.deregister`, and `runHealthChecks` keeps `defer { agent.shutdown() }`.
+      - The tests pin the behaviour. Each row asserts the exact status enum (`.error`, `.warning`, `.ok`), the named member in the message (`protocolVersion`, `session`), `DoctorReport.worstStatus == .warning` with `AcpClientExitCode.forDoctorStatus(worst) == .doctorWarning`, and every recorded pid gone after the run.
+      - `^1qfgtye` is separate work. This card's acceptance criteria name `capabilities` members only; the new card is about `authMethods` ELEMENTS and a count comparison, not a key-name round trip.
+    - next: task moved to done.
+  timestamp: 2026-09-05T00:38:24.232954+00:00
+- actor: claude-code
+  id: 01m1qg2ddmzvdbkff6akp1c0v0
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files. Rows 6 and 7 complete the §10 table.
+    - test: green — root 201 passed in 15 suites, integration 50 passed in 8 suites, no leaked processes after either run
+    - commit: 6f2432f fix(doctor): read raw initialize answer for row 6, watch process group for row 7
+    - review: clean — zero findings, task moved to done
+
+    Check 6 could not be written as the card asked, and the plan review's hazard was real: `capabilities` and `authMethods` decode forgivingly, so a row reading the DECODED value reports `ok` against every agent. The row now reads the RAW `initialize` answer off the frame tee — an `error` when the answer does not decode as `InitializeResponse` at all, a `warning` when the decode dropped a member the agent sent.
+
+    The review judged the round trip sound, and its reasoning is worth keeping: `AgentCapabilities` declares ONE `CodingKeys` enum used by both directions, so key ordering cannot matter (the test is set membership on names), a member whose encoding differs from its wire form cannot matter (only names are read), a deliberate `null` is excluded, and a legal empty `{}` names no key. The one key it will name for an otherwise legal answer is one the negotiated schema does not define — which is exactly "a member this build cannot read", and it is a warning, not an error.
+
+    Two traps the implementer designed around:
+    - Row 7 must run BEFORE `session.teardown()`. The teardown closes the connection, which cancels the tee's forwarding task, ends the byte stream, and group-kills the agent — a row after it would pass against every agent, the same defect as row 6.
+    - `killpg(pid, 0)` and not `kill(pid, 0)`, because `kill` cannot tell a running agent from an unreaped zombie, and an agent that leaves a child holds its own stdout open through that child.
+
+    The library change is safe. `writeToStdin` reads the descriptor and performs the whole write INSIDE the same lock that `closeStandardInput()` takes, so a write can never use a closed descriptor — it gets `agentUnavailable`. The §11 reap is unchanged.
+
+    One process note the review raised, not a defect: failability was proved by mutation rather than red-first. The assertions pin the exact status enum, so the pin is real.
+
+    Discovered work is filed as ^1qfgtye, and the review confirmed it is genuinely separate: this card names `capabilities` MEMBERS, that one names `authMethods` ELEMENTS.
+  timestamp: 2026-09-05T00:39:05.396752+00:00
 depends_on:
 - 01M1MPHV9ZMDKJ6SD59AF0JRF7
 - 01M1MPC2YVFK0A9NX4T9H4M0EV
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9e80'
 title: 'Doctor checks 6 and 7: the capabilities read, and the agent leaves nothing behind'
 ---
 ## What

@@ -154,9 +154,13 @@ func acpClientBinaryURL() throws -> URL {
 
 /// Runs the built `acp-client` with `arguments` and captures what it did.
 ///
-/// The run is bounded by ``TransportTestDeadline/limit``. A binary that hangs is
-/// killed at the limit and the call throws, so the test that asked fails and the
-/// suite goes on.
+/// The run is bounded. A binary that hangs is killed at the limit and the call
+/// throws, so the test that asked fails and the suite goes on.
+///
+/// The default bound suits a subcommand that answers as fast as the agent does.
+/// A subcommand that carries a wait of its own — `doctor`, whose fourth row
+/// races `initialize` against a limit of its own — states a longer one, so that
+/// the run this suite MEANS to take that long is not killed as a hang.
 ///
 /// - Parameters:
 ///   - arguments: The command-line arguments for `acp-client`.
@@ -166,6 +170,8 @@ func acpClientBinaryURL() throws -> URL {
 ///     a pipe.
 ///   - environment: The whole environment for the run, or `nil` to inherit this
 ///     process's own.
+///   - limit: The longest the run may take. The default is
+///     ``TransportTestDeadline/limit``.
 /// - Returns: The finished run.
 /// - Throws: A locator error, a spawn or file-system failure,
 ///   ``CLITestSupportError/pseudoTerminalUnavailable(errno:)``, or
@@ -174,7 +180,8 @@ func runAcpClient(
     _ arguments: [String],
     standardInput: CLIStandardInput = .endOfFile,
     standardOutput: CLIStandardOutput = .pipe,
-    environment: [String: String]? = nil
+    environment: [String: String]? = nil,
+    within limit: Duration = TransportTestDeadline.limit
 ) async throws -> CLIResult {
     let input = try StandardInputSource(standardInput)
     defer { input.tearDown() }
@@ -203,12 +210,9 @@ func runAcpClient(
     async let drainedOutput = drainedBytes(from: outputPipeReader)
     async let standardErrorData = readToEnd(errorPipeReader)
 
-    guard await exited(process, within: TransportTestDeadline.limit) else {
+    guard await exited(process, within: limit) else {
         kill(process.processIdentifier, SIGKILL)
-        throw CLITestSupportError.runTimedOut(
-            arguments: arguments,
-            limit: TransportTestDeadline.limit
-        )
+        throw CLITestSupportError.runTimedOut(arguments: arguments, limit: limit)
     }
     return CLIResult(
         exitCode: process.terminationStatus,
