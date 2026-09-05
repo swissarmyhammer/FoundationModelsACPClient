@@ -223,16 +223,18 @@ func makeIdleWithoutStopReasonAgent(
 /// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:argumentsFile:)``
 /// after that.
 ///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
-func makeBannerOnStdoutAgent() throws -> String {
+func makeBannerOnStdoutAgent(pidFile: String? = nil) throws -> String {
     try writeAgentScript(
         """
         \(printfLine(stubAgentBannerLine))
         \(requestLoop(
             answer: stubAgentDefaultAnswer,
             stopReason: .endTurn,
-            pidFile: nil,
+            pidFile: pidFile,
             transcript: nil
         ))
         """
@@ -304,10 +306,18 @@ private let commandNotFoundStatus = 127
 /// nothing to stdout and returns, so the client's read of that stdout reaches
 /// EOF at once and ``AgentProcess`` reaps the child on its own.
 ///
+/// - Parameter pidFile: Where the agent records its own pid before it ends, or
+///   `nil` to record none. The pid is written FIRST, so a caller reading the
+///   file afterwards learns the pid of an agent that is already gone.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: The write failure of the script file.
-func makeExitingAtOnceAgent() throws -> String {
-    try writeAgentScript("exit \(commandNotFoundStatus)")
+func makeExitingAtOnceAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        """
+        \(recordPidStatement(writingTo: pidFile))
+        exit \(commandNotFoundStatus)
+        """
+    )
 }
 
 /// Writes a stub agent that `acp-client probe` can read a whole report off.
@@ -365,6 +375,63 @@ func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
             stopReason: .endTurn,
             pidFile: pidFile,
             initialize: .fails
+        )
+    )
+}
+
+/// Writes a stub agent that answers `initialize` and then refuses `session/new`
+/// with a JSON-RPC error.
+///
+/// It is the protocol failure that lands AFTER the spawn and BEFORE the turn,
+/// which is the one place a leak would be easiest to write: the agent is
+/// running, and the command is on its way out through a throw rather than
+/// through its own return. `cli-plan.md` §9 gives that run the code 1 and §11
+/// still lets no agent outlive it.
+///
+/// `run` and `probe` both reach this row, because both open a session and only
+/// `run` goes on to prompt. The agent stays alive until its stdin closes, so
+/// the reap is the binary's work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNewSessionRefusingAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            newSession: .refuses
+        )
+    )
+}
+
+/// Writes a stub agent that answers every request of a probe and then reports
+/// `methodNotFound` for `session/close`.
+///
+/// `session/close` is optional on the wire, so this agent is CONFORMANT rather
+/// than broken, and `probe` therefore still writes its report and exits 0.
+/// `AgentSession.closeSession(_:)` reports the refusal as one event line and
+/// raises nothing — which is exactly the path a leak could hide on, because a
+/// teardown that gave up at the refused call would leave the agent running.
+///
+/// The agent reports ``stubAgentCommands``, so the probe's bounded wait for a
+/// command list ends on the list rather than on the clock.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeSessionCloseRefusingAgent(pidFile: String? = nil) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: .reports(stubAgentAuthMethods),
+            closeSession: .refuses,
+            availableCommands: stubAgentCommands
         )
     )
 }
@@ -603,8 +670,8 @@ func makeLingeringAgent(pidFile: String? = nil) throws -> String {
 /// agent's stdout, so the pipe never reaches EOF and ``AgentProcess`` never reaps the agent
 /// on its own — which is why the row reads the process GROUP rather than the pid.
 ///
-/// The file holds two pids, the agent's own first and its child's second, so a test can
-/// prove that neither outlived the run.
+/// The file holds ``stubAgentChildLeavingPidCount`` pids, the agent's own first and its
+/// child's second, so a test can prove that neither outlived the run.
 ///
 /// - Parameter pidFile: Where the agent records its own pid and its child's, one per line.
 /// - Returns: The absolute path of the script; the caller removes it.
@@ -618,6 +685,14 @@ func makeChildLeavingAgent(pidFile: String) throws -> String {
         """
     )
 }
+
+/// How many pids ``makeChildLeavingAgent(pidFile:)`` records: its own, and its
+/// child's.
+///
+/// A test reads the count before it reads the pids, because an agent that never
+/// spawned its child would record one pid, and a test that only walked the file
+/// would then pass while measuring nothing.
+let stubAgentChildLeavingPidCount = 2
 
 // MARK: - The script files
 
@@ -643,11 +718,49 @@ func writeAgentScript(_ content: String) throws -> String {
     ).path
 }
 
-/// Builds the command line of one `acp-client run` against a stub-agent script.
+/// The name of the `run` subcommand on the command line (`cli-plan.md` §6).
+let runSubcommandName = "run"
+
+/// The name of the `probe` subcommand on the command line (`cli-plan.md` §6).
+let probeSubcommandName = "probe"
+
+/// The name of the `doctor` subcommand on the command line (`cli-plan.md` §6).
+let doctorSubcommandName = "doctor"
+
+/// The separator that stands before the agent command (`cli-plan.md` §6).
+///
+/// It is required. With no separator the binary prints the usage to stderr and
+/// exits 2, because there is no default agent.
+let agentCommandSeparator = "--"
+
+/// Builds the command line of one `acp-client` subcommand against a stub-agent
+/// script.
+///
+/// The three subcommands take the same grammar — the name, the options of
+/// `cli-plan.md` §6.1, the `--` separator, and the agent command — so one
+/// builder writes all three and no suite grows a copy of its own.
 ///
 /// The scripts carry no execute bit, so the agent command is
 /// ``stubAgentShellCommand`` and the script is its first argument, which is also
 /// the shape `cli-plan.md` §6 gives an agent that takes arguments of its own.
+///
+/// - Parameters:
+///   - subcommand: The subcommand name, one of ``runSubcommandName``,
+///     ``probeSubcommandName`` and ``doctorSubcommandName``.
+///   - options: Everything that stands between the name and the separator: the
+///     options of `cli-plan.md` §6.1, and the prompt argument of `run`.
+///   - script: The absolute path of the stub-agent script.
+/// - Returns: The arguments for
+///   ``runAcpClient(_:standardInput:standardOutput:environment:signals:within:)``.
+func agentCommandArguments(
+    _ subcommand: String,
+    options: [String] = [],
+    script: String
+) -> [String] {
+    [subcommand] + options + [agentCommandSeparator, stubAgentShellCommand, script]
+}
+
+/// Builds the command line of one `acp-client run` against a stub-agent script.
 ///
 /// - Parameters:
 ///   - prompt: The prompt argument, or `nil` to put none on the line, which is
@@ -655,10 +768,47 @@ func writeAgentScript(_ content: String) throws -> String {
 ///   - options: The options of `cli-plan.md` §6.1 to put before the separator.
 ///   - script: The absolute path of the stub-agent script.
 /// - Returns: The arguments for
-///   ``runAcpClient(_:standardInput:standardOutput:environment:within:)``.
+///   ``runAcpClient(_:standardInput:standardOutput:environment:signals:within:)``.
 func runArguments(prompt: String?, options: [String] = [], script: String) -> [String] {
-    ["run"] + (prompt.map { [$0] } ?? []) + options
-        + ["--", stubAgentShellCommand, script]
+    agentCommandArguments(
+        runSubcommandName,
+        options: (prompt.map { [$0] } ?? []) + options,
+        script: script
+    )
+}
+
+/// The permission bits an agent command needs to reach `posix_spawn` at all.
+///
+/// ``AgentCommandResolver`` refuses a file that carries no executable bit, so a
+/// file that means to fail at the SPAWN has to pass that check first.
+private let executablePermissions: NSNumber = 0o755
+
+/// The bytes ``makeUnexecutableAgentBinary()`` writes.
+///
+/// They are not a Mach-O header and not a `#!` line, which is what makes
+/// `posix_spawn` answer `ENOEXEC`.
+private let unexecutableAgentContent = "this is not an executable format\n"
+
+/// Writes a file that resolves as an agent command and that cannot be executed.
+///
+/// It is the one shape that reaches ``AgentProcessError/spawnFailed(command:errno:)``
+/// from the command line. ``AgentCommandResolver`` asks three questions — the
+/// file exists, it is a regular file, and it carries the executable bit — and
+/// this file answers yes to all three, so the failure lands at the spawn and
+/// never at the resolution. `posix_spawn` then answers `ENOEXEC`, and no child
+/// is made at all.
+///
+/// - Returns: The absolute path of the file; the caller removes it with
+///   ``removeAgentScript(_:)``.
+/// - Throws: The write failure of the file, or the failure of the permission
+///   change.
+func makeUnexecutableAgentBinary() throws -> String {
+    let path = try writeAgentScript(unexecutableAgentContent)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: executablePermissions],
+        ofItemAtPath: path
+    )
+    return path
 }
 
 /// Removes a script a builder in this file wrote.
@@ -770,6 +920,8 @@ private let permissionRequestID = 100
 ///   - asksPermission: Whether the agent asks for permission in the middle of
 ///     the turn, and waits for the answer before it finishes.
 ///   - initialize: How the agent answers `initialize`.
+///   - newSession: How the agent answers `session/new`.
+///   - closeSession: How the agent answers `session/close`.
 ///   - availableCommands: The slash commands the agent reports right after its
 ///     `session/new` answer, or `nil` to send no `available_commands_update`.
 ///   - turnEnd: What the agent does once it has streamed its answer chunk. The
@@ -785,6 +937,8 @@ private func requestLoop(
     argumentsFile: String? = nil,
     asksPermission: Bool = false,
     initialize: StubAgentInitializeAnswer = .reports([]),
+    newSession: StubAgentRequestAnswer = .answers,
+    closeSession: StubAgentRequestAnswer = .answers,
     availableCommands: [AvailableCommand]? = nil,
     turnEnd: StubAgentTurnEnd = .atOnce
 ) throws -> String {
@@ -798,11 +952,11 @@ private func requestLoop(
           \(try printfLine(initializeAnswer(initialize)))
           ;;
         *'"method":"session/new"'*)
-          \(try printfLine(newSessionAnswer()))
+          \(try printfLine(newSessionAnswer(newSession)))
           \(try commandUpdateStatement(reporting: availableCommands))
           ;;
         *'"method":"session/close"'*)
-          \(try printfLine(closeSessionAnswer()))
+          \(try printfLine(closeSessionAnswer(closeSession)))
           ;;
         *'"method":"session/prompt"'*)
           \(try printfLine(promptAnswer()))
@@ -1093,8 +1247,38 @@ private func unreadableStubAgentCapabilities() -> [String: Any] {
 /// no Swift type in this package names it.
 private let jsonRPCInternalErrorCode = -32_603
 
+/// The JSON-RPC code an agent answers with when it does not implement a method
+/// at all.
+///
+/// It is the spec's `Method not found`. `session/close` is optional on the
+/// wire, and `AgentSession.closeSession(_:)` reads exactly this code as "that
+/// agent gave the call no answer of its own", so it is the code a stub that
+/// does not implement the method has to send.
+private let jsonRPCMethodNotFoundCode = -32_601
+
 /// The message a refusing stub agent puts in its `initialize` error.
 private let stubAgentInitializeRefusal = "the stub agent refuses to initialize"
+
+/// The message a refusing stub agent puts in its `session/new` error.
+private let stubAgentNewSessionRefusal = "the stub agent refuses to open a session"
+
+/// The message a stub agent that does not implement `session/close` answers
+/// with.
+private let stubAgentCloseSessionRefusal = "the stub agent has no session/close"
+
+/// How a stub agent answers one request of the handshake.
+///
+/// The two cases are the two things an agent can do with a request that reached
+/// it: answer it, or refuse it. `cli-plan.md` §9 gives a refusal the
+/// protocol-failure row, and §11 asks the same reap of that row as of every
+/// other row, so a refusal is a whole exit path of its own.
+private enum StubAgentRequestAnswer {
+    /// The agent answers the request.
+    case answers
+
+    /// The agent answers with a JSON-RPC error.
+    case refuses
+}
 
 /// The `initialize` answer the caller asked for.
 ///
@@ -1119,7 +1303,11 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
             capabilities: unreadableStubAgentCapabilities()
         )
     case .fails:
-        try initializeError()
+        try requestError(
+            id: initializeAnswerID,
+            code: jsonRPCInternalErrorCode,
+            message: stubAgentInitializeRefusal
+        )
     }
 }
 
@@ -1160,33 +1348,50 @@ private func initializeResult(
     ])
 }
 
-/// The failing `initialize` answer: a JSON-RPC error, which the client reads as
-/// a protocol failure.
+/// One JSON-RPC error answer.
 ///
+/// The three refusals this file can script differ in the id they answer, the
+/// code they carry and the text they name, and in nothing else, so one builder
+/// writes all three.
+///
+/// - Parameters:
+///   - id: The request id this error answers.
+///   - code: The JSON-RPC error code to carry.
+///   - message: The text to name.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func initializeError() throws -> String {
+private func requestError(id: Int, code: Int, message: String) throws -> String {
     try ndjsonLine([
-        "error": ["code": jsonRPCInternalErrorCode, "message": stubAgentInitializeRefusal],
-        "id": initializeAnswerID,
+        "error": ["code": code, "message": message],
+        "id": id,
         "jsonrpc": jsonRPCVersion,
     ])
 }
 
-/// The `session/close` answer, which carries nothing but its id.
+/// The `session/close` answer the caller asked for.
 ///
 /// The id is ``promptAnswerID`` because the answers of this stub are numbered by
 /// the ORDER the client sends its requests in, and `probe` sends no prompt: its
 /// third request is `session/close`. See ``initializeAnswerID``.
 ///
+/// - Parameter answer: How the agent answers.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func closeSessionAnswer() throws -> String {
-    try ndjsonLine([
-        "id": promptAnswerID,
-        "jsonrpc": jsonRPCVersion,
-        "result": [String: String](),
-    ])
+private func closeSessionAnswer(_ answer: StubAgentRequestAnswer) throws -> String {
+    switch answer {
+    case .answers:
+        return try ndjsonLine([
+            "id": promptAnswerID,
+            "jsonrpc": jsonRPCVersion,
+            "result": [String: String](),
+        ])
+    case .refuses:
+        return try requestError(
+            id: promptAnswerID,
+            code: jsonRPCMethodNotFoundCode,
+            message: stubAgentCloseSessionRefusal
+        )
+    }
 }
 
 /// One `available_commands_update` carrying the agent's slash commands.
@@ -1215,16 +1420,27 @@ private func jsonValue(of value: some Encodable) throws -> Any {
     try JSONSerialization.jsonObject(with: try JSONEncoder().encode(value))
 }
 
-/// The `session/new` answer: the one session id this stub gives out.
+/// The `session/new` answer the caller asked for: the one session id this stub
+/// gives out, or a refusal.
 ///
+/// - Parameter answer: How the agent answers.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func newSessionAnswer() throws -> String {
-    try ndjsonLine([
-        "id": newSessionAnswerID,
-        "jsonrpc": jsonRPCVersion,
-        "result": ["sessionId": stubAgentSessionID.rawValue],
-    ])
+private func newSessionAnswer(_ answer: StubAgentRequestAnswer) throws -> String {
+    switch answer {
+    case .answers:
+        return try ndjsonLine([
+            "id": newSessionAnswerID,
+            "jsonrpc": jsonRPCVersion,
+            "result": ["sessionId": stubAgentSessionID.rawValue],
+        ])
+    case .refuses:
+        return try requestError(
+            id: newSessionAnswerID,
+            code: jsonRPCInternalErrorCode,
+            message: stubAgentNewSessionRefusal
+        )
+    }
 }
 
 /// The `session/prompt` acknowledgement. The turn's content follows it as

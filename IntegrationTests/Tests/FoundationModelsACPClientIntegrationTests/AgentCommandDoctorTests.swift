@@ -83,10 +83,6 @@ struct AgentCommandDoctorTests {
     /// The text that stands before the unique part of a pid file's name.
     private static let pidFileNamePrefix = "acp-client-doctor-agent-pid-"
 
-    /// How many pids ``makeChildLeavingAgent(pidFile:)`` records: its own, and
-    /// its child's.
-    private static let childLeavingAgentPidCount = 2
-
     /// The number of seconds ``shortTimeLimit`` covers.
     private static let shortTimeLimitSeconds = 2
 
@@ -419,8 +415,8 @@ struct AgentCommandDoctorTests {
         #expect(teardown.status == .warning)
         let pids = try recordedAgentPids(in: pidFile)
         #expect(
-            pids.count == Self.childLeavingAgentPidCount,
-            "the agent recorded \(pids.count) pids rather than \(Self.childLeavingAgentPidCount)"
+            pids.count == stubAgentChildLeavingPidCount,
+            "the agent recorded \(pids.count) pids rather than \(stubAgentChildLeavingPidCount)"
         )
         for pid in pids {
             #expect(

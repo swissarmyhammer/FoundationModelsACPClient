@@ -1,6 +1,24 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m1qtp97pz8btvx5mcwk8m3y1
+  text: |-
+    The shared builder this task asks for now exists. Task ^f1fz3bv added
+    `agentCommandArguments(_:options:script:)` to
+    `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift`,
+    beside `runSubcommandName`, `probeSubcommandName`, `doctorSubcommandName` and
+    `agentCommandSeparator`. `runArguments(prompt:options:script:)` already calls it,
+    and `NoLeakedAgentTests.swift` calls it for `probe` and for `doctor`.
+
+    So the work left here is narrower than the title says: fold the two PRIVATE
+    copies onto it — `ProbeCommandTests.probeArguments(options:script:)` and
+    `DoctorCommandTests.doctorArguments(options:script:)` — and delete them. The
+    doctor copy reads `DoctorCommand.name` through `@testable import AcpClientCore`;
+    `doctorSubcommandName` is the same text spelled in the support file, so that
+    import may then be needed for the other names alone.
+  timestamp: 2026-09-05T03:44:42.230524+00:00
 position_column: todo
 position_ordinal: 9b80
 title: Fold the two private runArguments builders onto the shared one

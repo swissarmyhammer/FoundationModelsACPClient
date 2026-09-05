@@ -128,11 +128,43 @@ comments:
     - evidence: 3 files — `Sources/AcpClientCore/InterruptHandler.swift`, `Tests/FoundationModelsACPClientTests/InterruptHandlerTests.swift`, `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/InterruptTests.swift`. `timeout 420 swift test`: 215 tests in 17 suites passed, 0 warnings (was 212 in 16). `timeout 600 swift test --package-path IntegrationTests`: 72 tests in 11 suites passed, 0 warnings. Finding 1 proven by mutation: `stop()` re-split with the sentinel fix kept failed the new interleaving row 3 runs of 3, while the two sequential rows passed; the deterministic `stop puts back the SIG_DFL that stood before start` row was red on the unfixed code and is green now. Finding 2 proven by mutation: a stray newline added to `RunCommand.answerSink` failed the new `Data(interruptAnswer.utf8).starts(with: result.standardOutput)` assertion at `InterruptTests.swift:230`. Both mutations were restored inside the same shell command that ran them, and `git status` was verified clean of unintended changes after each. Both `## Review Findings` checkboxes are ticked.
     - next: ready for `/review`.
   timestamp: 2026-09-05T03:02:48.535651+00:00
+- actor: claude-code
+  id: 01m1qrkf2w3x822rm8zjbxj7rn
+  text: |-
+    ### review — clean
+
+    - evidence: `review sha e3988d0~1..e3988d0` — 0 findings, 7 validators attempted, 0 failed. 3 files reviewed, 2 not reviewed (`.kanban/`, from `.reviewignore`).
+    - Both findings of the 2026-09-04 21:52 pass are resolved and checked. The split is now unwritable: `ArmedInterrupts` binds the source and the displaced disposition into one value under one `Mutex` (`Sources/AcpClientCore/InterruptHandler.swift:71`, `:114`), `stop()` cancels, restores and clears in one `withLock` (`:167`), and `start()` saves, arms and stores in the same lock (`:138`).
+    - The `SIG_DFL` sentinel defect is gone. "Is a restore owed" is answered by the presence of the value (`:168`), not by the nullity of the disposition, and the restore is unconditional on that value (`:170`), so `nil`/`SIG_DFL` goes back like any other. `InterruptHandlerTests.swift:206` measures exactly that path, and reads the standing disposition with `sigaction(_, nil, &standing)` so the probe does not install what it reads.
+    - The new guards are the right ones. The interleaving row is well-founded because the two-lock mutation is ABSORBING — one hit anywhere saves the standing `SIG_IGN`, and every later arming reads it back — so a single hit in 40,000 rounds survives to the final assertion, which is why it failed 3/3 while the two sequential rows correctly passed. Under the fixed code the row is deterministic, not lucky. The integration assertion is the deterministic half of §8 on a racing path: it passes on empty and on whole, and fails on a trailing newline, a cursor escape or a spinner frame.
+    - No new defect in the merged-value design. `stop()` on an unarmed handler is a guarded no-op (`:168`), which is what lets `runTurn` defer it unconditionally. `start()` twice returns before the `signal` call (`:139`), so a second arming neither re-saves `SIG_IGN` nor overwrites the standing value; the interleaving row exercises that guard, because 8 workers make start-while-armed a certainty. `deliver` takes only the `delivered` lock and never `armed`, so `resume()` under the `armed` lock cannot invert a lock order.
+    - Verified without mutation: `swift test --filter 'FoundationModelsACPClientTests.*[Ii]nterrupt'` — 10 tests in 3 suites passed in 0.156s. No file under `Sources/`, `Tests/` or `IntegrationTests/` was left modified.
+    - next: none — task advanced to `done`.
+  timestamp: 2026-09-05T03:08:12.764001+00:00
+- actor: claude-code
+  id: 01m1qrmg3mrwdd5vsyr7ker2na
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files. Both findings fixed at the cause, and the first uncovered a second defect of the same cause.
+    - test: green — root 215 passed in 17 suites (up from 212 in 16), integration 72 passed in 11 suites, 0 warnings
+    - commit: e3988d0 fix(interrupt): merge armed source and displaced disposition under one lock
+    - review: clean — zero new findings, task moved to done
+
+    The second defect is the one worth remembering. `SIG_DFL` reaches Swift as `nil`, and the old code used `nil` as its "nothing saved" sentinel. A real `acp-client` starts with `SIGINT` at `SIG_DFL`, so EVERY ordinary run saved `nil`, the restore guard read that as "nothing was saved", and `SIGINT` stayed ignored for the life of the process. No race, no interleaving — just a sentinel colliding with a real value. The review's finding was about the lock split; checking `start()` for the mirror of that split is what turned it up.
+
+    The fix does not patch either symptom. The armed source and the displaced disposition are now ONE value under ONE lock, so "is a restore owed" is answered by whether the value stands, and the split is unwritable rather than merely absent.
+
+    Both fixes are proven by mutation: re-splitting `stop()` while keeping the sentinel fix failed the new interleaving row 3 runs of 3 while both sequential rows passed, and a stray newline in the answer sink failed the new integration prefix assertion.
+
+    Two process notes from this card, both earned:
+    - A mutation layered on UNCOMMITTED work cannot be undone with `git checkout -- <file>` — that restores HEAD and throws away the fix along with the mutation. Save a copy of the working file and restore from that, inside the same shell command.
+    - On a card whose failure mode is "waits for ever", do not mutate away the thing that ends the wait. The first review of this card did, and its 900-second bounded run hung with the tree left dirty.
+  timestamp: 2026-09-05T03:08:46.580204+00:00
 depends_on:
 - 01M1MQHBX56XTYHFZR6K0E160T
 - 01M1MPECJSM165NAWX5F3NKX9A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a180
 title: 'Handle Ctrl-C: cancel the turn, print what arrived, reap, and exit 4'
 ---
 ## What
