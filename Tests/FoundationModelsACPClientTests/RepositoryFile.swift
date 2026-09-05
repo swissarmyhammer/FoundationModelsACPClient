@@ -4,13 +4,19 @@ import Foundation
 /// file through `#filePath`.
 ///
 /// `#filePath` resolves relative to the file that contains the literal, so
-/// the navigation in `url(relativePath:)` starts at this helper's own
-/// location: `Tests/FoundationModelsACPClientTests/RepositoryFile.swift`.
+/// the navigation in `rootURL` starts at this helper's own location:
+/// `Tests/FoundationModelsACPClientTests/RepositoryFile.swift`.
 /// Three `deletingLastPathComponent()` steps go from this file to the
 /// repository root. Keep this file directly inside
 /// `Tests/FoundationModelsACPClientTests/`, or adjust the step count to
 /// match the new location.
 enum RepositoryFile {
+    /// The URL of this repository's root directory.
+    static let rootURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // RepositoryFile.swift → FoundationModelsACPClientTests/
+        .deletingLastPathComponent()  // → Tests/
+        .deletingLastPathComponent()  // → repository root
+
     /// Locates one file or directory of this repository.
     ///
     /// - Parameter relativePath: the item's path from the repository root,
@@ -24,11 +30,27 @@ enum RepositoryFile {
         guard !relativePath.contains(".."), !relativePath.hasPrefix("/") else {
             throw RepositoryFileError.pathEscapesRepository(relativePath)
         }
-        return URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()  // RepositoryFile.swift → FoundationModelsACPClientTests/
-            .deletingLastPathComponent()  // → Tests/
-            .deletingLastPathComponent()  // → repository root
-            .appendingPathComponent(relativePath)
+        return rootURL.appendingPathComponent(relativePath)
+    }
+
+    /// Returns the path of one item of this repository, from the repository
+    /// root.
+    ///
+    /// This is the inverse of `url(relativePath:)`. A test that walks a
+    /// directory holds absolute URLs, and a document names a repository-
+    /// relative path, so one of the two must convert before they compare.
+    ///
+    /// - Parameter url: the URL of a file or a directory.
+    /// - Returns: that item's path from the repository root, or `nil` when
+    ///   the item stands outside this repository.
+    static func relativePath(of url: URL) -> String? {
+        let root = rootURL.standardizedFileURL.path
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        let item = url.standardizedFileURL.path
+        guard item.hasPrefix(prefix) else {
+            return nil
+        }
+        return String(item.dropFirst(prefix.count))
     }
 
     /// Reads one repository file as UTF-8 text.

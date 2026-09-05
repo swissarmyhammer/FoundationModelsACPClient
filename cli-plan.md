@@ -96,12 +96,18 @@ The bar is a good Rust CLI. The family takes **Noora** (Tuist), a Swift
 CLI design system that covers what indicatif, dialoguer, comfy-table and
 owo-colors cover in Rust.
 
-**This package makes that decision, and the agent package follows it.**
-Noora is taken directly, and no spike compares it with an other package.
-Two CLIs in one family that draw tables differently is a defect a user
-sees, so one decision serves both. `FoundationModelsACPAgent/cli-plan.md`
-§5.2 records the same decision, and its milestone C1 asks for no
-comparison.
+**The agent package made that decision, and this package follows it.**
+`FoundationModelsACPAgent/cli-plan.md` §5.2 reads "We adopt Noora", and
+it states that the choice sets the family precedent and that the client
+CLI follows it. Noora is taken directly, and no spike compares it with
+another package: §5.2 makes the choice, and its milestone C1 asks for no
+comparison. Two CLIs in one family that draw tables differently is a
+defect a user sees, so one decision serves both. The comment beside the
+Noora dependency in `Package.swift` states the same owner.
+
+§5.2 names a different file, because each package contains the import in
+a file of its own: `TerminalRenderer.swift` in the agent package, and the
+file named below here.
 
 **The risk, recorded.** Noora's own CI runs on macOS 15. This package
 needs macOS 27, so no run upstream covers the platform this binary runs
@@ -297,7 +303,7 @@ package writes one `Doctorable` conformance over an agent command:
 | It writes valid ndJSON, and nothing else, to stdout | An agent that prints a banner to stdout — the most common ACP defect |
 | `initialize` answers inside a time limit | An agent that hangs |
 | The protocol version is one we support | A v1 agent, or a newer draft |
-| Each member of the `initialize` answer decodes, and none is dropped in silence | A malformed `initialize` result |
+| The `initialize` answer decodes, and no member of `capabilities` is dropped in silence | A malformed `initialize` result |
 | The process ends when its stdin closes, and it leaves no child | A leaked agent |
 
 The third row is worth the command on its own. `plan.md` for the agent
@@ -313,28 +319,34 @@ request. So a row that read stdout and waited for a line would wait for
 ever against a CORRECT agent. Rows 3 and 4 are two rows and one exchange:
 the doctor sends `initialize`, waits out its limit at most, and then
 judges every whole line the agent wrote while that ran. A banner stands
-ahead of the answer in that reading, so row 3 still catches it.
+ahead of the answer among those lines, so row 3 still catches it.
 
 **Row 6 reads the RAW `initialize` answer, and never the decoded value.**
-The generated `InitializeResponse` decodes `capabilities` and
-`authMethods` forgivingly: a member of the wrong shape becomes a default,
-and it throws nothing. A row that read the decoded value could therefore
+The generated `InitializeResponse` drops a member of the wrong shape, and
+it throws nothing. A row that read the decoded value could therefore
 never fail, and a check that cannot fail is not a check. So the row
-decodes the raw answer itself and compares the two readings. Only `info`
+decodes the raw answer itself and compares the two results. Only `info`
 and `protocolVersion` can make the decode throw, and the row reports that
-as an ERROR. Each member the forgiving decode dropped in silence is a
-WARNING, and the row names it.
+as an ERROR.
+
+The row compares the members of `capabilities` ALONE. It reads
+`capabilities` out of the raw answer, it reads the same member out of the
+decoded value, and it names each member that the raw answer holds and the
+decoded value does not. Each such member is a WARNING. The row does NOT
+yet read `authMethods`, which decodes in the same way, so an agent that
+sends a malformed `authMethods` gets no warning for it. Card ^1qfgtye
+holds that work.
 
 **Row 7 watches the process GROUP, and it runs BEFORE the teardown.**
-`kill(pid, 0)` cannot tell a running agent from an unreaped zombie of
+`kill(pid, 0)` cannot tell an agent that runs from an unreaped zombie of
 one, and an agent that leaves a child holds its own stdout open through
 that child. `killpg(pid, 0)` asks the question the row means to ask: is
-anything left. The row runs before the connection closes, because closing
-the connection group-kills the agent, and a row after that would report
-`ok` against every agent — for the reason row 6 exists. The verdict is a
-WARNING and never an error: such an agent answered every request, so it
-is usable, and it leaks. §9 gives that verdict exit code 5, and this row
-is the reason that code exists.
+anything left. The row runs before the connection closes, because the
+close of the connection group-kills the agent, and a row after that would
+report `ok` against every agent — for the reason row 6 exists. The
+verdict is a WARNING and never an error: such an agent answered every
+request, so it is usable, and it leaks. §9 gives that verdict exit code
+5, and this row is the reason that code exists.
 
 `doctor` exits 0, 1 or 5 (§9). `--json` writes the report to stdout.
 
@@ -349,12 +361,12 @@ gives in "Transports, and who owns the agent process".
 that arrived, reaps the agent, and exits 4. A second `Ctrl-C` ends the
 run at once, and it still reaps the agent.
 
-The `--timeout` limit of §6.1 and the `Ctrl-C` handling above are both
+The `--timeout` limit of §6.1 and the `Ctrl-C` rule above are both
 CHILDREN of the task group that runs the turn. Neither one races that
 group from outside. A child that sleeps and then throws the timeout has
 no race to lose: the group IS the race, the throw is the limit and
 nothing else, and the group cancels and drains its other children on the
-way out. So no task is left running behind the exit.
+way out. So no task stays alive behind the exit.
 
 **No agent process outlives the run.** This holds after success, after a
 failure, after a timeout, and after an interrupt. A leaked agent holds
@@ -369,7 +381,7 @@ test that holds each one, stands on the kanban card ^f1fz3bv.
 When a parent exits, the system gives its unreaped children to `launchd`,
 which reaps them at once. So a pid read AFTER `acp-client` exits is gone
 whether or not `acp-client` reaped it. The reap is proven where the
-reader IS the parent and stays alive to take the reading:
+reader IS the parent and stays alive to read the pid:
 `AgentProcessTests.killingAgentSurfacesDisconnectedState` kills the agent
 that `AgentProcess` spawned from the test process, and then asserts the
 pid is gone.
@@ -377,12 +389,18 @@ pid is gone.
 ## 12. What this binary must not do
 
 `plan.md` gives the import rule: "Never Router, ACPAgent, MCP, or the
-FoundationModels framework." The binary keeps it. It links FIVE things
-and nothing more: this package, the wire, the family leaf
-`FoundationModelsExtras`, the parser and the terminal package. The family
-leaf is one of the five because §10 builds `doctor` on the Extras
-`Doctorable` module. `ManifestTests` reads `Package.swift` and counts
-those five.
+FoundationModels framework." The two targets of §3 keep it.
+
+The `acp-client` executable target links ONE thing: the `AcpClientCore`
+library. It holds the `@main` type and nothing else, so it needs nothing
+else.
+
+`AcpClientCore` links FIVE things and nothing more: this package, the
+wire, the family leaf `FoundationModelsExtras`, the parser and the
+terminal package. The family leaf is one of the five because §10 builds
+`doctor` on the Extras `Doctorable` module. §3 states the same count.
+`ManifestTests` reads `Package.swift`, counts those five against the
+library, and asserts that the executable takes the library alone.
 
 ## 13. Client capabilities
 
@@ -468,12 +486,12 @@ No model is necessary, and no network is necessary.
 | N3 | `--frames`. | Done |
 | N4 | `probe`. | Done |
 | N5 | `doctor` (§10). | Done |
-| N6 | `--timeout`, the interrupt, and the reaping tests of §11. | Done |
+| N6 | `--timeout`, the interrupt, and the tests of §11 that prove the reap. | Done |
 
 N5 waited for two things, and both are behind it. The `Doctorable` module
 of `FoundationModelsExtras` is written, its `main` branch is pushed, and
 this package is resolved against it. No milestone of this plan now waits
-for an other package.
+for another package.
 
 ## 16. Open items
 
@@ -482,7 +500,7 @@ for an other package.
   answer needs a real agent that asks for it.
 - **The interactive permission policy.** §13.1 makes a headless one-turn
   run decline each permission request and each elicitation. An
-  INTERACTIVE `acp-client` needs an other answer: a prompt the person
+  INTERACTIVE `acp-client` needs another answer: a prompt the person
   reads, and a decision the person gives. What that prompt looks like,
   and which of the two elicitation modes it covers, is not decided.
 - **What `--cwd` owes.** §6.1 hands the value to the agent unchecked. A

@@ -89,6 +89,9 @@ private enum PlanSection {
         }
     }
 
+    /// The character that opens and closes a Markdown code span.
+    static let quoteMark: Character = "`"
+
     /// Returns the name a backtick-quoted table cell holds.
     ///
     /// The plan writes each subcommand name as code, so a cell that carries no
@@ -98,11 +101,36 @@ private enum PlanSection {
     /// - Returns: The text between the backticks, or `nil` when the cell holds
     ///   none.
     static func quotedName(in cell: String) -> String? {
-        let backtick = "`"
+        let backtick = String(quoteMark)
         guard cell.hasPrefix(backtick), cell.hasSuffix(backtick), cell.count > backtick.count else {
             return nil
         }
         return String(cell.dropFirst().dropLast())
+    }
+
+    /// Returns the backtick-quoted item of a section whose text ends with the
+    /// given suffix.
+    ///
+    /// The lines are joined first, because Markdown wraps a paragraph and a
+    /// code span therefore need not stand whole on one line. In the joined
+    /// text the backticks alternate: every second piece of the split is the
+    /// inside of a code span, and every other piece is prose.
+    ///
+    /// - Parameters:
+    ///   - suffix: The ending to look for, for example a file name.
+    ///   - lines: The lines of one section.
+    /// - Returns: The first such code span, or `nil` when the section holds
+    ///   none.
+    static func quotedItem(endingWith suffix: String, among lines: [Substring]) -> String? {
+        let firstCodeSpan = 1
+        let piecesForEachCodeSpan = 2
+        return lines.joined(separator: " ")
+            .split(separator: quoteMark, omittingEmptySubsequences: false)
+            .enumerated()
+            .first {
+                $0.offset % piecesForEachCodeSpan == firstCodeSpan && $0.element.hasSuffix(suffix)
+            }
+            .map { String($0.element) }
     }
 }
 
@@ -235,29 +263,36 @@ struct PlanDocumentTests {
         )
     }
 
-    @Test("section 5 names the terminal file, and that file stands")
+    @Test("section 5 names the terminal file by the path it stands at")
     func sectionFiveNamesTheTerminalFileThatStands() throws {
         let section = try PlanSection.lines(
             under: Self.terminalHeading,
             of: PlanSection.planPath
         )
-        #expect(
-            section.contains { $0.contains(Self.terminalFileName) },
+        let documented = try #require(
+            PlanSection.quotedItem(endingWith: Self.terminalFileName, among: section),
             """
-            \(PlanSection.planPath) section 5 must name \(Self.terminalFileName), \
-            which is the one file that imports the terminal package.
+            \(PlanSection.planPath) section 5 must name \(Self.terminalFileName) as \
+            code, because that is the one file that imports the terminal package.
             """
         )
 
         let sources = try RepositoryFile.swiftSourceFiles(
             underAnyOf: RepositoryFile.commandLineClientDirectories
         )
+        let onDisk = sources
+            .compactMap(RepositoryFile.relativePath(of:))
+            .filter { $0.hasSuffix("/" + Self.terminalFileName) }
+            .sorted()
         #expect(
-            sources.contains { $0.lastPathComponent == Self.terminalFileName },
+            onDisk == [documented],
             """
-            \(PlanSection.planPath) section 5 names \(Self.terminalFileName), and \
-            no file of \(RepositoryFile.commandLineClientDirectories) carries that \
-            name. The plan names a file that is not there.
+            \(PlanSection.planPath) section 5 must name the terminal file by the \
+            path it stands at, and it must be the one such file. The section writes \
+            "\(documented)", and \(RepositoryFile.commandLineClientDirectories) \
+            holds \(onDisk). A file that moves between the two source directories \
+            leaves the plan naming a directory that no longer holds it, which is \
+            the drift this test exists to catch.
             """
         )
     }
