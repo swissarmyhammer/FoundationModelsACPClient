@@ -276,6 +276,35 @@ func makeSilentAgent(pidFile: String? = nil) throws -> String {
     )
 }
 
+/// Writes a stub agent that answers `initialize` the way `initialize` says, and
+/// behaves as
+/// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:argumentsFile:)``
+/// after that.
+///
+/// The agents of this file that differ in their `initialize` answer alone share
+/// this one script, so each of them names its answer here and writes no request
+/// loop of its own.
+///
+/// - Parameters:
+///   - pidFile: Where the agent records its own pid before it answers anything,
+///     or `nil` to record none.
+///   - initialize: How the agent answers `initialize`.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+private func makeAgent(
+    pidFile: String?,
+    initialize: StubAgentInitializeAnswer
+) throws -> String {
+    try writeAgentScript(
+        requestLoop(
+            answer: stubAgentDefaultAnswer,
+            stopReason: .endTurn,
+            pidFile: pidFile,
+            initialize: initialize
+        )
+    )
+}
+
 /// Writes a stub agent that answers `initialize` with a protocol version other
 /// than the one it was sent.
 ///
@@ -294,13 +323,9 @@ func makeSilentAgent(pidFile: String? = nil) throws -> String {
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeWrongProtocolVersionAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            initialize: .reportsProtocolVersion(stubAgentUnsupportedProtocolVersion)
-        )
+    try makeAgent(
+        pidFile: pidFile,
+        initialize: .reportsProtocolVersion(stubAgentUnsupportedProtocolVersion)
     )
 }
 
@@ -382,14 +407,7 @@ func makeProbeAgent(
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            initialize: .fails
-        )
-    )
+    try makeAgent(pidFile: pidFile, initialize: .fails)
 }
 
 /// Writes a stub agent that answers `initialize` and then refuses `session/new`
@@ -466,14 +484,7 @@ func makeSessionCloseRefusingAgent(pidFile: String? = nil) throws -> String {
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeMissingProtocolVersionAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            initialize: .omitsProtocolVersion
-        )
-    )
+    try makeAgent(pidFile: pidFile, initialize: .omitsProtocolVersion)
 }
 
 /// Writes a stub agent that answers `initialize` with a `capabilities` object this build
@@ -494,14 +505,7 @@ func makeMissingProtocolVersionAgent(pidFile: String? = nil) throws -> String {
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            initialize: .reportsUnreadableCapabilities
-        )
-    )
+    try makeAgent(pidFile: pidFile, initialize: .reportsUnreadableCapabilities)
 }
 
 /// Writes a stub agent that answers `initialize` with an `authMethods` array
@@ -522,14 +526,7 @@ func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeUnreadableAuthMethodAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            initialize: .reportsUnreadableAuthMethod
-        )
-    )
+    try makeAgent(pidFile: pidFile, initialize: .reportsUnreadableAuthMethod)
 }
 
 /// Writes a stub agent that streams one answer chunk and then never sends a

@@ -51,6 +51,63 @@ comments:
     - No probe changes left in the work tree. Git status shows only the prior implementation changes.
     - next: ready for review.
   timestamp: 2026-09-05T12:05:35.696121+00:00
+- actor: wballard
+  id: 01m1rqf75qpegatth28dnzgfz7
+  text: |-
+    ### commit — changed
+    - evidence: 48bccae feat(doctor): count authMethods the forgiving decode dropped
+    - next: none
+  timestamp: 2026-09-05T12:07:39.447702+00:00
+- actor: claude-code
+  id: 01m1rqnvz8t08p30vzv7c3sayr
+  text: |-
+    ### review — findings
+    - scope: `review sha HEAD~1..HEAD` (commit 48bccae)
+    - evidence: 1 finding — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:524 (`reuse/reuse`)
+    - next: implement the open item in the `## Review Findings (2026-09-05 07:08)` section, then run the review again. The task stays in `review`.
+  timestamp: 2026-09-05T12:11:17.352455+00:00
+- actor: claude-code
+  id: 01m1rqpdtg9fhrgfy3sgzd7shw
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 3 files: `Sources/AcpClientCore/AgentCommandDoctor.swift`, `IntegrationTests/.../Support/StubAgents.swift`, `IntegrationTests/.../AgentCommandDoctorTests.swift`. Red: `unreadableAuthMethodWarnsOnTheCapabilitiesRow` failed because row 6 reported `ok`; green after the doctor change.
+    - test: green — root 223/223 in 19 suites, integration 80/80 in 12 suites, 0 warnings, 0 skipped
+    - commit: 48bccae
+    - review: findings — `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:524` (`reuse/reuse`: `makeUnreadableAuthMethodAgent()` duplicates `makeUnreadableCapabilitiesAgent()`; parameterize the `initialize` value into one shared factory)
+  timestamp: 2026-09-05T12:11:35.632652+00:00
+- actor: claude-code
+  id: 01m1rqzapq794dy08tg5qy6ks7
+  text: |-
+    Review finding worked: the `reuse/reuse` item on `StubAgents.swift`.
+
+    **What changed.** `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift` now has one private factory, `makeAgent(pidFile:initialize:)`. It writes the request loop with `stubAgentDefaultAnswer`, `.endTurn`, the `pidFile` and the `initialize` answer the caller names. The finding named two factories, and five factories in the file had that same shape and differed in their `initialize` value alone. All five now call the shared factory and write no request loop of their own: `makeWrongProtocolVersionAgent`, `makeInitializeRefusingAgent`, `makeMissingProtocolVersionAgent`, `makeUnreadableCapabilitiesAgent` and `makeUnreadableAuthMethodAgent`. Each keeps its signature, its doc comment and its `initialize` value, so no caller and no test assertion changed.
+
+    **What stays.** `makeNewSessionRefusingAgent(pidFile:)` has the same shape and differs in its `newSession: .refuses` argument, not in `initialize`. The card scoped this fold to the `initialize` factories, so that one stays as it is. The new task ^5cg7rnq records the fold for it.
+
+    **Rules read.** The rule dump for `.swift` was read whole. The rules that apply: `reuse` and `duplication` (two blocks that differ only by a value are one function with an argument), the doc-comment rules (the new factory carries a doc comment in the shape of the file), `fluent-usage` (a factory starts with `make`), and `doc-parameter-naming` (each `- Parameter` entry names the internal name).
+
+    **Suites.** `swift test` at the root: 223 tests in 19 suites passed. `swift test --package-path IntegrationTests`: 80 tests in 12 suites passed. Zero failures, zero warnings, zero skipped. The only lines that hold the words "warning" or "skip" are test names.
+
+    **Work tree.** `git status` shows the kanban files and `StubAgents.swift` only. No probe mutation stays.
+  timestamp: 2026-09-05T12:16:27.351421+00:00
+- actor: claude-code
+  id: 01m1rqzxnqngg2zpgv7ty99bw0
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift. One private factory `makeAgent(pidFile:initialize:)` added; `makeWrongProtocolVersionAgent`, `makeInitializeRefusingAgent`, `makeMissingProtocolVersionAgent`, `makeUnreadableCapabilitiesAgent` and `makeUnreadableAuthMethodAgent` now call it. The `reuse/reuse` finding is checked. `swift test`: 223 tests in 19 suites passed. `swift test --package-path IntegrationTests`: 80 tests in 12 suites passed. Zero failures, zero warnings, zero skipped. New task ^5cg7rnq holds the `makeNewSessionRefusingAgent` fold.
+    - next: /review
+  timestamp: 2026-09-05T12:16:46.775020+00:00
+- actor: claude-code
+  id: 01m1rr3knavshqanrmvwpe6qkn
+  text: |-
+    ### test — green
+    - Command: `swift build` (root). Result: build complete, no warning.
+    - Command: `swift test` (root). Result: 223 tests, 19 suites, all pass. No failure. No skip. No warning.
+    - Command: `swift build --package-path IntegrationTests`. Result: build complete, no warning.
+    - Command: `swift test --package-path IntegrationTests` (nested). Result: 80 tests, 12 suites, all pass. No failure. No skip. No warning.
+    - Work tree check: `git status --short` shows only the prior implementation files. No probe mutation is left.
+    - next: ready for review.
+  timestamp: 2026-09-05T12:18:47.594862+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Doctor row 6: also name the authMethods the forgiving decode dropped'
@@ -97,3 +154,12 @@ the decoded array did not, so the arithmetic is the whole test.
       `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift`
       with one test for each acceptance row.
 - [x] Run both suites.
+
+## Review Findings (2026-09-05 07:08)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 3 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/StubAgents.swift:524` `reuse/reuse` — Function `makeUnreadableAuthMethodAgent()` duplicates the implementation of the existing `makeUnreadableCapabilitiesAgent()` function (line 496). Both call `writeAgentScript(requestLoop(...))` with identical arguments except for the `initialize` parameter value. The difference should be parameterized into a shared helper rather than duplicated. Extract a shared helper function taking the `initialize` parameter, or structure as small case-specific wrappers calling a parameterized factory. For example: `func makeStubAgent(pidFile: String? = nil, initialize: StubAgentInitializeAnswer) throws -> String { ... }`, then have both factory functions call it with their respective `initialize` value.
