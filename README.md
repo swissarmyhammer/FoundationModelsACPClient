@@ -39,6 +39,22 @@ let entries = client.session(for: session.sessionId).entries
 For an agent in the same process, make a transport pair with
 `InMemoryTransport.pair()` and connect over the client end.
 
+## The `acp-client` binary
+
+The package also ships `acp-client`, a command-line client for any ACP v2
+agent. It starts the agent, runs one turn, prints the answer, and exits. With
+`--frames` it shows every ndJSON message in both directions, so you can see
+what an agent sent.
+
+```
+acp-client run "write a haiku" -- acp-agent acp
+acp-client probe -- npx @some-vendor/their-acp-agent --model small
+```
+
+`acp-client` is an executable **product**, so another package can depend on
+this one and spawn the binary from its own tests. The plan it is written
+against is [`cli-plan.md`](cli-plan.md).
+
 ## Install
 
 Add the package to the dependencies in your `Package.swift`:

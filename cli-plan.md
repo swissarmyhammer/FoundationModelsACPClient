@@ -55,8 +55,14 @@ does lives in a library beside it:
 |---|---|
 | Name | `AcpClientCore` |
 | Kind | A library target, and a library product |
-| Links | This package, `FoundationModelsACP`, `FoundationModelsExtras`, `ArgumentParser` and `Noora` |
+| Links | Five: this package, `FoundationModelsACP`, `FoundationModelsExtras`, `ArgumentParser` and `Noora` |
 | Path | `Sources/AcpClientCore/` |
+
+The links are **five**, and `FoundationModelsExtras` is one of them. §10
+builds the `doctor` subcommand on the Extras `Doctorable` module, so the
+family leaf is a dependency of the client and not of the container alone.
+§12 states the same count, and `ManifestTests` reads `Package.swift` and
+counts it.
 
 The library is a **product** for the same reason the binary is, and for a
 second one: SwiftPM publishes no importable module for an executable
@@ -71,27 +77,53 @@ The binary uses **swift-argument-parser**. It writes no parser of its
 own. The library gives `--help`, `--version`, the subcommand tree, and
 the usage errors.
 
-It costs no new package checkout. `FoundationModelsExtras` already
-declares `apple/swift-argument-parser` from 1.8.0, and this package
-already depends on Extras, so the library stands in `Package.resolved`
-today. `Package.swift` declares `apple/swift-argument-parser` directly,
-with the same version floor, because the binary wants the parser only and
-not the `Operations` fusion machinery that re-exports it.
+The parser costs no new package checkout. `FoundationModelsExtras`
+already declares `apple/swift-argument-parser` from 1.8.0, and this
+package already depends on Extras, so the library stands in
+`Package.resolved` today. `Package.swift` declares
+`apple/swift-argument-parser` directly, with the same version floor,
+because the binary wants the parser only and not the `Operations` fusion
+machinery that re-exports it.
+
+**The terminal package of §5 does cost more.** Noora brings three
+packages of its own into the graph: `onevcat/Rainbow`, `apple/swift-log`
+and `tuist/path`. Those three are the price of §5, and the comment beside
+the Noora dependency in `Package.swift` is where a reader meets it.
 
 ## 5. The terminal output
 
-The bar is a good Rust CLI. The agent plan adopts **Noora** (Tuist), a
-Swift CLI design system that covers what indicatif, dialoguer,
-comfy-table and owo-colors cover in Rust.
+The bar is a good Rust CLI. The family takes **Noora** (Tuist), a Swift
+CLI design system that covers what indicatif, dialoguer, comfy-table and
+owo-colors cover in Rust.
 
-**This package follows that decision.** Two CLIs in one family that draw
-tables differently is a defect a user sees.
+**This package makes that decision, and the agent package follows it.**
+Noora is taken directly, and no spike compares it with an other package.
+Two CLIs in one family that draw tables differently is a defect a user
+sees, so one decision serves both. `FoundationModelsACPAgent/cli-plan.md`
+§5.2 records the same decision, and its milestone C1 asks for no
+comparison.
 
-It keeps the same containment rule: **one file imports Noora.**
+**The risk, recorded.** Noora's own CI runs on macOS 15. This package
+needs macOS 27, so no run upstream covers the platform this binary runs
+on. A Noora release can therefore break this package with no red mark
+upstream. The containment rule below is what holds that risk to one file.
+
+The containment rule is: **one file imports Noora.**
 `Sources/AcpClientCore/TerminalOutput.swift` vends a spinner, a
 progress bar and a table, and every other file calls that type. A test
 pins the single import over both source directories of §3, so a swap
 costs one file.
+
+That file makes two decisions Noora's own defaults do not make:
+
+- It builds Noora's `Terminal` with `signalBehavior: .none`. The default
+  is `.restoreAndExit`, which installs handlers for SIGINT, SIGTERM,
+  SIGQUIT and SIGHUP. Those handlers print a cursor escape to **stdout**,
+  and then they exit 0. That writes to the one descriptor §8 keeps for
+  the answer, and it takes `Ctrl-C` away from §11, which §9 exits 4.
+- It reads `isatty` on **stderr** itself. Noora's own gate reads the
+  wrong descriptor: `Terminal.isInteractive()` reads stdin, and
+  `Terminal.isColored()` reads stdout.
 
 The rule is absolute: the terminal package writes to **stderr** only, and
 it draws nothing when stderr is not a terminal. §8 holds stdout to the
@@ -136,7 +168,7 @@ no-knowledge-of-our-runtime claim would stop being true.
 
 | Option | Effect |
 |---|---|
-| `--cwd <path>` | The working directory of the session. Default: the process working directory. |
+| `--cwd <path>` | The working directory of the **session**. Default: the process working directory. |
 | `--frames` | Write every ndJSON message to stderr, in both directions, with a direction mark. |
 | `--timeout <seconds>` | End the run if the turn does not stop in time. Default: no limit. |
 | `--verbose` | Write the session events to stderr. See §8. |
@@ -145,6 +177,29 @@ no-knowledge-of-our-runtime claim would stop being true.
 
 `--frames` is the reason the binary exists. It shows the protocol
 exchange, so a person can see what an agent sent.
+
+**`--cwd` names the session, and never this process.** `run` and `probe`
+each open a session, and each sends the value in `session/new`. The
+binary never changes its own working directory. A relative value is made
+absolute against the process working directory, and the result goes to
+the agent as it stands. The binary opens no directory and reads no file
+there, so it makes no check of its own: an agent can hold a workspace
+this process cannot see. A path that names no directory is therefore the
+agent's to refuse. §16 holds the open question.
+
+**Not every option shapes every subcommand.** The three subcommands take
+one option group, because §6 gives them one grammar. What each option
+then shapes is another matter, and each subcommand answers for itself.
+Every option of the table above shapes `run`:
+
+| Subcommand | The inert options | Why |
+|---|---|---|
+| `probe` | `--timeout` | `probe` runs no turn, and the limit bounds a turn. |
+| `doctor` | `--cwd`, `--frames`, `--timeout`, `--verbose`, `--quiet` | `doctor` opens no session, so `--cwd` names nothing. It writes its whole report to stdout and nothing to stderr, so `--verbose` and `--quiet` shape nothing. Each of its rows keeps a time limit of its own, so `--timeout` is not that limit. And `--frames` needs a seam through the check runner, which owns the frame tee its rows read. |
+
+An inert option is still parsed, and it is still checked. A `--timeout`
+of zero or less gives the turn no time at all, so it is a usage error on
+each of the three subcommands, and §9 exits it 2.
 
 ## 7. Where the prompt comes from
 
@@ -157,6 +212,21 @@ exchange, so a person can see what an agent sent.
 
 The agent's own stdin is a pipe that `AgentProcess` owns. It is never
 this binary's stdin.
+
+**The binary resolves a bare agent command itself.** It walks `PATH` in
+order, and it takes the first entry that names an executable file. An
+empty `PATH` entry is dropped: POSIX reads an empty entry as the working
+directory, and a working directory on `PATH` is how a command in a
+downloaded folder gets run by mistake.
+
+The library does not do this, and that is deliberate.
+`AgentProcess.init(command:)` refuses each command that does not start
+with `/`, because a `PATH` lookup must select WHICH `PATH` applies, and a
+library cannot answer that. A binary can: its `PATH` is the one its user
+typed the command into. So the lookup lives in the binary, and every
+value it hands `AgentProcess` is a value `AgentProcess` accepts. `run`,
+`probe` and `doctor` share the one resolver, and the first check of the
+§10 table reports its outcome.
 
 ## 8. stdout and stderr
 
@@ -180,11 +250,25 @@ we cannot know why: it may be downloading a model, as ours does. So when
 stderr is a terminal, a plain spinner runs from the prompt until the
 first chunk. It carries no claim about what the agent is doing.
 
+**The turn ends on the `idle` `state_update`, and not on the prompt
+acknowledgement.** In v2 a `PromptResponse` carries `meta` and nothing
+more: it says the agent accepted the prompt, and it names no stop reason.
+So the run reads the end of the turn off the `idle` update that comes
+after it, and §9 reads the exit code off the stop reason that update
+carries.
+
+**The decline lines of §13.1 are the one exception** to "a default run
+writes nothing to stderr until it fails". A run that refused a permission
+request, or an elicitation, writes one line for each. Those lines go out
+at every verbosity, `--quiet` included.
+
 ## 9. Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | `end_turn`, or a report that ran |
+| 0 | An `idle` that reports NO stop reason. The schema makes the field optional, and an agent that went idle without a reason still went idle. |
+| 0 | A stop reason this build does not know, which the generated `StopReason` carries as `unknown`. A turn that ended for a newer reason still ended. |
 | 1 | An error: spawn, protocol, or I/O. `doctor` found an error. |
 | 2 | A usage error |
 | 3 | `refusal` |
@@ -195,6 +279,10 @@ first chunk. It carries no claim about what the agent is doing.
 This is the same table the agent CLI uses. Code 5 exists because the Rust
 doctor's code 2 for errors would collide with the usage error. See
 `doctor-plan.md` §5.
+
+The three rows of code 0 are one rule: a turn that ENDED is a success,
+whatever the agent said about why. A non-zero code for an unknown reason
+would make each later addition to the schema look like a failure.
 
 ## 10. The `doctor` subcommand
 
@@ -209,13 +297,44 @@ package writes one `Doctorable` conformance over an agent command:
 | It writes valid ndJSON, and nothing else, to stdout | An agent that prints a banner to stdout — the most common ACP defect |
 | `initialize` answers inside a time limit | An agent that hangs |
 | The protocol version is one we support | A v1 agent, or a newer draft |
-| The advertised capabilities are readable | A malformed `initialize` result |
+| Each member of the `initialize` answer decodes, and none is dropped in silence | A malformed `initialize` result |
 | The process ends when its stdin closes, and it leaves no child | A leaked agent |
 
 The third row is worth the command on its own. `plan.md` for the agent
 side makes "the agent MUST NOT write non-ACP content to stdout" a
 protocol MUST, and a foreign agent that breaks it fails in a way that
 looks like a parsing bug in **our** client.
+
+Three rows make a decision the table alone does not show.
+
+**Row 3 reads what `initialize` produced, and never what it hopes will
+arrive.** A conformant ACP agent writes to stdout only in ANSWER to a
+request. So a row that read stdout and waited for a line would wait for
+ever against a CORRECT agent. Rows 3 and 4 are two rows and one exchange:
+the doctor sends `initialize`, waits out its limit at most, and then
+judges every whole line the agent wrote while that ran. A banner stands
+ahead of the answer in that reading, so row 3 still catches it.
+
+**Row 6 reads the RAW `initialize` answer, and never the decoded value.**
+The generated `InitializeResponse` decodes `capabilities` and
+`authMethods` forgivingly: a member of the wrong shape becomes a default,
+and it throws nothing. A row that read the decoded value could therefore
+never fail, and a check that cannot fail is not a check. So the row
+decodes the raw answer itself and compares the two readings. Only `info`
+and `protocolVersion` can make the decode throw, and the row reports that
+as an ERROR. Each member the forgiving decode dropped in silence is a
+WARNING, and the row names it.
+
+**Row 7 watches the process GROUP, and it runs BEFORE the teardown.**
+`kill(pid, 0)` cannot tell a running agent from an unreaped zombie of
+one, and an agent that leaves a child holds its own stdout open through
+that child. `killpg(pid, 0)` asks the question the row means to ask: is
+anything left. The row runs before the connection closes, because closing
+the connection group-kills the agent, and a row after that would report
+`ok` against every agent — for the reason row 6 exists. The verdict is a
+WARNING and never an error: such an agent answered every request, so it
+is usable, and it leaks. §9 gives that verdict exit code 5, and this row
+is the reason that code exists.
 
 `doctor` exits 0, 1 or 5 (§9). `--json` writes the report to stdout.
 
@@ -230,15 +349,40 @@ gives in "Transports, and who owns the agent process".
 that arrived, reaps the agent, and exits 4. A second `Ctrl-C` ends the
 run at once, and it still reaps the agent.
 
+The `--timeout` limit of §6.1 and the `Ctrl-C` handling above are both
+CHILDREN of the task group that runs the turn. Neither one races that
+group from outside. A child that sleeps and then throws the timeout has
+no race to lose: the group IS the race, the throw is the limit and
+nothing else, and the group cancels and drains its other children on the
+way out. So no task is left running behind the exit.
+
 **No agent process outlives the run.** This holds after success, after a
 failure, after a timeout, and after an interrupt. A leaked agent holds
 gigabytes of model weights, so a test asserts each path.
 
+Each path is proven with a REAL pid. The stub agent writes its own pid to
+a file, and the test reads that pid after the binary exits and asserts
+`kill(pid, 0)` reports the process is gone. The map of the paths, and the
+test that holds each one, stands on the kanban card ^f1fz3bv.
+
+**The REAP itself is not proven from outside the run, and it cannot be.**
+When a parent exits, the system gives its unreaped children to `launchd`,
+which reaps them at once. So a pid read AFTER `acp-client` exits is gone
+whether or not `acp-client` reaped it. The reap is proven where the
+reader IS the parent and stays alive to take the reading:
+`AgentProcessTests.killingAgentSurfacesDisconnectedState` kills the agent
+that `AgentProcess` spawned from the test process, and then asserts the
+pid is gone.
+
 ## 12. What this binary must not do
 
 `plan.md` gives the import rule: "Never Router, ACPAgent, MCP, or the
-FoundationModels framework." The binary keeps it. It links this package,
-the wire, the parser and the terminal package, and nothing more.
+FoundationModels framework." The binary keeps it. It links FIVE things
+and nothing more: this package, the wire, the family leaf
+`FoundationModelsExtras`, the parser and the terminal package. The family
+leaf is one of the five because §10 builds `doctor` on the Extras
+`Doctorable` module. `ManifestTests` reads `Package.swift` and counts
+those five.
 
 ## 13. Client capabilities
 
@@ -253,7 +397,35 @@ value with `auth.terminal`.
 **It does not do this in N1 to N6.** Terminal authentication needs the
 binary to run the agent invocation again, in an interactive terminal, and
 that is its own work. The first version advertises what the container
-advertises. §15 holds the question.
+advertises. §16 holds the question.
+
+### 13.1 Permission and elicitation
+
+`acp-client` sends `ACPClient.advertisedCapabilities`. That value
+advertises elicitation in both modes, so a foreign agent may send
+`session/request_permission` or `elicitation/create` in the middle of the
+one turn.
+
+**The binary declines each one, and it writes one line to stderr for
+each.** A permission request gets the request's own rejection option, or
+the `cancelled` outcome when the request offers none. An elicitation gets
+the `decline` action, in form mode and in url mode alike. No URL is
+opened, and no value the agent asked for goes back over ACP.
+
+The reason is the shape of the binary. A headless one-turn run has no
+person to ask. The container holds such a request as observable state
+until a UI answers it, and there is no UI here, so the turn would wait
+for ever. And a batch run must never grant an agent something a person
+did not see.
+
+The decline line is what a reader needs. A run that refused an agent
+something must say what it refused, or the person who reads the
+transcript cannot tell a refusal from an answer the agent never asked
+for. The line goes out at every verbosity, `--quiet` included, and §8
+names it as the one exception to its stderr rule.
+
+An INTERACTIVE `acp-client` needs a different answer, and §16 holds that
+question.
 
 ## 14. Testing
 
@@ -274,31 +446,50 @@ advertises. §15 holds the question.
 | An interrupt gives exit 4, and it reaps the agent. | none |
 | No agent process outlives the run, in each exit path. | none |
 
-The stub agent of the present suite serves each row. The `doctor` rows
-need two more stubs: one that writes a banner to stdout, and one that
-never answers. Both are a few lines.
+Each row above is written, and each one is green. The stubs stand in two
+places. The unit suite drives an in-process transport pair, and the
+nested `IntegrationTests` package drives the built binary against shell
+stubs. The two `doctor` stubs this table asks for — one that writes a
+banner to stdout, and one that never answers — are among them.
+
+The split of the two suites is structural. This package's manifest
+declares no integration target, so `swift test` runs the unit tests and
+nothing else. The other suite runs with
+`swift test --package-path IntegrationTests`. CI runs both.
 
 No model is necessary, and no network is necessary.
 
 ## 15. Milestones
 
-| ID | Work |
-|---|---|
-| N1 | The target, the product, the `ArgumentParser` dependency, the subcommand tree, and the usage text. |
-| N2 | `run`: start the agent, run one turn, print the answer. §7 to §9. |
-| N3 | `--frames`. |
-| N4 | `probe`. |
-| N5 | `doctor` (§10). Blocked by Extras D1 to D3. |
-| N6 | `--timeout`, the interrupt, and the reaping tests of §11. |
+| ID | Work | State |
+|---|---|---|
+| N1 | The target, the product, the `ArgumentParser` dependency, the subcommand tree, and the usage text. | Done |
+| N2 | `run`: start the agent, run one turn, print the answer. §7 to §9. | Done |
+| N3 | `--frames`. | Done |
+| N4 | `probe`. | Done |
+| N5 | `doctor` (§10). | Done |
+| N6 | `--timeout`, the interrupt, and the reaping tests of §11. | Done |
 
-N5 waits for the `Doctorable` module in Extras. Every other milestone is
-free of an upstream block.
+N5 waited for two things, and both are behind it. The `Doctorable` module
+of `FoundationModelsExtras` is written, its `main` branch is pushed, and
+this package is resolved against it. No milestone of this plan now waits
+for an other package.
 
 ## 16. Open items
 
 - **Terminal authentication.** Does `acp-client` advertise `auth.terminal`
   and re-run the agent invocation in the user's terminal? See §13. The
   answer needs a real agent that asks for it.
+- **The interactive permission policy.** §13.1 makes a headless one-turn
+  run decline each permission request and each elicitation. An
+  INTERACTIVE `acp-client` needs an other answer: a prompt the person
+  reads, and a decision the person gives. What that prompt looks like,
+  and which of the two elicitation modes it covers, is not decided.
+- **What `--cwd` owes.** §6.1 hands the value to the agent unchecked. A
+  path that names no directory is therefore the agent's to refuse. Should
+  the binary refuse it first, with the usage row of §9? The answer needs
+  a person, because a session directory can name a workspace this process
+  cannot see.
 - **More than one turn.** The binary runs one turn. A session that
   continues over several prompts is a different tool, and it is not in
   this plan.

@@ -271,12 +271,37 @@ comments:
   id: 01m1qwc05v48hv26tz8f7k7y52
   text: "### implement — changed\n- evidence: 3 files —\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/CLITestSupport.swift`\n  (the bounded `PipeDrain`, `DrainedPipe`, `pipeDrainGrace`, the one\n  `polled(within:until:)`; `readToEnd(_:)` and `drainedBytes(from:)` deleted),\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/CLITestSupportTests.swift`\n  (two new drain tests),\n  `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/NoLeakedAgentTests.swift`\n  (the header, the `noLeakRunBound` doc, and the mid-turn case doc).\n  `swift test` — 215 tests in 17 suites, passed. \n  `swift test --package-path IntegrationTests` — 77 tests in 12 suites, passed,\n  19.1 s. No warnings in either package.\n  Finding :63 proven fixed by the re-run mutation: `killpg`→`kill` now FAILS in\n  16.5 s with 3 named issues, where before the fix it printed nothing and was\n  killed at 180 s.\n  Findings :39 and :85 proven by the second mutation: `waitpid` removed from\n  `terminateCurrent()` reds 4 `AgentProcessTests` rows, which is the seam the\n  card now names for the reap.\n  All three review findings are checked, and the acceptance row and the Tests\n  row that carried the unassertable zombie claim were changed.\n- next: `/review`.\n"
   timestamp: 2026-09-05T04:14:02.427696+00:00
+- actor: claude-code
+  id: 01m1qwsqe2z8h3ry7ry57kka7a
+  text: |
+    ### review — clean
+
+    - evidence: `review sha 1186896~1..1186896`, 7 validators attempted, 0 findings, 0 confirmed, 0 refuted. 3 files reviewed, 2 skipped (`.kanban/`, from `.reviewignore`). All three prior findings are checked and genuinely fixed. Directed verification of the four judgement points found no new defect. `timeout 900 swift test --package-path IntegrationTests` — 77 tests in 12 suites, 19.07 s, 0 failures, 0 warnings. Working tree clean, no stray test process.
+    - next: none. Task moved to `done`.
+  timestamp: 2026-09-05T04:21:32.226287+00:00
+- actor: claude-code
+  id: 01m1qwtz69ew41gx9hftm0qbta
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files. The harness drains both pipes as the bytes arrive; the zombie claim was rewritten rather than left unassertable.
+    - test: green — root 215 passed in 17 suites, integration 77 passed in 12 suites in 19.1 s, 0 warnings
+    - commit: 1186896 fix(integration): drain CLI test pipes as bytes arrive to stop leak-wedged suites
+    - review: clean — zero new findings, task moved to done
+
+    The pipe-drain fix is the one that pays back beyond this card. A leaked agent used to inherit and hold open the harness's stderr write end, and `FileHandle.readToEnd()` is synchronous and non-cancellable, so a leak WEDGED the suite instead of failing it. Proven both ways: the `killpg`→`kill` mutation hung until killed at 180 s before the fix, and now fails in 16.5 s naming the pid that outlived the run. That is the same failure mode that wedged two `swift-test` processes on this board earlier.
+
+    The review checked the drain carefully and found it sound: no lost bytes (the kernel buffer holds what arrives before the handler is installed, and the end-of-file flag is set under the same lock that appends), no data race, no handler left installed (two closings, both needed, because Foundation keeps calling a handler after end of file), and the 2-second grace cannot truncate a legitimate slow write — it begins only after the binary has already exited, so the only process that could still hold a write end is a leaked descendant.
+
+    The zombie claim is now honest. It cannot be measured from that sweep at all: `launchd` reaps an orphan the moment its parent exits. The acceptance row names `AgentProcessTests.killingAgentSurfacesDisconnectedState` instead, where the test process IS the agent's parent and stays alive to take the reading, and the file header opens by denying the claim outright and giving the reason.
+
+    44 call sites were checked: the bytes are identical in the non-leak case, `standardError` no longer throws (which narrows what callers must handle), and the bound grew by two graces, still under the suite backstop.
+  timestamp: 2026-09-05T04:22:12.937294+00:00
 depends_on:
 - 01M1MPG0WT31XJVP37C3CAT35C
 - 01M1MPJRCZKG9CEZ7N5TDX6EDK
 - 01M1MPKCCB56CA910R6JA5XSFA
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a280
 title: Prove no agent process outlives the run, on every exit path
 ---
 ## What
