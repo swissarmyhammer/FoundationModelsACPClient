@@ -508,6 +508,49 @@ func makeUnreadableCapabilitiesAgent(pidFile: String? = nil) throws -> String {
     try makeAgent(pidFile: pidFile, initialize: .reportsUnreadableCapabilities)
 }
 
+/// Writes a stub agent that answers `initialize` with a `capabilities` member
+/// that is a string rather than an object.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 is what this one is
+/// for. `InitializeResponse` reads `capabilities` with `forgivingDecode`, which
+/// degrades a value that is not an object to the empty default and throws
+/// nothing. The client then believes the agent supports no capability at all,
+/// and a row that compared the members of an object would have no object to
+/// read. Only a real agent that sends this shape can prove the row names the
+/// member instead, as it names an `authMethods` member that is not an array.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNonObjectCapabilitiesAgent(pidFile: String? = nil) throws -> String {
+    try makeAgent(pidFile: pidFile, initialize: .reportsNonObjectCapabilities)
+}
+
+/// Writes a stub agent that answers `initialize` with a `capabilities` member
+/// set to `null`.
+///
+/// The schema lets the member be absent, and `null` is how an agent that
+/// writes every member spells absent. The decode reads it as no member, and
+/// the sixth row of the check table of `cli-plan.md` §10 must read it the same
+/// way rather than as a member of the wrong shape, as it does for an
+/// `authMethods` member set to `null`. Only a real agent that sends `null` can
+/// prove the row tells the two apart.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNullCapabilitiesAgent(pidFile: String? = nil) throws -> String {
+    try makeAgent(pidFile: pidFile, initialize: .reportsNullCapabilities)
+}
+
 /// Writes a stub agent that answers `initialize` with an `authMethods` array
 /// that holds one method this build can read beside one element it cannot.
 ///
@@ -1328,6 +1371,13 @@ private enum StubAgentInitializeAnswer {
     /// cannot read.
     case reportsUnreadableCapabilities
 
+    /// The agent answers with a `capabilities` member that is a string rather
+    /// than an object.
+    case reportsNonObjectCapabilities
+
+    /// The agent answers with a `capabilities` member set to `null`.
+    case reportsNullCapabilities
+
     /// The agent answers with an `authMethods` array that holds
     /// ``stubAgentReadableAuthMethod`` beside
     /// ``stubAgentUnreadableAuthMethodCount`` elements this build cannot read.
@@ -1372,6 +1422,18 @@ private func readableStubAgentCapabilities() -> [String: Any] {
 private func unreadableStubAgentCapabilities() -> [String: Any] {
     ["session": "yes"]
 }
+
+/// The `capabilities` member ``makeNonObjectCapabilitiesAgent(pidFile:)``
+/// answers `initialize` with.
+///
+/// The schema states `capabilities` as an object, and this sends a bare
+/// capability name in its place, which is the shape an agent that named its
+/// surface rather than describing it writes. `InitializeResponse` reads the
+/// member with `forgivingDecode`, so the decode gives the empty default and
+/// throws nothing at all: the client silently believes the agent supports no
+/// capability. That silence is what the sixth row of the check table of
+/// `cli-plan.md` §10 reports.
+private let nonObjectStubAgentCapabilities = "session"
 
 /// One element of the `authMethods` array
 /// ``makeUnreadableAuthMethodAgent(pidFile:)`` answers `initialize` with, and
@@ -1465,6 +1527,18 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
             protocolVersion: ACPClient.supportedProtocolVersion,
             capabilities: unreadableStubAgentCapabilities()
         )
+    case .reportsNonObjectCapabilities:
+        try initializeResult(
+            authMethodsMember: nil,
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            capabilitiesMember: nonObjectStubAgentCapabilities
+        )
+    case .reportsNullCapabilities:
+        try initializeResult(
+            authMethodsMember: nil,
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            capabilitiesMember: NSNull()
+        )
     case .reportsUnreadableAuthMethod:
         try initializeResult(
             reporting: [stubAgentReadableAuthMethod],
@@ -1488,7 +1562,7 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
         try initializeResult(
             authMethodsMember: nonArrayStubAgentAuthMethods,
             protocolVersion: ACPClient.supportedProtocolVersion,
-            capabilities: unreadableStubAgentCapabilities()
+            capabilitiesMember: unreadableStubAgentCapabilities()
         )
     case .fails:
         try requestError(
@@ -1528,16 +1602,17 @@ private func initializeResult(
     return try initializeResult(
         authMethodsMember: advertised.isEmpty ? nil : advertised,
         protocolVersion: protocolVersion,
-        capabilities: capabilities
+        capabilitiesMember: capabilities
     )
 }
 
-/// The successful `initialize` answer, with its `authMethods` member written
-/// exactly as the caller gave it.
+/// The successful `initialize` answer, with its `authMethods` and
+/// `capabilities` members written exactly as the caller gave them.
 ///
-/// This is the one place the member reaches the wire, so it is where an agent
-/// that sends the member in a shape the schema does not state is scripted.
-/// The array-building overload above is what every conformant stub uses.
+/// This is the one place the two members reach the wire, so it is where an
+/// agent that sends either one in a shape the schema does not state is
+/// scripted. The array-building overload above is what every conformant stub
+/// uses.
 ///
 /// - Parameters:
 ///   - authMethodsMember: The `authMethods` member, as the untyped JSON
@@ -1545,17 +1620,19 @@ private func initializeResult(
 ///     `NSNull` writes `null`, and a string writes a string.
 ///   - protocolVersion: The protocol version to answer with, or `nil` to leave
 ///     the member out.
-///   - capabilities: The `capabilities` member to answer with. The default is
-///     the baseline session surface every conformant stub advertises.
+///   - capabilitiesMember: The `capabilities` member, as the untyped JSON
+///     `JSONSerialization` writes. An `NSNull` writes `null`, and a string
+///     writes a string. The default is the baseline session surface every
+///     conformant stub advertises.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
 private func initializeResult(
     authMethodsMember: Any?,
     protocolVersion: ProtocolVersion?,
-    capabilities: [String: Any] = readableStubAgentCapabilities()
+    capabilitiesMember: Any = readableStubAgentCapabilities()
 ) throws -> String {
     var result: [String: Any] = [
-        "capabilities": capabilities,
+        "capabilities": capabilitiesMember,
         "info": ["name": stubAgentName, "version": stubAgentVersion],
     ]
     if let protocolVersion {

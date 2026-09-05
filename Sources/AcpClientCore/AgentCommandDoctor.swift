@@ -562,16 +562,26 @@ struct AgentCommandDoctor: Doctorable {
     /// The `capabilities` members the agent sent and the decode did not keep,
     /// as one loss.
     ///
+    /// Two shapes are a loss, as they are for `authMethods`. A member that is
+    /// not an object at all — a string, a number, an array — is one the decode
+    /// degrades to the empty default whole, so the client believes the agent
+    /// supports no capability; the member itself is what that loss names. An
+    /// object is compared member by member, and the loss names each member of
+    /// it the decode dropped.
+    ///
     /// - Parameters:
     ///   - answer: The members of the raw initialize answer, untyped.
     ///   - capabilities: What the decode made of that answer's `capabilities`.
-    /// - Returns: The loss, naming each dropped member, or `nil` when the
-    ///   decode kept every member the agent sent.
+    /// - Returns: The loss, naming the member or each dropped member of it, or
+    ///   `nil` when the agent sent no `capabilities` member or the decode kept
+    ///   every member of it.
     private static func capabilityMembersLoss(
         in answer: [String: Any],
         keeping capabilities: AgentCapabilities
     ) -> DecodeLoss? {
-        let dropped = membersTheDecodeDropped(from: answer, keeping: capabilities)
+        guard let sent = memberTheAgentSent(named: capabilitiesKey, in: answer) else { return nil }
+        guard let sentMembers = sent as? [String: Any] else { return capabilitiesShapeLoss }
+        let dropped = membersTheDecodeDropped(from: sentMembers, keeping: capabilities)
         guard !dropped.isEmpty else { return nil }
         return DecodeLoss(
             message: """
@@ -614,7 +624,7 @@ struct AgentCommandDoctor: Doctorable {
         in answer: [String: Any],
         keeping authMethods: [AuthMethod]?
     ) -> DecodeLoss? {
-        guard let sent = answer[authMethodsKey], !(sent is NSNull) else { return nil }
+        guard let sent = memberTheAgentSent(named: authMethodsKey, in: answer) else { return nil }
         guard let elements = sent as? [Any] else { return authMethodsShapeLoss }
         let dropped = elements.count - (authMethods?.count ?? 0)
         guard dropped > 0 else { return nil }
@@ -631,25 +641,80 @@ struct AgentCommandDoctor: Doctorable {
         )
     }
 
-    /// The loss for an `authMethods` member that is not an array at all.
+    /// One member of the raw answer, when the agent sent it.
     ///
-    /// The decode degrades such a member to `nil` whole and throws nothing,
-    /// so the row names the member rather than a count: there is no array to
-    /// count, and the whole of it is what the client lost.
-    private static let authMethodsShapeLoss = DecodeLoss(
-        message: """
-            the agent sent an \(authMethodsKey) member that is not an array, and \
-            the decode dropped it whole
-            """,
-        fix: """
-            Send \(authMethodsKey) as the array the negotiated protocol version \
-            states. A member of another shape becomes no method at all, so a \
-            person cannot log in with any of them.
+    /// A `null` member is absent. The schema lets both members the sixth row
+    /// reads be left out, and `null` is how an agent that writes every member
+    /// spells left out, so the decode reads it as no member and the row must
+    /// read it the same way rather than as a member of the wrong shape. Both
+    /// halves of the row read their member here, so the two cannot disagree
+    /// about what absent means.
+    ///
+    /// - Parameters:
+    ///   - name: The member to read.
+    ///   - answer: The members of the raw initialize answer, untyped.
+    /// - Returns: The member's value, or `nil` when the agent left the member
+    ///   out or sent `null`.
+    private static func memberTheAgentSent(named name: String, in answer: [String: Any]) -> Any? {
+        guard let sent = answer[name], !(sent is NSNull) else { return nil }
+        return sent
+    }
+
+    /// The loss for an `authMethods` member that is not an array at all.
+    private static let authMethodsShapeLoss = shapeLoss(
+        of: authMethodsKey,
+        expecting: "an array",
+        costing: """
+            A member of another shape becomes no method at all, so a person \
+            cannot log in with any of them.
             """
     )
 
-    /// The names of the `capabilities` members the agent sent and the decode
-    /// did not keep.
+    /// The loss for a `capabilities` member that is not an object at all.
+    private static let capabilitiesShapeLoss = shapeLoss(
+        of: capabilitiesKey,
+        expecting: "an object",
+        costing: """
+            A member of another shape becomes no capability at all, so the \
+            client asks the agent for nothing it can do.
+            """
+    )
+
+    /// The loss for a member the agent sent in a shape the schema does not
+    /// state at all.
+    ///
+    /// The decode degrades such a member to its default whole and throws
+    /// nothing, so the row names the member rather than what it held: there is
+    /// nothing inside it to compare, and the whole of it is what the client
+    /// lost. Both halves of the row build their shape loss here, so the two
+    /// cannot drift apart in what they say.
+    ///
+    /// - Parameters:
+    ///   - member: The name of the member, as the answer carries it.
+    ///   - shape: The shape the schema states for the member, with its
+    ///     article.
+    ///   - cost: What the client loses when the member is dropped, as the
+    ///     sentence that ends the fix.
+    /// - Returns: The loss.
+    private static func shapeLoss(
+        of member: String,
+        expecting shape: String,
+        costing cost: String
+    ) -> DecodeLoss {
+        DecodeLoss(
+            message: """
+                the \(member) member the agent sent is not \(shape), and the \
+                decode dropped it whole
+                """,
+            fix: """
+                Send \(member) as \(shape), in the form the negotiated protocol \
+                version states. \(cost)
+                """
+        )
+    }
+
+    /// The names of the members of one `capabilities` object the decode did
+    /// not keep.
     ///
     /// The comparison is a round trip, and not a list of member names spelled
     /// here: the decoded capabilities are encoded again, and every key the raw
@@ -661,22 +726,13 @@ struct AgentCommandDoctor: Doctorable {
     /// its own to go stale against the schema.
     ///
     /// - Parameters:
-    ///   - answer: The members of the raw initialize answer, untyped.
-    ///   - capabilities: What the decode made of that answer's `capabilities`.
+    ///   - sentMembers: The members of the raw `capabilities` object, untyped.
+    ///   - capabilities: What the decode made of that object.
     /// - Returns: The names of the lost members, sorted, or an empty array.
     private static func membersTheDecodeDropped(
-        from answer: [String: Any],
+        from sentMembers: [String: Any],
         keeping capabilities: AgentCapabilities
     ) -> [String] {
-        guard let sent = answer[capabilitiesKey] else {
-            return []
-        }
-        guard let sentMembers = sent as? [String: Any] else {
-            // The agent sent a `capabilities` value that is not an object at
-            // all, so the decode kept none of it. The member itself is the one
-            // thing to name.
-            return [capabilitiesKey]
-        }
         let read = encodedMemberNames(of: capabilities)
         return sentMembers.keys
             .filter { !(sentMembers[$0] is NSNull) && !read.contains($0) }

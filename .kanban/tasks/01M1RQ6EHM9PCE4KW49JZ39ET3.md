@@ -44,6 +44,73 @@ comments:
     - No fix was needed. No file was changed.
     - next: ready for review.
   timestamp: 2026-09-05T12:33:49.737472+00:00
+- actor: claude-code
+  id: 01m1rs0gxhepenr373bytww3th
+  text: |-
+    ### commit — changed
+    - evidence: e347890 feat(doctor): warn when authMethods is not null and not an array
+  timestamp: 2026-09-05T12:34:35.057758+00:00
+- actor: claude-code
+  id: 01m1rsc51jqkb7kq25ye79ww12
+  text: |-
+    ### review — findings
+    - scope: `review sha HEAD~1..HEAD` (commit e347890)
+    - evidence: 1 finding — Sources/AcpClientCore/AgentCommandDoctor.swift:509
+    - next: correct the open item in the `## Review Findings (2026-09-05 07:34)` section, then run the review again
+  timestamp: 2026-09-05T12:40:56.114231+00:00
+- actor: claude-code
+  id: 01m1rscpsdcr1m41ee46kcjdz2
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 3 files: `Sources/AcpClientCore/AgentCommandDoctor.swift` (not-an-array arm in `authMethodsLoss`), `IntegrationTests/.../Support/StubAgents.swift` (3 answers, 3 factories), `IntegrationTests/.../AgentCommandDoctorTests.swift` (3 tests). Red then green for the string-member test, the two-losses test, and the `null` test.
+    - test: green — root 223/223 in 19 suites, integration 83/83 in 12 suites, 0 warnings, 0 skipped
+    - commit: e347890
+    - review: findings — `Sources/AcpClientCore/AgentCommandDoctor.swift:509` (`completeness/invariant-propagation`: the comment says the row names a member that is not the object or the array the schema states, but `capabilityMembersLoss` has no explicit not-an-object check parallel to `authMethodsShapeLoss`)
+  timestamp: 2026-09-05T12:41:14.285301+00:00
+- actor: claude-code
+  id: 01m1rsjn0fgxkkfx7dvm6cqvna
+  text: |-
+    Research for the open finding, before the first edit.
+
+    What happens today when `capabilities` is a string:
+    - The wire reads `capabilities` with `forgivingDecode(AgentCapabilities.self, forKey:, default: AgentCapabilities())`. That helper is `forgivingDecodeIfPresent(...) ?? fallback()`, so a string, a number, an array and `null` all become the empty default and nothing throws. Row 6 sees a decoded answer.
+    - `membersTheDecodeDropped(from:keeping:)` reads the raw member with `as? [String: Any]`. A string is not that, so it returns `[capabilitiesKey]`. `capabilityMembersLoss` then builds the message "the agent sent capability members this build cannot read, and the decode dropped them: capabilities". So the row does warn, and the message does hold the word `capabilities`. The card was correct on that point.
+    - The message is wrong in shape: it lists `capabilities` as if it were one dropped member OF the capabilities object, beside the fix "Send each capability in the shape the negotiated protocol version states". The `authMethods` half has its own `authMethodsShapeLoss` that says the member is not an array and the decode dropped it whole. The two halves are not parallel, and that is the finding.
+    - A second divergence stands in the same code: `null` in `capabilities` is also not `[String: Any]`, so today it is reported as a loss named `capabilities`. Rule 4 in the file header says "a `null` member is absent, which the schema allows, and is no loss" for both members. The `authMethods` half treats `NSNull` as absent; the `capabilities` half does not.
+
+    Plan (TDD, one arm at a time):
+    1. Test: an agent that sends `capabilities` as a string warns on row 6, and the message names `capabilities` and says the member is not an object. Run: red, because today's message says "capability members ... dropped them: capabilities" and never says the shape.
+    2. Make the two halves structurally parallel. One shared shape-loss builder makes both `authMethodsShapeLoss` and a new `capabilitiesShapeLoss`. `capabilityMembersLoss` reads the raw member in the same three steps `authMethodsLoss` does: absent is no loss, wrong shape is the shape loss, right shape is the member comparison. `membersTheDecodeDropped` then takes the members of the object, and no longer decides the shape. Run: green.
+    3. Test: an agent that sends `capabilities` as `null` passes row 6. Run: red, because the new arm reads `NSNull` as a member of the wrong shape.
+    4. One shared reader treats a `null` member as absent for both halves. Run: green. Then both suites.
+
+    Stubs: two `StubAgentInitializeAnswer` cases and two factories on `makeAgent(pidFile:initialize:)`. The raw overload `initializeResult(authMethodsMember:protocolVersion:capabilities:)` types `capabilities` as `[String: Any]`, so it must take the member untyped to write a string or `null`.
+  timestamp: 2026-09-05T12:44:29.071226+00:00
+- actor: claude-code
+  id: 01m1rsybg8a3vwp45x2979kqfc
+  text: |-
+    ### implement — changed
+
+    Finding worked, word for word: `Sources/AcpClientCore/AgentCommandDoctor.swift:509` `completeness/invariant-propagation` — The comment at lines 509-510 (marked as changed) states that the row reports members "by name when it is not the object or the array the schema states". The code at line 618 adds an explicit type check for `authMethods` not being an array. However, `capabilityMembersLoss` lacks a corresponding explicit check for `capabilities` not being an object, despite the comment indicating both should be handled identically. Add an explicit type check in `capabilityMembersLoss` or at the start of `capabilitiesCheck` to detect when the `capabilities` member is not a dictionary/object, returning a shape loss message parallel to `authMethodsShapeLoss`.
+
+    - evidence: 3 files.
+      - `Sources/AcpClientCore/AgentCommandDoctor.swift`: `capabilityMembersLoss` now reads the raw member in the same three steps as `authMethodsLoss`: a member the agent left out or sent as `null` is no loss, a member that is not an object is the new `capabilitiesShapeLoss`, and an object is compared member by member. One shared builder, `shapeLoss(of:expecting:costing:)`, makes both `authMethodsShapeLoss` and `capabilitiesShapeLoss`, so the two messages cannot drift apart. One shared reader, `memberTheAgentSent(named:in:)`, treats a `null` member as absent for both halves. `membersTheDecodeDropped(from:keeping:)` now takes the members of the `capabilities` object and no longer decides the shape. The doc comments of the four functions state the arms.
+      - `IntegrationTests/.../Support/StubAgents.swift`: two `StubAgentInitializeAnswer` cases and two factories on the shared `makeAgent(pidFile:initialize:)`: `makeNonObjectCapabilitiesAgent` (sends `"capabilities": "session"`) and `makeNullCapabilitiesAgent` (sends `"capabilities": null`). The raw overload `initializeResult(authMethodsMember:protocolVersion:capabilitiesMember:)` now takes the `capabilities` member untyped, so a string and `null` reach the wire.
+      - `IntegrationTests/.../AgentCommandDoctorTests.swift`: two tests, and the header comment now counts six failing agents and four accepted ones.
+    - red, then green:
+      1. `aNonObjectCapabilitiesMemberWarnsOnTheCapabilitiesRow` written first. Run: red. The row did warn, and its message did hold the word `capabilities`, but it read "the agent sent capability members this build cannot read, and the decode dropped them: capabilities" and never said the shape. Then the shape-loss path landed. Run: green, with the four older row-6 tests green.
+      2. `aNullCapabilitiesMemberPassesTheCapabilitiesRow` written next. Run: red, `capabilities.status → .warning`, because the new arm read `NSNull` as a member of the wrong shape. Then the shared reader landed. Run: green.
+    - suites: `swift test` at the root: 223 tests in 19 suites passed. `swift test --package-path IntegrationTests`: 85 tests in 12 suites passed. Zero failures, zero compiler warnings, zero skipped. The two "Executed 0 tests" lines are the empty XCTest bundle of each package.
+    - discovered: before this change, `capabilities: null` was reported as a loss named `capabilities`, against rule 4 in the file header, which says a `null` member is no loss for either member. The shared reader removes that divergence too, and the second test proves it.
+    - next: `/review`. The task stays in `doing`.
+  timestamp: 2026-09-05T12:50:52.552101+00:00
+- actor: claude-code
+  id: 01m1rt24d7v0dzryj7heexpzzs
+  text: |-
+    ### test — green
+    - evidence: `swift test` — 223 tests, 19 suites, all passed, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests` — 85 tests, 12 suites, all passed, 0 failures, 0 warnings, 0 skipped.
+    - next: ready for the next step.
+  timestamp: 2026-09-05T12:52:56.359213+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Doctor row 6: report an authMethods member that is not an array'
@@ -80,3 +147,12 @@ that is not an object. See `membersTheDecodeDropped(from:keeping:)` in
       `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentCommandDoctorTests.swift`
       with one test for each acceptance row.
 - [x] Run both suites.
+
+## Review Findings (2026-09-05 07:34)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 3 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Sources/AcpClientCore/AgentCommandDoctor.swift:509` `completeness/invariant-propagation` — The comment at lines 509-510 (marked as changed) states that the row reports members "by name when it is not the object or the array the schema states". The code at line 618 adds an explicit type check for `authMethods` not being an array. However, `capabilityMembersLoss` lacks a corresponding explicit check for `capabilities` not being an object, despite the comment indicating both should be handled identically. Add an explicit type check in `capabilityMembersLoss` or at the start of `capabilitiesCheck` to detect when the `capabilities` member is not a dictionary/object, returning a shape loss message parallel to `authMethodsShapeLoss`.

@@ -19,11 +19,12 @@ import Testing
 //
 // The sixth row is the one row a test can make pass by accident. `capabilities`
 // and `authMethods` both decode forgivingly, so a check that read the DECODED
-// answer would report `ok` against every agent, malformed ones included. Five
+// answer would report `ok` against every agent, malformed ones included. Six
 // tests below drive agents that send an answer this build cannot read in full,
-// and they are what state that the row can fail at all. Three more drive agents
-// whose `authMethods` the row must accept: one that advertises only readable
-// methods, one that sends no member at all, and one that sends `null`.
+// and they are what state that the row can fail at all. Four more drive agents
+// whose answer the row must accept: one that advertises only readable
+// methods, one that sends no `authMethods` member at all, and one for each
+// member that sends it as `null`.
 //
 // The suite lives in the nested `IntegrationTests` package because every row
 // after the first spawns a real agent. The root `swift test` never sees this
@@ -486,6 +487,49 @@ struct AgentCommandDoctorTests {
             "the row did not name the authMethods member the decode dropped: \(capabilities.message)"
         )
         #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("a capabilities member that is not an object warns on the capabilities row, and names the member")
+    func aNonObjectCapabilitiesMemberWarnsOnTheCapabilitiesRow() async throws {
+        let script = try makeNonObjectCapabilitiesAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The handshake SUCCEEDED. `capabilities` decodes forgivingly, so a
+        // string in place of the object becomes the empty default and nothing
+        // throws: the client is left believing the agent supports no capability
+        // at all. The raw member holds no members to compare either, so the
+        // row must name the member itself and say what shape it is not, as it
+        // does for an `authMethods` member that is not an array.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .warning)
+        #expect(
+            capabilities.message.contains("capabilities"),
+            "the row did not name the member the decode dropped: \(capabilities.message)"
+        )
+        #expect(
+            capabilities.message.contains("not an object"),
+            "the row did not say the member is not an object: \(capabilities.message)"
+        )
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("an agent that sends capabilities as null passes the capabilities row")
+    func aNullCapabilitiesMemberPassesTheCapabilitiesRow() async throws {
+        let script = try makeNullCapabilitiesAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The schema lets the member be absent, and `null` is how an agent
+        // that writes every member spells absent. The decode reads it as no
+        // member, and a row that read `null` as a member of the wrong shape
+        // would warn against an agent that did nothing wrong, as it must not
+        // for an `authMethods` member set to `null`.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .ok)
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .ok, .ok])
     }
 
     @Test("an agent that ignores a closed stdin warns on the teardown row, and asks for exit 5")
