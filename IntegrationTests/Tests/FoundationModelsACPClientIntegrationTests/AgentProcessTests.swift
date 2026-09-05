@@ -47,17 +47,6 @@ private let foreignAgentScript = """
     done
     """
 
-/// Writes a foreign-agent script into a fresh temporary file.
-///
-/// - Parameter content: The script text.
-/// - Returns: The absolute path of the script file.
-private func writeScript(_ content: String) throws -> String {
-    let path = FileManager.default.temporaryDirectory
-        .appendingPathComponent("acp-agent-\(UUID().uuidString).sh").path
-    try content.write(toFile: path, atomically: true, encoding: .utf8)
-    return path
-}
-
 /// Polls a pid file until the agent's child reported its pid there.
 ///
 /// - Parameter path: The pid file the agent writes.
@@ -88,12 +77,16 @@ private func reportedChildPid(at path: String) async -> pid_t? {
     .timeLimit(.minutes(5))
 )
 struct AgentProcessTests {
+    /// The text that stands before the unique part of the child pid file's name.
+    private static let childPidFileNamePrefix = "acp-agent-child-pid-"
+
     /// Full session over stdio against a foreign ACP agent binary: initialize,
     /// `session/new`, prompt, updates, stop. This is the test that proves the
     /// "knows nothing about our runtime" claim.
     @MainActor
     @Test func fullSessionOverStdioToForeignAgent() async throws {
-        let script = try writeScript(foreignAgentScript)
+        let script = try writeAgentScript(foreignAgentScript)
+        defer { removeAgentScript(script) }
         let process = try AgentProcess(command: shellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
@@ -128,7 +121,8 @@ struct AgentProcessTests {
     /// promptly, and the dead agent is reaped — no zombie stays behind.
     @MainActor
     @Test func killingAgentSurfacesDisconnectedState() async throws {
-        let script = try writeScript(foreignAgentScript)
+        let script = try writeAgentScript(foreignAgentScript)
+        defer { removeAgentScript(script) }
         let process = try AgentProcess(command: shellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
@@ -145,7 +139,8 @@ struct AgentProcessTests {
     /// connection — asserted by pid, through the reap.
     @MainActor
     @Test func spawnedAgentLeavesNoStrayPidAfterTeardown() async throws {
-        let script = try writeScript(foreignAgentScript)
+        let script = try writeAgentScript(foreignAgentScript)
+        defer { removeAgentScript(script) }
         let process = try AgentProcess(command: shellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
         #expect(processExists(pid))
@@ -161,19 +156,20 @@ struct AgentProcessTests {
     /// An agent that spawns a child of its own has that child cleaned up too:
     /// the teardown kills the whole process group.
     @Test func agentChildProcessIsCleanedUpWithTheGroup() async throws {
-        let childPidPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("acp-agent-child-\(UUID().uuidString).pid").path
-        let script = try writeScript(
+        let childPidFile = temporaryFileURL(prefix: Self.childPidFileNamePrefix)
+        defer { try? FileManager.default.removeItem(at: childPidFile) }
+        let script = try writeAgentScript(
             """
             sleep 300 &
             echo $! > "$1"
             exec sleep 300
             """
         )
-        let process = try AgentProcess(command: shellCommand, arguments: [script, childPidPath])
+        defer { removeAgentScript(script) }
+        let process = try AgentProcess(command: shellCommand, arguments: [script, childPidFile.path])
         let pid = try #require(process.processIdentifier)
 
-        let childPid = try #require(await reportedChildPid(at: childPidPath))
+        let childPid = try #require(await reportedChildPid(at: childPidFile.path))
         #expect(processExists(pid))
         #expect(processExists(childPid))
 

@@ -42,8 +42,31 @@ comments:
     - evidence: `swift build` (root) and `swift build` (IntegrationTests) each show 0 lines with `warning:`.
     - next: /review
   timestamp: 2026-09-05T14:13:12.996230+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1ryptq8jan12zvhkpss7760
+  text: |-
+    ### commit — changed
+    - evidence: c265c68 docs(plan): tell what doctor row 6 does with capabilities and authMethods
+    - next: /review
+  timestamp: 2026-09-05T14:14:08.872027+00:00
+- actor: claude-code
+  id: 01m1ryt8kb78h0zwqg9fhj1j2n
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit c265c68). counts: findings 0, confirmed 0, refuted 0, attempted 7, failed 0. 1 file reviewed. `cli-plan.md` had no validator that matches a Markdown file. `.kanban/` files are excluded by `.reviewignore`.
+    - next: none. The card is in `done`.
+  timestamp: 2026-09-05T14:16:01.387760+00:00
+- actor: claude-code
+  id: 01m1rytq2x578jrzptv5ayk336
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — `cli-plan.md` §10 (row 6 paragraph and table row rewritten; stale sentence and `^1qfgtye` reference removed), `Tests/FoundationModelsACPClientTests/PlanDocumentTests.swift` (drift guard `sectionTenStatesThatRowSixReadsEveryMember`, red with 2 issues against the old text, green after)
+    - test: green — root 225/225 in 20 suites, integration 87/87 in 12 suites, 0 warnings, 0 skipped
+    - commit: c265c68
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T14:16:16.221231+00:00
+position_column: done
+position_ordinal: ac80
 title: 'cli-plan.md §10: describe the authMethods arms row 6 now has'
 ---
 ## What
