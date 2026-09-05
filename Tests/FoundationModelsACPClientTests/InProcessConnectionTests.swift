@@ -93,7 +93,7 @@ private final class InProcessStubAgent: Agent {
     let initialized = try await connection.initialize(makeInitializeRequest())
     #expect(initialized.protocolVersion == ACPClient.supportedProtocolVersion)
 
-    let cwd = try #require(AbsolutePath(rawValue: "/"))
+    let cwd = AbsolutePath(rawValue: "/")
     let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
     #expect(session.sessionId == stubSessionID)
 

@@ -225,9 +225,9 @@ struct TurnRunner {
     /// - Returns: Why the turn ended.
     /// - Throws: ``AcpClientTimeout`` when the turn reached its limit,
     ///   ``TurnEndedWithoutIdleError`` when the stream ended first,
-    ///   ``SessionWorkingDirectoryError`` when `--cwd` does not resolve,
-    ///   `RequestError` on a peer error, or `ConnectionError` when the agent
-    ///   went away.
+    ///   ``ProcessWorkingDirectoryError`` when `--cwd` is absent and this
+    ///   process has no working directory, `RequestError` on a peer error, or
+    ///   `ConnectionError` when the agent went away.
     func run() async throws -> TurnOutcome {
         let (sessionId, updates) = try await session.openSession()
         let (toolNames, toolNameFeed) = AsyncStream<String>.makeStream()

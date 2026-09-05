@@ -186,12 +186,15 @@ exchange, so a person can see what an agent sent.
 
 **`--cwd` names the session, and never this process.** `run` and `probe`
 each open a session, and each sends the value in `session/new`. The
-binary never changes its own working directory. A relative value is made
-absolute against the process working directory, and the result goes to
-the agent as it stands. The binary opens no directory and reads no file
-there, so it makes no check of its own: an agent can hold a workspace
-this process cannot see. A path that names no directory is therefore the
-agent's to refuse. §16 holds the open question.
+binary never changes its own working directory. `--cwd` goes to the
+agent exactly as typed. The binary does not resolve the value, does not
+normalize it, and does not check it. The agent owns the file system of
+the session, and the agent can be on a different machine, so the agent
+is the only judge of the path. A relative value is the agent's to
+refuse, and a path that names no directory is the agent's to refuse. The
+binary reports that refusal as an agent error, under the row of §9 for a
+refused `session/new`. There is no usage-error row for `--cwd`. With no
+`--cwd`, the binary sends its own working directory.
 
 **Not every option shapes every subcommand.** The three subcommands take
 one option group, because §6 gives them one grammar. What each option
@@ -516,11 +519,6 @@ for another package.
   INTERACTIVE `acp-client` needs another answer: a prompt the person
   reads, and a decision the person gives. What that prompt looks like,
   and which of the two elicitation modes it covers, is not decided.
-- **What `--cwd` owes.** §6.1 hands the value to the agent unchecked. A
-  path that names no directory is therefore the agent's to refuse. Should
-  the binary refuse it first, with the usage row of §9? The answer needs
-  a person, because a session directory can name a workspace this process
-  cannot see.
 - **More than one turn.** The binary runs one turn. A session that
   continues over several prompts is a different tool, and it is not in
   this plan.

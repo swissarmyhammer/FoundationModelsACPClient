@@ -98,7 +98,7 @@ struct AgentProcessTests {
         #expect(initialized.protocolVersion == ACPClient.supportedProtocolVersion)
         #expect(initialized.info.name == "foreign-agent")
 
-        let cwd = try #require(AbsolutePath(rawValue: "/"))
+        let cwd = AbsolutePath(rawValue: "/")
         let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
         #expect(session.sessionId == foreignSessionID)
 

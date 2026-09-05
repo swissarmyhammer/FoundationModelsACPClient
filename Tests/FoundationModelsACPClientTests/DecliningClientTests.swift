@@ -195,7 +195,7 @@ func aPermissionRefusalNamesTheToolCallItRefused() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aPermissionRefusalNamesTheCommandItRefused() async throws {
     let harness = DecliningClientHarness()
-    let cwd = try #require(AbsolutePath(rawValue: "/"))
+    let cwd = AbsolutePath(rawValue: "/")
 
     _ = try await harness.client.requestPermission(
         permissionRequest(
@@ -333,7 +333,7 @@ func anElicitationDuringATurnStillLetsTheTurnReachItsStopReason() async throws {
     let harness = DecliningClientHarness()
     let connection = await harness.container.connect(over: clientEnd) { _ in harness.client }
 
-    let cwd = try #require(AbsolutePath(rawValue: "/"))
+    let cwd = AbsolutePath(rawValue: "/")
     let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
     #expect(session.sessionId == testSession)
 

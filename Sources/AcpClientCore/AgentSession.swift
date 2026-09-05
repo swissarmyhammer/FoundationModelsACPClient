@@ -21,11 +21,13 @@
 //    chunk that arrived in between.
 //
 // `--cwd` is the **session's** working directory, and never this binary's.
-// The value reaches the agent as `NewSessionRequest.cwd`, made absolute
-// against the process working directory, and the process working directory
-// itself never changes. `probe` uses the same option for the same reason: an
-// agent reports what it supports for a workspace, and the workspace is the
-// session's directory.
+// The value reaches the agent as `NewSessionRequest.cwd` exactly as typed:
+// this binary does not resolve it, does not normalise it, and does not check
+// it. The agent owns the file system the session runs in, and that agent can
+// stand on another machine, so the agent is the only judge of the path. The
+// process working directory itself never changes. `probe` uses the same
+// option for the same reason: an agent reports what it supports for a
+// workspace, and the workspace is the session's directory.
 //
 // One name to watch. `FoundationModelsACP` exports a `TerminalOutput` of its
 // own — the ACP model of what an agent-owned terminal printed. Inside this
@@ -57,12 +59,19 @@ struct AgentSession {
     /// The terminal layer that receives this seam's own diagnostics.
     private let output: TerminalOutput
 
-    /// The `--cwd` value, or `nil` for the process working directory.
+    /// The `--cwd` value as typed, or `nil` for the process working directory.
     ///
-    /// The value stays as it was typed until ``openSession()`` resolves it,
-    /// because resolving it can fail and ``openSession()`` is the member that
-    /// can report a failure.
+    /// The value goes to the agent with no change. `cli-plan.md` §6.1 gives
+    /// the agent the whole judgement of it, so this seam holds no opinion.
     private let requestedWorkingDirectory: String?
+
+    /// Reads the working directory of this process.
+    ///
+    /// It is injected for the one failure this seam reports of its own: a
+    /// process whose working directory was deleted reads an empty string
+    /// here. A test injects that reading, because no test may delete the
+    /// directory the whole test process runs in.
+    private let processWorkingDirectory: () -> String
 
     /// Connects over `transport` and builds the seam around the connection.
     ///
@@ -77,12 +86,15 @@ struct AgentSession {
     ///     answer text.
     ///   - cwd: The `--cwd` value, or `nil` for the process working
     ///     directory.
+    ///   - processWorkingDirectory: What this seam reads as the working
+    ///     directory of this process. The default reads the real one.
     ///   - clock: The clock that schedules the container's coalesced flushes.
     ///     A test injects a manual clock, so it reads no wall clock.
     init(
         over transport: any ACPTransport,
         terminal: TerminalOutput,
         cwd: String?,
+        processWorkingDirectory: @escaping () -> String = { FileManager.default.currentDirectoryPath },
         clock: any Clock<Duration> = ContinuousClock()
     ) async {
         let (container, connection) = await Self.connect(
@@ -94,6 +106,7 @@ struct AgentSession {
         self.connection = connection
         output = terminal
         requestedWorkingDirectory = cwd
+        self.processWorkingDirectory = processWorkingDirectory
     }
 
     /// Connects one observable container over `transport`, behind the
@@ -172,22 +185,40 @@ struct AgentSession {
     /// that subscribed after driving the turn would lose every chunk the
     /// agent sent in between.
     ///
-    /// The session that opens is a session event of §8, and it carries the
-    /// resolved working directory beside the id: `--cwd` is the one option
-    /// this seam interprets rather than passes on, so the line reports what
-    /// the agent was actually told.
+    /// The session that opens is a session event of §8, and the line carries
+    /// the working directory beside the id, so a person reads what the agent
+    /// was told. `--cwd` goes to the agent as typed: an agent that refuses
+    /// the path answers a `RequestError`, which is the protocol-failure row
+    /// of §9.
     ///
     /// - Returns: The session the agent opened, and its update stream.
-    /// - Throws: ``SessionWorkingDirectoryError`` when `--cwd` does not
-    ///   resolve to an absolute path, `RequestError` on a peer error, or
-    ///   `ConnectionError` when the agent went away.
+    /// - Throws: ``ProcessWorkingDirectoryError`` when `--cwd` is absent and
+    ///   this process has no working directory, `RequestError` on a peer
+    ///   error, or `ConnectionError` when the agent went away.
     func openSession() async throws -> (SessionId, AsyncStream<SessionUpdate>) {
-        let cwd = try Self.sessionWorkingDirectory(for: requestedWorkingDirectory)
+        let cwd = AbsolutePath(rawValue: try workingDirectoryToSend())
         let response = try await connection.newSession(NewSessionRequest(cwd: cwd))
         output.event(
             "session/new opened \(response.sessionId.rawValue) in \(cwd.rawValue)"
         )
         return (response.sessionId, connection.updates(for: response.sessionId))
+    }
+
+    /// Returns the `cwd` to send: `--cwd` as typed, or the working directory
+    /// of this process when `--cwd` is absent.
+    ///
+    /// - Returns: The path, exactly as it goes on the wire.
+    /// - Throws: ``ProcessWorkingDirectoryError`` when `--cwd` is absent and
+    ///   this process has no working directory.
+    private func workingDirectoryToSend() throws -> String {
+        if let requestedWorkingDirectory {
+            return requestedWorkingDirectory
+        }
+        let processDirectory = processWorkingDirectory()
+        guard !processDirectory.isEmpty else {
+            throw ProcessWorkingDirectoryError()
+        }
+        return processDirectory
     }
 
     /// Asks the agent to close one session, and reports what came back rather
@@ -226,60 +257,23 @@ struct AgentSession {
     func teardown() async {
         await connection.close()
     }
-
-    /// Resolves the working directory the session runs in.
-    ///
-    /// An absent `--cwd` gives the process working directory, which is the
-    /// default `cli-plan.md` §6.1 states. A relative `--cwd` is made absolute
-    /// against that same directory. Neither path changes the process working
-    /// directory: this binary stays where it was started, and only the
-    /// session moves.
-    ///
-    /// - Parameter requested: The `--cwd` value, or `nil` for the process
-    ///   working directory.
-    /// - Returns: The absolute path to send as `NewSessionRequest.cwd`.
-    /// - Throws: ``SessionWorkingDirectoryError`` when the resolved path is
-    ///   not absolute.
-    private static func sessionWorkingDirectory(for requested: String?) throws -> AbsolutePath {
-        let processDirectory = FileManager.default.currentDirectoryPath
-        guard let requested else {
-            return try absolutePath(processDirectory)
-        }
-        let base = URL(fileURLWithPath: processDirectory, isDirectory: true)
-        // `standardizedFileURL` removes "." and ".." without touching the
-        // file system, so an agent gets a clean path and this binary reads no
-        // directory to build it.
-        let resolved = URL(fileURLWithPath: requested, relativeTo: base).standardizedFileURL
-        return try absolutePath(resolved.path)
-    }
-
-    /// Wraps one resolved path in the wire's absolute-path type.
-    ///
-    /// - Parameter path: The path to wrap.
-    /// - Returns: The wire value.
-    /// - Throws: ``SessionWorkingDirectoryError`` when the path is not
-    ///   absolute.
-    private static func absolutePath(_ path: String) throws -> AbsolutePath {
-        guard let absolute = AbsolutePath(rawValue: path) else {
-            throw SessionWorkingDirectoryError(path: path)
-        }
-        return absolute
-    }
 }
 
-/// The failure ``AgentSession/openSession()`` throws when the session's
-/// working directory does not resolve to an absolute path.
+/// The failure ``AgentSession/openSession()`` throws when `--cwd` is absent
+/// and this process has no working directory.
 ///
-/// `NewSessionRequest.cwd` is absolute by contract, so a path that is not
-/// absolute cannot go on the wire at all. The message names the path, because
-/// the value came from the command line and the person who typed it is the
-/// one who can correct it.
-struct SessionWorkingDirectoryError: Error, CustomStringConvertible {
-    /// The path that did not resolve to an absolute path.
-    let path: String
-
+/// `FileManager.default.currentDirectoryPath` answers an empty string when
+/// the directory the process started in was deleted. An empty string is no
+/// path, so it cannot stand for the session's working directory, and it is
+/// not a mistake on the command line: the person gave no `--cwd` at all. The
+/// message names the two repairs, because the person who reads it is the one
+/// who can make either.
+struct ProcessWorkingDirectoryError: Error, CustomStringConvertible {
     /// A human-readable description of this error.
     var description: String {
-        "The session working directory \"\(path)\" is not an absolute path."
+        """
+        This process has no working directory: the directory it started in \
+        is gone. Give --cwd, or start from a directory that exists.
+        """
     }
 }

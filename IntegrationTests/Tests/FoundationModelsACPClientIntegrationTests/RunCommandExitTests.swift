@@ -154,6 +154,66 @@ struct RunCommandExitTests {
     /// The text that stands before the unique part of a transcript file's name.
     private static let transcriptFileNamePrefix = "acp-client-agent-requests-"
 
+    /// The relative `--cwd` the judging agent refuses.
+    ///
+    /// It is a path a person types every day, and it names no directory this
+    /// suite reads: the binary must send it as typed, and only the agent
+    /// judges it.
+    private static let relativeWorkingDirectory = "src"
+
+    /// The absolute `--cwd` the judging agent accepts.
+    private static let absoluteWorkingDirectory = "/"
+
+    @Test("a relative --cwd reaches the agent as typed, and the agent's refusal exits 1 and names the field")
+    func aRelativeCwdReachesTheAgentAsTypedAndItsRefusalIsReported() async throws {
+        let script = try makeWorkingDirectoryJudgingAgent()
+        defer { removeAgentScript(script) }
+
+        let result = try await runAcpClient(
+            runArguments(
+                prompt: Self.prompt,
+                options: ["--cwd", Self.relativeWorkingDirectory],
+                script: script
+            )
+        )
+
+        // §9 gives a refused `session/new` the protocol-failure row, and §6.1
+        // gives the agent the whole judgement of `--cwd`. A binary that made
+        // the path absolute first would get a session from this agent and
+        // exit 0, which is the defect this test exists to catch.
+        #expect(result.exitCode == SectionNineExitCode.failure)
+        #expect(result.standardOutput.isEmpty)
+        let reported = String(decoding: result.standardError, as: UTF8.self)
+        #expect(
+            reported.contains(stubAgentWorkingDirectoryField),
+            "stderr did not name the refused field: \"\(reported)\""
+        )
+        #expect(
+            reported.contains(stubAgentWorkingDirectoryReason),
+            "stderr did not give the agent's reason: \"\(reported)\""
+        )
+    }
+
+    @Test("an absolute --cwd reaches the judging agent as typed, and the session opens")
+    func anAbsoluteCwdReachesTheJudgingAgentAndTheSessionOpens() async throws {
+        let script = try makeWorkingDirectoryJudgingAgent()
+        defer { removeAgentScript(script) }
+
+        let result = try await runAcpClient(
+            runArguments(
+                prompt: Self.prompt,
+                options: ["--cwd", Self.absoluteWorkingDirectory],
+                script: script
+            )
+        )
+
+        // The control for the test above: the same agent opens a session for
+        // an absolute path, so the refusal above came from the path and not
+        // from an agent that refuses every `session/new`.
+        #expect(result.exitCode == SectionNineExitCode.success)
+        #expect(result.standardOutput == Data(stubAgentDefaultAnswer.utf8))
+    }
+
     @Test("a well behaved agent writes the answer to stdout, and the run exits 0")
     func aWellBehavedAgentWritesTheAnswerAndTheRunSucceeds() async throws {
         let script = try makeWellBehavedAgent(answer: Self.answer, stopReason: .endTurn)

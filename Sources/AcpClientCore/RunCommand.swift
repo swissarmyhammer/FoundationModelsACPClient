@@ -258,8 +258,9 @@ struct RunCommand: AsyncParsableCommand {
     ///   - terminal: The layer that owns standard error.
     /// - Returns: Why the turn ended.
     /// - Throws: `ProtocolVersionMismatchError` when the agent answered
-    ///   `initialize` with another version, ``SessionWorkingDirectoryError``
-    ///   when `--cwd` does not resolve, ``AcpClientTimeout`` when the turn
+    ///   `initialize` with another version, ``ProcessWorkingDirectoryError``
+    ///   when `--cwd` is absent and this process has no working directory,
+    ///   ``AcpClientTimeout`` when the turn
     ///   reached its limit, ``AcpClientInterrupted`` when a second `Ctrl-C`
     ///   ended the run, ``TurnEndedWithoutIdleError`` when the agent went
     ///   away in the middle of the turn, `RequestError` on a peer error, or

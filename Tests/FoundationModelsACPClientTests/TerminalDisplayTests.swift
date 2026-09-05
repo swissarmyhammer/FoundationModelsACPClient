@@ -144,7 +144,7 @@ func nonUTF8BytesSurviveToTheReplacementCharacterTranscript() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func terminalUpdateForAnUnseenIdCreatesTheTerminal() async throws {
     let terminalID = TerminalId(rawValue: "term-new")
-    let cwd = try #require(AbsolutePath(rawValue: "/workspace/project"))
+    let cwd = AbsolutePath(rawValue: "/workspace/project")
     let exitStatus = TerminalExitStatus(exitCode: 0)
 
     let state = try await stateAfterPromptTurn(sending: [

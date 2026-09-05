@@ -35,9 +35,10 @@ private let stubReplyText = "Hello from the stub."
 /// The message id the stub agent stamps on its reply chunk.
 private let stubMessageID = MessageId(rawValue: "agent-session-msg-1")
 
-/// The relative `--cwd` value the tests resolve against the process working
-/// directory. It names a directory of this repository, so a reader can see
-/// that the value is a real path and not a token.
+/// The relative `--cwd` value the tests send as typed. It names a directory of
+/// this repository, so a reader can see that the value is a real path and not
+/// a token. The seam never makes it absolute: the agent is the only judge of
+/// the session's working directory.
 private let relativeCwd = "Sources"
 
 /// The absolute `--cwd` value the tests pass through unchanged.
@@ -97,6 +98,8 @@ private struct AgentSessionHarness {
     ///     prompt turn, or `nil` to ask for none.
     ///   - cwd: The `--cwd` value, or `nil` for the process working
     ///     directory.
+    ///   - processWorkingDirectory: What the seam reads as the working
+    ///     directory of this process. The default reads the real one.
     ///   - verbosity: The verbosity to build the terminal layer with.
     ///   - closeSessionError: The error the stub answers `session/close`
     ///     with.
@@ -105,6 +108,7 @@ private struct AgentSessionHarness {
         script: [SessionUpdate] = [],
         elicitation: CreateElicitationRequest? = nil,
         cwd: String? = nil,
+        processWorkingDirectory: @escaping () -> String = { FileManager.default.currentDirectoryPath },
         verbosity: TerminalVerbosity = .normal,
         closeSessionError: RequestError = .methodNotFound("session/close"),
         clock: any Clock<Duration> = ContinuousClock()
@@ -133,6 +137,7 @@ private struct AgentSessionHarness {
                 sink: { buffer.append($0) }
             ),
             cwd: cwd,
+            processWorkingDirectory: processWorkingDirectory,
             clock: clock
         )
     }
@@ -162,18 +167,6 @@ private struct AgentSessionHarness {
         await session.teardown()
         withExtendedLifetime(agentConnection) {}
     }
-}
-
-/// The absolute form of one repository-relative path, resolved against the
-/// process working directory exactly as the seam resolves `--cwd`.
-///
-/// - Parameter relativePath: The path to resolve.
-/// - Returns: The absolute path, as text.
-private func absoluteForm(of relativePath: String) -> String {
-    URL(
-        fileURLWithPath: relativePath,
-        relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-    ).standardizedFileURL.path
 }
 
 /// The seam takes a transport and drives the agent over it, so a unit test
@@ -326,19 +319,20 @@ func aChunkSentAsSoonAsThePromptLandsReachesTheReturnedStream() async throws {
     await harness.teardown()
 }
 
-/// `--cwd` is the SESSION's working directory, so a relative value is made
-/// absolute against the process working directory and sent as
-/// `NewSessionRequest.cwd`. The process working directory itself never
-/// changes.
+/// `--cwd` is the SESSION's working directory, and the agent is the only judge
+/// of it. A relative value therefore reaches `NewSessionRequest.cwd` exactly
+/// as typed: the seam does not make it absolute against the process working
+/// directory, because that directory is the wrong base when the agent stands
+/// on another machine. The process working directory itself never changes.
 @MainActor @Test(.timeLimit(.minutes(1)))
-func aRelativeCwdReachesNewSessionAsAnAbsolutePath() async throws {
+func aRelativeCwdReachesNewSessionAsTyped() async throws {
     let processDirectory = FileManager.default.currentDirectoryPath
     let harness = await AgentSessionHarness(cwd: relativeCwd)
 
     _ = try await harness.openedSession()
 
     let agent = try #require(harness.agent)
-    #expect(agent.lastWorkingDirectory?.rawValue == absoluteForm(of: relativeCwd))
+    #expect(agent.lastWorkingDirectory?.rawValue == relativeCwd)
     #expect(FileManager.default.currentDirectoryPath == processDirectory)
     await harness.teardown()
 }
@@ -365,6 +359,25 @@ func anAbsentCwdUsesTheProcessWorkingDirectory() async throws {
 
     let agent = try #require(harness.agent)
     #expect(agent.lastWorkingDirectory?.rawValue == FileManager.default.currentDirectoryPath)
+    await harness.teardown()
+}
+
+/// The one failure this seam reports of its own is a process with no working
+/// directory: the directory it started in was deleted, and
+/// `FileManager.default.currentDirectoryPath` answers an empty string. An
+/// empty string is no path, so the seam sends no `session/new` at all and
+/// names the cause. That is not a mistake on the command line, because the
+/// person gave no `--cwd`.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func anEmptyProcessWorkingDirectoryIsReportedAndNoSessionOpens() async throws {
+    let harness = await AgentSessionHarness(processWorkingDirectory: { "" })
+
+    await #expect(throws: ProcessWorkingDirectoryError.self) {
+        _ = try await harness.openedSession()
+    }
+
+    let agent = try #require(harness.agent)
+    #expect(agent.lastWorkingDirectory == nil)
     await harness.teardown()
 }
 

@@ -101,7 +101,7 @@ private let usedTokens = 1_500
 @MainActor @Test func toolCallUpdateLandsItsFullPayload() async {
     let client = SwiftUIACPClient()
     let callID = ToolCallId(rawValue: "call-1")
-    let location = ToolCallLocation(path: AbsolutePath(rawValue: "/tmp/file.swift")!, line: locationLine)
+    let location = ToolCallLocation(path: AbsolutePath(rawValue: "/tmp/file.swift"), line: locationLine)
     let update = ToolCallUpdate(
         toolCallId: callID,
         content: .value([.content(Content(content: textBlock("output")))]),

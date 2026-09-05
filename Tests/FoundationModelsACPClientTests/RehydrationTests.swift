@@ -419,7 +419,7 @@ func aSessionResumeReplayOverTheWireRebuildsTheState() async throws {
     state.beginRehydration()
     _ = try await connection.resumeSession(
         ResumeSessionRequest(
-            cwd: AbsolutePath(rawValue: "/")!,
+            cwd: AbsolutePath(rawValue: "/"),
             sessionId: testSession,
             replayFrom: .start(ReplayFromStart())
         )

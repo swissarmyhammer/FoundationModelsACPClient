@@ -231,7 +231,7 @@ struct StubAgentTests {
         #expect(initialized.protocolVersion == ACPClient.supportedProtocolVersion)
         #expect(initialized.info.name == stubAgentName)
 
-        let cwd = try #require(AbsolutePath(rawValue: "/"))
+        let cwd = AbsolutePath(rawValue: "/")
         let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
         #expect(session.sessionId == stubAgentSessionID)
 
@@ -251,7 +251,7 @@ struct StubAgentTests {
 
         let client = SwiftUIACPClient()
         let connection = try await initializedConnection(for: client, over: process.transport)
-        let cwd = try #require(AbsolutePath(rawValue: "/"))
+        let cwd = AbsolutePath(rawValue: "/")
         let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
 
         let replyLanded = try await promptTurnLandsReply(

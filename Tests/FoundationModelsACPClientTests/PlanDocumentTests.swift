@@ -220,6 +220,54 @@ struct PlanDocumentTests {
     /// the row does not read it.
     private static let denialWords: Set<String> = ["not", "read"]
 
+    /// The heading opening of the option section of the plan.
+    private static let optionHeading = "### 6.1"
+
+    /// The option §6.1 hands to the agent as typed, as the plan writes it.
+    private static let workingDirectoryOption = "--cwd"
+
+    /// The two words that, together in one sentence about the option, state
+    /// that the value goes to the agent as typed.
+    private static let asTypedWords: Set<String> = ["as", "typed"]
+
+    /// The two words that, together in one sentence, would state the
+    /// client-side resolution `AgentSession` no longer makes.
+    private static let resolutionWords: Set<String> = ["made", "absolute"]
+
+    @Test("section 6.1 states that --cwd goes to the agent as typed")
+    func sectionSixPointOneStatesThatCwdGoesToTheAgentAsTyped() throws {
+        let section = try PlanSection.lines(
+            under: Self.optionHeading,
+            of: PlanSection.planPath
+        )
+        let sentences = PlanSection.sentences(of: section)
+        let optionSpan = PlanSection.codeSpan(Self.workingDirectoryOption)
+        let aboutTheOption = sentences.filter { $0.contains(optionSpan) }
+        #expect(
+            aboutTheOption.contains { Self.asTypedWords.isSubset(of: PlanSection.words(of: $0)) },
+            """
+            \(PlanSection.planPath) section 6.1 must hold one sentence that names \
+            \(optionSpan) and says the value goes to the agent as typed. \
+            AgentSession.openSession() sends the value with no change, and a plan \
+            that says otherwise sends a reader to look for a resolution that no \
+            longer runs. The sentences that name the option: \(aboutTheOption)
+            """
+        )
+
+        let resolutionSentences = sentences.filter { sentence in
+            Self.resolutionWords.isSubset(of: PlanSection.words(of: sentence))
+        }
+        #expect(
+            resolutionSentences.isEmpty,
+            """
+            \(PlanSection.planPath) section 6.1 must not say that the binary makes \
+            \(optionSpan) absolute. The agent is the only judge of the session's \
+            working directory, and the binary resolves nothing. These sentences \
+            say otherwise: \(resolutionSentences)
+            """
+        )
+    }
+
     @Test("section 10 states that row 6 reads every member the doctor compares")
     func sectionTenStatesThatRowSixReadsEveryMember() throws {
         let section = try PlanSection.lines(

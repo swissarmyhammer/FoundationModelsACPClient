@@ -297,7 +297,7 @@ func makeSilentAgent(pidFile: String? = nil) throws -> String {
 private func makeAgent(
     pidFile: String?,
     initialize: StubAgentInitializeAnswer = .reports([]),
-    newSession: StubAgentRequestAnswer = .answers
+    newSession: StubAgentNewSessionAnswer = .answers
 ) throws -> String {
     try writeAgentScript(
         requestLoop(
@@ -434,6 +434,28 @@ func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeNewSessionRefusingAgent(pidFile: String? = nil) throws -> String {
     try makeAgent(pidFile: pidFile, newSession: .refuses)
+}
+
+/// Writes a stub agent that judges the `cwd` of `session/new`, as
+/// `cli-plan.md` §6.1 lets an agent do.
+///
+/// The agent opens a session for a `cwd` that opens with `/`, and it refuses
+/// every other `cwd` with JSON-RPC invalid params whose `data` names the field
+/// (``stubAgentWorkingDirectoryField``) and the reason
+/// (``stubAgentWorkingDirectoryReason``). That is what the agent of
+/// `FoundationModelsACPAgent` does, and it is what proves the binary sends
+/// `--cwd` as typed: a binary that made the path absolute first would get a
+/// session from this agent, and no refusal would reach stderr.
+///
+/// The agent stays alive until its stdin closes, so the reap is the binary's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeWorkingDirectoryJudgingAgent(pidFile: String? = nil) throws -> String {
+    try makeAgent(pidFile: pidFile, newSession: .judgesWorkingDirectory)
 }
 
 /// Writes a stub agent that answers every request of a probe and then reports
@@ -1095,7 +1117,7 @@ private func requestLoop(
     argumentsFile: String? = nil,
     asksPermission: Bool = false,
     initialize: StubAgentInitializeAnswer = .reports([]),
-    newSession: StubAgentRequestAnswer = .answers,
+    newSession: StubAgentNewSessionAnswer = .answers,
     closeSession: StubAgentRequestAnswer = .answers,
     availableCommands: [AvailableCommand]? = nil,
     turnEnd: StubAgentTurnEnd = .atOnce
@@ -1110,7 +1132,7 @@ private func requestLoop(
           \(try printfLine(initializeAnswer(initialize)))
           ;;
         *'"method":"session/new"'*)
-          \(try printfLine(newSessionAnswer(newSession)))
+          \(try newSessionStatements(newSession))
           \(try commandUpdateStatement(reporting: availableCommands))
           ;;
         *'"method":"session/close"'*)
@@ -1479,11 +1501,47 @@ private let jsonRPCInternalErrorCode = -32_603
 /// does not implement the method has to send.
 private let jsonRPCMethodNotFoundCode = -32_601
 
+/// The JSON-RPC code an agent answers with when a request it understood
+/// carries a parameter it refuses.
+///
+/// It is the spec's `Invalid params`. `cli-plan.md` §6.1 gives the agent the
+/// whole judgement of `cwd`, and this is the code an agent answers with for a
+/// `cwd` it refuses. The number is spelled here because JSON-RPC fixes it and
+/// no Swift type in this package names it.
+private let jsonRPCInvalidParamsCode = -32_602
+
 /// The message a refusing stub agent puts in its `initialize` error.
 private let stubAgentInitializeRefusal = "the stub agent refuses to initialize"
 
 /// The message a refusing stub agent puts in its `session/new` error.
 private let stubAgentNewSessionRefusal = "the stub agent refuses to open a session"
+
+/// The message a stub agent puts in an `Invalid params` error. It is the text
+/// the JSON-RPC specification gives that code.
+private let stubAgentInvalidParamsMessage = "Invalid params"
+
+/// The member of an error's `data` in which a stub agent names the parameter
+/// it refused.
+private let refusedFieldMember = "field"
+
+/// The member of an error's `data` in which a stub agent gives its reason.
+private let refusedReasonMember = "reason"
+
+/// The `session/new` parameter ``makeWorkingDirectoryJudgingAgent(pidFile:)``
+/// names in its refusal, as the wire spells it.
+let stubAgentWorkingDirectoryField = "cwd"
+
+/// The reason ``makeWorkingDirectoryJudgingAgent(pidFile:)`` gives for a `cwd`
+/// that does not open with `/`.
+let stubAgentWorkingDirectoryReason = "must be absolute"
+
+/// The text of a `session/new` request line whose `cwd` opens with `/`.
+///
+/// The client's codec writes sorted keys and no escaped slash, so an absolute
+/// path stands in the request line as exactly this text, and a relative path
+/// never does. A `/bin/sh` agent has no JSON parser, and this text is all it
+/// needs to judge the path.
+private let absoluteWorkingDirectoryMarker = "\"cwd\":\"/"
 
 /// The message a stub agent that does not implement `session/close` answers
 /// with.
@@ -1501,6 +1559,24 @@ private enum StubAgentRequestAnswer {
 
     /// The agent answers with a JSON-RPC error.
     case refuses
+}
+
+/// How a stub agent answers `session/new`.
+///
+/// `cli-plan.md` §6.1 gives the agent the whole judgement of `cwd`, so the
+/// third case is an agent that reads the path, which is what the agent of
+/// `FoundationModelsACPAgent` does.
+private enum StubAgentNewSessionAnswer {
+    /// The agent opens ``stubAgentSessionID``.
+    case answers
+
+    /// The agent answers with a JSON-RPC internal error.
+    case refuses
+
+    /// The agent opens ``stubAgentSessionID`` for a `cwd` that opens with `/`,
+    /// and it refuses every other `cwd` with JSON-RPC invalid params whose
+    /// `data` names the field and the reason.
+    case judgesWorkingDirectory
 }
 
 /// The `initialize` answer the caller asked for.
@@ -1648,19 +1724,30 @@ private func initializeResult(
 
 /// One JSON-RPC error answer.
 ///
-/// The three refusals this file can script differ in the id they answer, the
-/// code they carry and the text they name, and in nothing else, so one builder
-/// writes all three.
+/// The refusals this file can script differ in the id they answer, the code
+/// they carry, the text they name and the `data` they attach, and in nothing
+/// else, so one builder writes all of them.
 ///
 /// - Parameters:
 ///   - id: The request id this error answers.
 ///   - code: The JSON-RPC error code to carry.
 ///   - message: The text to name.
+///   - data: The structured detail to attach, or `nil` to attach none. An
+///     absent `data` is left out of the line, never written as `null`.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func requestError(id: Int, code: Int, message: String) throws -> String {
-    try ndjsonLine([
-        "error": ["code": code, "message": message],
+private func requestError(
+    id: Int,
+    code: Int,
+    message: String,
+    data: [String: String]? = nil
+) throws -> String {
+    var error: [String: Any] = ["code": code, "message": message]
+    if let data {
+        error["data"] = data
+    }
+    return try ndjsonLine([
+        "error": error,
         "id": id,
         "jsonrpc": jsonRPCVersion,
     ])
@@ -1718,26 +1805,70 @@ private func jsonValue(of value: some Encodable) throws -> Any {
     try JSONSerialization.jsonObject(with: try JSONEncoder().encode(value))
 }
 
-/// The `session/new` answer the caller asked for: the one session id this stub
-/// gives out, or a refusal.
+/// The `session/new` answer that opens the one session this stub gives out.
 ///
-/// - Parameter answer: How the agent answers.
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
-private func newSessionAnswer(_ answer: StubAgentRequestAnswer) throws -> String {
+private func newSessionResult() throws -> String {
+    try ndjsonLine([
+        "id": newSessionAnswerID,
+        "jsonrpc": jsonRPCVersion,
+        "result": ["sessionId": stubAgentSessionID.rawValue],
+    ])
+}
+
+/// The `session/new` answer that refuses the `cwd` the client sent.
+///
+/// It is the answer the agent of `FoundationModelsACPAgent` gives a `cwd` that
+/// is not absolute: JSON-RPC invalid params, with the field and the reason in
+/// `data` rather than in the message, so a client reads them without parsing
+/// prose.
+///
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func workingDirectoryRefusal() throws -> String {
+    try requestError(
+        id: newSessionAnswerID,
+        code: jsonRPCInvalidParamsCode,
+        message: stubAgentInvalidParamsMessage,
+        data: [
+            refusedFieldMember: stubAgentWorkingDirectoryField,
+            refusedReasonMember: stubAgentWorkingDirectoryReason,
+        ]
+    )
+}
+
+/// Renders the shell statements of the `session/new` arm.
+///
+/// The judging agent reads the request line it was given, so its arm is a
+/// nested `case` over that line rather than one fixed answer.
+///
+/// - Parameter answer: How the agent answers.
+/// - Returns: The shell statements of the arm.
+/// - Throws: A JSON-encoding failure.
+private func newSessionStatements(_ answer: StubAgentNewSessionAnswer) throws -> String {
     switch answer {
     case .answers:
-        return try ndjsonLine([
-            "id": newSessionAnswerID,
-            "jsonrpc": jsonRPCVersion,
-            "result": ["sessionId": stubAgentSessionID.rawValue],
-        ])
+        return printfLine(try newSessionResult())
     case .refuses:
-        return try requestError(
-            id: newSessionAnswerID,
-            code: jsonRPCInternalErrorCode,
-            message: stubAgentNewSessionRefusal
+        return printfLine(
+            try requestError(
+                id: newSessionAnswerID,
+                code: jsonRPCInternalErrorCode,
+                message: stubAgentNewSessionRefusal
+            )
         )
+    case .judgesWorkingDirectory:
+        return """
+        case "$line" in
+          *'\(absoluteWorkingDirectoryMarker)'*)
+            \(printfLine(try newSessionResult()))
+            ;;
+          *)
+            \(printfLine(try workingDirectoryRefusal()))
+            ;;
+        esac
+        """
     }
 }
 

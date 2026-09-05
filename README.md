@@ -27,7 +27,7 @@ _ = try await connection.initialize(InitializeRequest(
     capabilities: ACPClient.advertisedCapabilities
 ))
 let session = try await connection.newSession(
-    NewSessionRequest(cwd: AbsolutePath(rawValue: "/Users/me/project")!))
+    NewSessionRequest(cwd: AbsolutePath(rawValue: "/Users/me/project")))
 _ = try await connection.prompt(PromptRequest(
     prompt: [.text(TextContent(text: "Hello"))],
     sessionId: session.sessionId))
