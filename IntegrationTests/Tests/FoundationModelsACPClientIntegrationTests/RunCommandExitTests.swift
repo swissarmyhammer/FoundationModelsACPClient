@@ -154,27 +154,13 @@ struct RunCommandExitTests {
     /// The text that stands before the unique part of a transcript file's name.
     private static let transcriptFileNamePrefix = "acp-client-agent-requests-"
 
-    /// Builds the command line of one `run` against a stub-agent script.
-    ///
-    /// The scripts carry no execute bit, so the agent command is the shell and
-    /// the script is its argument, which is also the shape `cli-plan.md` §6
-    /// gives an agent that takes arguments of its own.
-    ///
-    /// - Parameters:
-    ///   - prompt: The prompt argument, or `nil` to put none on the line.
-    ///   - script: The absolute path of the stub-agent script.
-    /// - Returns: The arguments for ``runAcpClient(_:standardInput:environment:)``.
-    private static func runArguments(prompt: String?, script: String) -> [String] {
-        ["run"] + (prompt.map { [$0] } ?? []) + ["--", stubAgentShellCommand, script]
-    }
-
     @Test("a well behaved agent writes the answer to stdout, and the run exits 0")
     func aWellBehavedAgentWritesTheAnswerAndTheRunSucceeds() async throws {
         let script = try makeWellBehavedAgent(answer: Self.answer, stopReason: .endTurn)
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(prompt: Self.prompt, script: script)
+            runArguments(prompt: Self.prompt, script: script)
         )
 
         #expect(result.exitCode == SectionNineExitCode.success)
@@ -203,7 +189,7 @@ struct RunCommandExitTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(prompt: Self.prompt, script: script)
+            runArguments(prompt: Self.prompt, script: script)
         )
 
         #expect(result.exitCode == expectedExitCode)
@@ -216,7 +202,7 @@ struct RunCommandExitTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(prompt: Self.prompt, script: script)
+            runArguments(prompt: Self.prompt, script: script)
         )
 
         #expect(result.exitCode == SectionNineExitCode.success)
@@ -241,7 +227,7 @@ struct RunCommandExitTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(prompt: nil, script: script),
+            runArguments(prompt: nil, script: script),
             standardInput: .terminal
         )
 
@@ -257,7 +243,7 @@ struct RunCommandExitTests {
         let script = try ending.makeAgent(pidFile: pidFile.path)
         defer { removeAgentScript(script) }
 
-        _ = try await runAcpClient(Self.runArguments(prompt: Self.prompt, script: script))
+        _ = try await runAcpClient(runArguments(prompt: Self.prompt, script: script))
 
         let pid = try recordedAgentPid(in: pidFile)
         #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
@@ -274,7 +260,7 @@ struct RunCommandExitTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(prompt: row.promptArgument, script: script),
+            runArguments(prompt: row.promptArgument, script: script),
             standardInput: row.standardInput
         )
 

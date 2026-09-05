@@ -743,6 +743,8 @@ let agentCommandSeparator = "--"
 /// The scripts carry no execute bit, so the agent command is
 /// ``stubAgentShellCommand`` and the script is its first argument, which is also
 /// the shape `cli-plan.md` §6 gives an agent that takes arguments of its own.
+/// The agent's own arguments stand after the script, because that is where the
+/// shell hands them to it.
 ///
 /// - Parameters:
 ///   - subcommand: The subcommand name, one of ``runSubcommandName``,
@@ -750,14 +752,17 @@ let agentCommandSeparator = "--"
 ///   - options: Everything that stands between the name and the separator: the
 ///     options of `cli-plan.md` §6.1, and the prompt argument of `run`.
 ///   - script: The absolute path of the stub-agent script.
+///   - agentArguments: The agent's own arguments, after the script.
 /// - Returns: The arguments for
 ///   ``runAcpClient(_:standardInput:standardOutput:environment:signals:within:)``.
 func agentCommandArguments(
     _ subcommand: String,
     options: [String] = [],
-    script: String
+    script: String,
+    agentArguments: [String] = []
 ) -> [String] {
-    [subcommand] + options + [agentCommandSeparator, stubAgentShellCommand, script]
+    [subcommand] + options
+        + [agentCommandSeparator, stubAgentShellCommand, script] + agentArguments
 }
 
 /// Builds the command line of one `acp-client run` against a stub-agent script.
@@ -767,13 +772,20 @@ func agentCommandArguments(
 ///     the §7 row that reads the prompt off standard input.
 ///   - options: The options of `cli-plan.md` §6.1 to put before the separator.
 ///   - script: The absolute path of the stub-agent script.
+///   - agentArguments: The agent's own arguments, after the script.
 /// - Returns: The arguments for
 ///   ``runAcpClient(_:standardInput:standardOutput:environment:signals:within:)``.
-func runArguments(prompt: String?, options: [String] = [], script: String) -> [String] {
+func runArguments(
+    prompt: String?,
+    options: [String] = [],
+    script: String,
+    agentArguments: [String] = []
+) -> [String] {
     agentCommandArguments(
         runSubcommandName,
         options: (prompt.map { [$0] } ?? []) + options,
-        script: script
+        script: script,
+        agentArguments: agentArguments
     )
 }
 

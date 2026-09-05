@@ -107,32 +107,12 @@ struct StreamRulesTests {
     /// words would prove nothing about that.
     private static let agentArguments = ["--model", "small", "-v"]
 
-    /// Builds the command line of one `run` against a stub-agent script.
-    ///
-    /// The scripts carry no execute bit, so the agent command is the shell and
-    /// the script is its first argument, which is also the shape `cli-plan.md`
-    /// §6 gives an agent that takes arguments of its own.
-    ///
-    /// - Parameters:
-    ///   - options: The §6.1 options to put before the separator.
-    ///   - script: The absolute path of the stub-agent script.
-    ///   - agentArguments: The agent's own arguments, after the script.
-    /// - Returns: The arguments for ``runAcpClient(_:standardInput:standardOutput:environment:)``.
-    private static func runArguments(
-        options: [String] = [],
-        script: String,
-        agentArguments: [String] = []
-    ) -> [String] {
-        ["run", streamPrompt] + options
-            + ["--", stubAgentShellCommand, script] + agentArguments
-    }
-
     @Test("stdout holds the answer text and nothing else, byte for byte")
     func stdoutHoldsTheAnswerTextAlone() async throws {
         let script = try makeWellBehavedAgent(answer: streamAnswer)
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(Self.runArguments(script: script))
+        let result = try await runAcpClient(runArguments(prompt: streamPrompt, script: script))
 
         #expect(result.exitCode == sectionNineSuccess)
         // Byte equality is what pins "add no trailing newline": one extra byte
@@ -148,7 +128,7 @@ struct StreamRulesTests {
         let script = try makeWellBehavedAgent(answer: streamAnswer)
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(Self.runArguments(script: script))
+        let result = try await runAcpClient(runArguments(prompt: streamPrompt, script: script))
 
         #expect(result.exitCode == sectionNineSuccess)
         #expect(
@@ -163,7 +143,7 @@ struct StreamRulesTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(options: ["--quiet"], script: script)
+            runArguments(prompt: streamPrompt, options: ["--quiet"], script: script)
         )
 
         #expect(result.exitCode == sectionNineSuccess)
@@ -180,7 +160,7 @@ struct StreamRulesTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(options: ["--verbose"], script: script)
+            runArguments(prompt: streamPrompt, options: ["--verbose"], script: script)
         )
 
         #expect(result.exitCode == sectionNineSuccess)
@@ -198,7 +178,7 @@ struct StreamRulesTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(options: ["--frames"], script: script)
+            runArguments(prompt: streamPrompt, options: ["--frames"], script: script)
         )
 
         #expect(result.exitCode == sectionNineSuccess)
@@ -224,7 +204,7 @@ struct StreamRulesTests {
         let script = try makePermissionRequestingAgent(answer: streamAnswer)
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(Self.runArguments(script: script))
+        let result = try await runAcpClient(runArguments(prompt: streamPrompt, script: script))
 
         #expect(result.exitCode == sectionNineSuccess)
         #expect(result.standardOutput == Data(streamAnswer.utf8))
@@ -247,7 +227,7 @@ struct StreamRulesTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.runArguments(script: script, agentArguments: Self.agentArguments)
+            runArguments(prompt: streamPrompt, script: script, agentArguments: Self.agentArguments)
         )
 
         #expect(result.exitCode == sectionNineSuccess)
@@ -263,11 +243,11 @@ struct StreamRulesTests {
         defer { removeAgentScript(script) }
 
         let piped = try await runAcpClient(
-            Self.runArguments(script: script),
+            runArguments(prompt: streamPrompt, script: script),
             standardOutput: .pipe
         )
         let filed = try await runAcpClient(
-            Self.runArguments(script: script),
+            runArguments(prompt: streamPrompt, script: script),
             standardOutput: .file
         )
 

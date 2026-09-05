@@ -67,20 +67,6 @@ struct ProbeCommandTests {
     /// directory's name.
     private static let workingDirectoryNamePrefix = "acp-client-probe-cwd-"
 
-    /// Builds the command line of one `probe` against a stub-agent script.
-    ///
-    /// The scripts carry no execute bit, so the agent command is the shell and
-    /// the script is its argument, which is also the shape `cli-plan.md` §6
-    /// gives an agent that takes arguments of its own.
-    ///
-    /// - Parameters:
-    ///   - options: The options of §6.1 to put before the separator.
-    ///   - script: The absolute path of the stub-agent script.
-    /// - Returns: The arguments for ``runAcpClient(_:standardInput:standardOutput:environment:)``.
-    private static func probeArguments(options: [String] = [], script: String) -> [String] {
-        ["probe"] + options + ["--", stubAgentShellCommand, script]
-    }
-
     /// Runs one `probe` against a fresh stub agent, and gives back the report.
     ///
     /// - Parameters:
@@ -95,7 +81,9 @@ struct ProbeCommandTests {
         let script = try makeProbeAgent(commands: commands)
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(probeArguments(options: options, script: script))
+        let result = try await runAcpClient(
+            agentCommandArguments(probeSubcommandName, options: options, script: script)
+        )
         return (result, String(decoding: result.standardOutput, as: UTF8.self))
     }
 
@@ -138,7 +126,9 @@ struct ProbeCommandTests {
         let script = try makeProbeAgent(transcript: transcript.path)
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(Self.probeArguments(script: script))
+        let result = try await runAcpClient(
+            agentCommandArguments(probeSubcommandName, script: script)
+        )
 
         #expect(result.exitCode == reportRanExitCode)
         let received = try String(contentsOf: transcript, encoding: .utf8)
@@ -175,7 +165,11 @@ struct ProbeCommandTests {
         defer { removeAgentScript(script) }
 
         let result = try await runAcpClient(
-            Self.probeArguments(options: ["--cwd", directory.path], script: script)
+            agentCommandArguments(
+                probeSubcommandName,
+                options: ["--cwd", directory.path],
+                script: script
+            )
         )
 
         #expect(result.exitCode == reportRanExitCode)
@@ -218,7 +212,9 @@ struct ProbeCommandTests {
         let script = try makeInitializeRefusingAgent()
         defer { removeAgentScript(script) }
 
-        let result = try await runAcpClient(Self.probeArguments(script: script))
+        let result = try await runAcpClient(
+            agentCommandArguments(probeSubcommandName, script: script)
+        )
 
         #expect(result.exitCode == failureExitCode)
         #expect(result.standardOutput.isEmpty)
@@ -235,7 +231,7 @@ struct ProbeCommandTests {
             : try makeInitializeRefusingAgent(pidFile: pidFile.path)
         defer { removeAgentScript(script) }
 
-        _ = try await runAcpClient(Self.probeArguments(script: script))
+        _ = try await runAcpClient(agentCommandArguments(probeSubcommandName, script: script))
 
         let pid = try recordedAgentPid(in: pidFile)
         #expect(!processExists(pid), "the agent with pid \(pid) outlived the probe")

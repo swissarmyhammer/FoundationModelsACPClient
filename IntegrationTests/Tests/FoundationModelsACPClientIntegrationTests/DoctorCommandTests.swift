@@ -86,20 +86,6 @@ private let okStatusValue = "ok"
     .timeLimit(.minutes(doctorSuiteTimeLimitMinutes))
 )
 struct DoctorCommandTests {
-    /// Builds the command line of one `doctor` against a stub-agent script.
-    ///
-    /// The scripts carry no execute bit, so the agent command is the shell and
-    /// the script is its argument, which is also the shape `cli-plan.md` §6
-    /// gives an agent that takes arguments of its own.
-    ///
-    /// - Parameters:
-    ///   - options: The options of §6.1 to put before the separator.
-    ///   - script: The absolute path of the stub-agent script.
-    /// - Returns: The arguments for ``runAcpClient(_:standardInput:standardOutput:environment:within:)``.
-    private static func doctorArguments(options: [String] = [], script: String) -> [String] {
-        [DoctorCommand.name] + options + ["--", stubAgentShellCommand, script]
-    }
-
     /// Runs one `doctor` against a stub-agent script, and gives back its report.
     ///
     /// - Parameters:
@@ -112,7 +98,7 @@ struct DoctorCommandTests {
         options: [String] = []
     ) async throws -> (result: CLIResult, report: String) {
         let result = try await runAcpClient(
-            doctorArguments(options: options, script: script),
+            agentCommandArguments(doctorSubcommandName, options: options, script: script),
             within: doctorRunBound
         )
         return (result, String(decoding: result.standardOutput, as: UTF8.self))
