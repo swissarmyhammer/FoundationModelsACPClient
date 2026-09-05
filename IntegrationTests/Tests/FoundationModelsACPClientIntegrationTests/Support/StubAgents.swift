@@ -276,31 +276,36 @@ func makeSilentAgent(pidFile: String? = nil) throws -> String {
     )
 }
 
-/// Writes a stub agent that answers `initialize` the way `initialize` says, and
-/// behaves as
+/// Writes a stub agent that answers `initialize` the way `initialize` says,
+/// answers `session/new` the way `newSession` says, and behaves as
 /// ``makeWellBehavedAgent(answer:stopReason:pidFile:transcript:argumentsFile:)``
 /// after that.
 ///
-/// The agents of this file that differ in their `initialize` answer alone share
-/// this one script, so each of them names its answer here and writes no request
-/// loop of its own.
+/// The agents of this file that differ in one answer of the handshake alone
+/// share this one script, so each of them names that one answer here and
+/// writes no request loop of its own. Each default is the answer a
+/// well-behaved agent gives, and it is the default ``requestLoop`` gives the
+/// same answer.
 ///
 /// - Parameters:
 ///   - pidFile: Where the agent records its own pid before it answers anything,
 ///     or `nil` to record none.
 ///   - initialize: How the agent answers `initialize`.
+///   - newSession: How the agent answers `session/new`.
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 private func makeAgent(
     pidFile: String?,
-    initialize: StubAgentInitializeAnswer
+    initialize: StubAgentInitializeAnswer = .reports([]),
+    newSession: StubAgentRequestAnswer = .answers
 ) throws -> String {
     try writeAgentScript(
         requestLoop(
             answer: stubAgentDefaultAnswer,
             stopReason: .endTurn,
             pidFile: pidFile,
-            initialize: initialize
+            initialize: initialize,
+            newSession: newSession
         )
     )
 }
@@ -428,14 +433,7 @@ func makeInitializeRefusingAgent(pidFile: String? = nil) throws -> String {
 /// - Returns: The absolute path of the script; the caller removes it.
 /// - Throws: A JSON-encoding failure, or the write failure of the script file.
 func makeNewSessionRefusingAgent(pidFile: String? = nil) throws -> String {
-    try writeAgentScript(
-        requestLoop(
-            answer: stubAgentDefaultAnswer,
-            stopReason: .endTurn,
-            pidFile: pidFile,
-            newSession: .refuses
-        )
-    )
+    try makeAgent(pidFile: pidFile, newSession: .refuses)
 }
 
 /// Writes a stub agent that answers every request of a probe and then reports

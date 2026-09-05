@@ -111,8 +111,30 @@ comments:
     - evidence: `swift test` — 223 tests, 19 suites, all passed, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests` — 85 tests, 12 suites, all passed, 0 failures, 0 warnings, 0 skipped.
     - next: ready for the next step.
   timestamp: 2026-09-05T12:52:56.359213+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rt3v5jkcqa4m46y59pyv03
+  text: |-
+    ### commit — changed
+    - evidence: 7337f97 fix(doctor): read capabilities in the same three steps as authMethods
+  timestamp: 2026-09-05T12:53:52.434891+00:00
+- actor: claude-code
+  id: 01m1rtbp9yaxb9jkpj5ye7k29a
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 7337f97) — 0 findings, 7 validator runs attempted, 0 failed; 3 files reviewed, 2 files in `.kanban/` excluded by `.reviewignore`. The one prior finding (2026-09-05 07:34) is checked.
+    - next: none. The task moved to `done`.
+  timestamp: 2026-09-05T12:58:09.598866+00:00
+- actor: claude-code
+  id: 01m1rtc76g5c9jfvtjqwwdq1fs
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — `Sources/AcpClientCore/AgentCommandDoctor.swift` (shared `shapeLoss` builder and `memberTheAgentSent` reader; `capabilityMembersLoss` reads absent, shape and members like `authMethodsLoss`), `IntegrationTests/.../Support/StubAgents.swift` (2 answers, 2 factories), `IntegrationTests/.../AgentCommandDoctorTests.swift` (2 tests, each red then green). 1 of 1 findings checked.
+    - test: green — root 223/223 in 19 suites, integration 85/85 in 12 suites, 0 warnings, 0 skipped
+    - commit: 7337f97
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T12:58:26.896541+00:00
+position_column: done
+position_ordinal: a780
 title: 'Doctor row 6: report an authMethods member that is not an array'
 ---
 ## What
