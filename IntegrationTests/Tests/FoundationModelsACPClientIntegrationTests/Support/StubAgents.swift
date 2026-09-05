@@ -529,6 +529,73 @@ func makeUnreadableAuthMethodAgent(pidFile: String? = nil) throws -> String {
     try makeAgent(pidFile: pidFile, initialize: .reportsUnreadableAuthMethod)
 }
 
+/// Writes a stub agent that answers `initialize` with an `authMethods` member
+/// that is a string rather than an array.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 is what this one is
+/// for. `InitializeResponse` reads `authMethods` with
+/// `forgivingDecodeArrayIfPresent`, which degrades a value that is not an array
+/// to `nil` and throws nothing. The client then believes the agent advertised
+/// no authentication method at all, and a row that counted array elements alone
+/// would have nothing to count. Only a real agent that sends this shape can
+/// prove the row names the member instead.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNonArrayAuthMethodsAgent(pidFile: String? = nil) throws -> String {
+    try makeAgent(pidFile: pidFile, initialize: .reportsNonArrayAuthMethods)
+}
+
+/// Writes a stub agent that answers `initialize` with an `authMethods` member
+/// set to `null`.
+///
+/// The schema lets the member be absent, and `null` is how an agent that
+/// writes every member spells absent. The decode reads it as no member, and
+/// the sixth row of the check table of `cli-plan.md` §10 must read it the same
+/// way rather than as a member of the wrong shape. Only a real agent that
+/// sends `null` can prove the row tells the two apart.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeNullAuthMethodsAgent(pidFile: String? = nil) throws -> String {
+    try makeAgent(pidFile: pidFile, initialize: .reportsNullAuthMethods)
+}
+
+/// Writes a stub agent that answers `initialize` with a `capabilities` object
+/// this build cannot read, beside an `authMethods` member that is a string
+/// rather than an array.
+///
+/// The sixth row of the check table of `cli-plan.md` §10 collects one loss for
+/// each kind it can find and names them all on one row. An agent that sends
+/// both shapes at once is what proves the `authMethods` arm stands BESIDE the
+/// `capabilities` arm rather than in its place.
+///
+/// The agent stays alive until its stdin closes, so the reap is the caller's
+/// work and never the agent's own exit.
+///
+/// - Parameter pidFile: Where the agent records its own pid before it answers
+///   anything, or `nil` to record none.
+/// - Returns: The absolute path of the script; the caller removes it.
+/// - Throws: A JSON-encoding failure, or the write failure of the script file.
+func makeUnreadableCapabilitiesAndNonArrayAuthMethodsAgent(
+    pidFile: String? = nil
+) throws -> String {
+    try makeAgent(
+        pidFile: pidFile,
+        initialize: .reportsUnreadableCapabilitiesAndNonArrayAuthMethods
+    )
+}
+
 /// Writes a stub agent that streams one answer chunk and then never sends a
 /// `state_update` at all.
 ///
@@ -1266,6 +1333,18 @@ private enum StubAgentInitializeAnswer {
     /// ``stubAgentUnreadableAuthMethodCount`` elements this build cannot read.
     case reportsUnreadableAuthMethod
 
+    /// The agent answers with an `authMethods` member that is a string rather
+    /// than an array.
+    case reportsNonArrayAuthMethods
+
+    /// The agent answers with an `authMethods` member set to `null`.
+    case reportsNullAuthMethods
+
+    /// The agent answers with a `capabilities` object holding a member this
+    /// build cannot read, beside an `authMethods` member that is a string
+    /// rather than an array.
+    case reportsUnreadableCapabilitiesAndNonArrayAuthMethods
+
     /// The agent answers with a JSON-RPC error, and the handshake fails.
     case fails
 }
@@ -1310,6 +1389,18 @@ private func unreadableStubAgentCapabilities() -> [String: Any] {
 private func unreadableStubAgentAuthMethod() -> [String: Any] {
     ["type": "agent", "id": "stub-broken", "name": "Sign in with the broken stub"]
 }
+
+/// The `authMethods` member ``makeNonArrayAuthMethodsAgent(pidFile:)`` answers
+/// `initialize` with.
+///
+/// The schema states `authMethods` as an array, and this sends a bare method
+/// id in its place, which is the shape an agent that forgot the brackets
+/// writes. `InitializeResponse` reads the member with
+/// `forgivingDecodeArrayIfPresent`, so the decode gives `nil` and throws
+/// nothing at all: the client silently believes the agent advertised no
+/// method. That silence is what the sixth row of the check table of
+/// `cli-plan.md` §10 reports.
+private let nonArrayStubAgentAuthMethods = "stub-oauth"
 
 /// The JSON-RPC code an agent answers with when it will not serve a request it
 /// understood.
@@ -1383,6 +1474,22 @@ private func initializeAnswer(_ answer: StubAgentInitializeAnswer) throws -> Str
                 count: stubAgentUnreadableAuthMethodCount
             )
         )
+    case .reportsNonArrayAuthMethods:
+        try initializeResult(
+            authMethodsMember: nonArrayStubAgentAuthMethods,
+            protocolVersion: ACPClient.supportedProtocolVersion
+        )
+    case .reportsNullAuthMethods:
+        try initializeResult(
+            authMethodsMember: NSNull(),
+            protocolVersion: ACPClient.supportedProtocolVersion
+        )
+    case .reportsUnreadableCapabilitiesAndNonArrayAuthMethods:
+        try initializeResult(
+            authMethodsMember: nonArrayStubAgentAuthMethods,
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            capabilities: unreadableStubAgentCapabilities()
+        )
     case .fails:
         try requestError(
             id: initializeAnswerID,
@@ -1417,6 +1524,36 @@ private func initializeResult(
     capabilities: [String: Any] = readableStubAgentCapabilities(),
     unreadableAuthMethods: [Any] = []
 ) throws -> String {
+    let advertised = try authMethods.map { try jsonValue(of: $0) } + unreadableAuthMethods
+    return try initializeResult(
+        authMethodsMember: advertised.isEmpty ? nil : advertised,
+        protocolVersion: protocolVersion,
+        capabilities: capabilities
+    )
+}
+
+/// The successful `initialize` answer, with its `authMethods` member written
+/// exactly as the caller gave it.
+///
+/// This is the one place the member reaches the wire, so it is where an agent
+/// that sends the member in a shape the schema does not state is scripted.
+/// The array-building overload above is what every conformant stub uses.
+///
+/// - Parameters:
+///   - authMethodsMember: The `authMethods` member, as the untyped JSON
+///     `JSONSerialization` writes, or `nil` to leave the member out. An
+///     `NSNull` writes `null`, and a string writes a string.
+///   - protocolVersion: The protocol version to answer with, or `nil` to leave
+///     the member out.
+///   - capabilities: The `capabilities` member to answer with. The default is
+///     the baseline session surface every conformant stub advertises.
+/// - Returns: The message as one ndJSON line.
+/// - Throws: A JSON-encoding failure.
+private func initializeResult(
+    authMethodsMember: Any?,
+    protocolVersion: ProtocolVersion?,
+    capabilities: [String: Any] = readableStubAgentCapabilities()
+) throws -> String {
     var result: [String: Any] = [
         "capabilities": capabilities,
         "info": ["name": stubAgentName, "version": stubAgentVersion],
@@ -1424,9 +1561,8 @@ private func initializeResult(
     if let protocolVersion {
         result["protocolVersion"] = protocolVersion.rawValue
     }
-    let advertised = try authMethods.map { try jsonValue(of: $0) } + unreadableAuthMethods
-    if !advertised.isEmpty {
-        result["authMethods"] = advertised
+    if let authMethodsMember {
+        result["authMethods"] = authMethodsMember
     }
     return try ndjsonLine([
         "id": initializeAnswerID,

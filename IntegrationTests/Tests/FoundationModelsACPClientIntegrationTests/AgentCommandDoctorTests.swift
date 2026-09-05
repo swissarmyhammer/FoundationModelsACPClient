@@ -19,11 +19,11 @@ import Testing
 //
 // The sixth row is the one row a test can make pass by accident. `capabilities`
 // and `authMethods` both decode forgivingly, so a check that read the DECODED
-// answer would report `ok` against every agent, malformed ones included. Three
+// answer would report `ok` against every agent, malformed ones included. Five
 // tests below drive agents that send an answer this build cannot read in full,
-// and they are what state that the row can fail at all. Two more drive agents
+// and they are what state that the row can fail at all. Three more drive agents
 // whose `authMethods` the row must accept: one that advertises only readable
-// methods, and one that sends no member at all.
+// methods, one that sends no member at all, and one that sends `null`.
 //
 // The suite lives in the nested `IntegrationTests` package because every row
 // after the first spawns a real agent. The root `swift test` never sees this
@@ -425,6 +425,67 @@ struct AgentCommandDoctorTests {
         // loss would warn against every such agent.
         let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
         #expect(capabilities.status == .ok)
+    }
+
+    @Test("an agent that sends authMethods as null passes the capabilities row")
+    func aNullAuthMethodsMemberPassesTheCapabilitiesRow() async throws {
+        let script = try makeNullAuthMethodsAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The schema lets the member be absent, and `null` is how an agent
+        // that writes every member spells absent. The decode reads it as no
+        // member, and a row that read `null` as a member of the wrong shape
+        // would warn against an agent that did nothing wrong.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .ok)
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .ok, .ok])
+    }
+
+    @Test("an authMethods member that is not an array warns on the capabilities row, and names the member")
+    func aNonArrayAuthMethodsMemberWarnsOnTheCapabilitiesRow() async throws {
+        let script = try makeNonArrayAuthMethodsAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The handshake SUCCEEDED. `authMethods` decodes forgivingly, so a
+        // string in place of the array becomes `nil` and nothing throws: the
+        // client is left believing the agent advertised no method at all. The
+        // raw member is not an array either, so a row that only counted array
+        // elements would have nothing to count and would report `ok`.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .warning)
+        #expect(
+            capabilities.message.contains("authMethods"),
+            "the row did not name the member the decode dropped: \(capabilities.message)"
+        )
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
+    }
+
+    @Test("an authMethods member that is not an array is named beside a dropped capabilities member, on one row")
+    func aNonArrayAuthMethodsMemberIsNamedBesideADroppedCapabilitiesMember() async throws {
+        let script = try makeUnreadableCapabilitiesAndNonArrayAuthMethodsAgent()
+        defer { removeAgentScript(script) }
+
+        let checks = await Self.doctor(over: script).runHealthChecks()
+
+        // The row collects one loss for each kind and names them all, so a
+        // person repairs the agent in one pass. The `authMethods` arm stands
+        // BESIDE the `capabilities` arm: a row that named only one of the two
+        // would have replaced an arm rather than added one.
+        let capabilities = try Self.row(named: AgentCommandDoctor.capabilitiesCheckName, in: checks)
+        #expect(capabilities.status == .warning)
+        #expect(
+            capabilities.message.contains("session"),
+            "the row did not name the capabilities member the decode dropped: \(capabilities.message)"
+        )
+        #expect(
+            capabilities.message.contains("authMethods"),
+            "the row did not name the authMethods member the decode dropped: \(capabilities.message)"
+        )
+        #expect(checks.map(\.status) == [.ok, .ok, .ok, .ok, .ok, .warning, .ok])
     }
 
     @Test("an agent that ignores a closed stdin warns on the teardown row, and asks for exit 5")

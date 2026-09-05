@@ -108,8 +108,30 @@ comments:
     - Work tree check: `git status --short` shows only the prior implementation files. No probe mutation is left.
     - next: ready for review.
   timestamp: 2026-09-05T12:18:47.594862+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m1rr7g3sjtaat7tvk2jtbdgt
+  text: |-
+    ### commit — changed
+    - evidence: 90cab90 refactor(integration-tests): reuse one factory for the initialize stub agents
+  timestamp: 2026-09-05T12:20:55.033367+00:00
+- actor: claude-code
+  id: 01m1rrapzfnnww814ww0n1btnh
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 90cab90). 0 findings. 1 file reviewed. The one prior finding (StubAgents.swift reuse/reuse) is checked.
+    - next: none. The task is done.
+  timestamp: 2026-09-05T12:22:40.367844+00:00
+- actor: claude-code
+  id: 01m1rrb6wh8syx2ywxprbq873d
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — `IntegrationTests/.../Support/StubAgents.swift`: private `makeAgent(pidFile:initialize:)`; five `initialize`-only factories fold onto it. 1 of 1 findings checked. Follow-up card `^5cg7rnq` for the `makeNewSessionRefusingAgent` fold.
+    - test: green — root 223/223 in 19 suites, integration 80/80 in 12 suites, 0 warnings, 0 skipped
+    - commit: 90cab90
+    - review: clean — 0 findings; task moved to `done`
+  timestamp: 2026-09-05T12:22:56.657807+00:00
+position_column: done
+position_ordinal: a680
 title: 'Doctor row 6: also name the authMethods the forgiving decode dropped'
 ---
 ## What

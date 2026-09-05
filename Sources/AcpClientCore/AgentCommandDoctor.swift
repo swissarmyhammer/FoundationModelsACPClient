@@ -49,7 +49,10 @@ import Synchronization
 //    `AuthMethod` is the wire's own union, and this package must not spell
 //    what a readable element looks like. An element the raw array held and
 //    the decoded array does not is a dropped one, and the arithmetic is the
-//    whole test.
+//    whole test. A `capabilities` member that is not an object, and an
+//    `authMethods` member that is not an array, are each named as that
+//    member, because the decode dropped the whole of it; a `null` member is
+//    absent, which the schema allows, and is no loss.
 // 5. **The teardown row runs BEFORE the connection closes.** Closing the
 //    connection cancels the tee's forwarding task, which ends the transport's
 //    byte stream, which runs `AgentProcess`'s own teardown and group-kills the
@@ -503,8 +506,9 @@ struct AgentCommandDoctor: Doctorable {
     /// and never the decoded one.
     ///
     /// The row collects one loss for each kind it can find — the `capabilities`
-    /// members by name, the `authMethods` elements by count — and names them
-    /// all on one row, so a person repairs the agent in one pass.
+    /// members by name, the `authMethods` elements by count, and either member
+    /// by name when it is not the object or the array the schema states — and
+    /// names them all on one row, so a person repairs the agent in one pass.
     ///
     /// An agent that answered nothing at all, and one that answered a JSON-RPC
     /// error, both leave this row nothing to read. That is not a defect of its
@@ -583,32 +587,40 @@ struct AgentCommandDoctor: Doctorable {
         )
     }
 
-    /// The `authMethods` elements the agent sent and the decode did not keep,
-    /// as one loss.
+    /// The `authMethods` the agent sent and the decode did not keep, as one
+    /// loss.
     ///
-    /// The comparison is a COUNT, and never a reading of what an element looks
-    /// like. `AuthMethod` is an enumeration over the wire's own union, and this
-    /// package must not spell what a readable element is. The decode drops an
-    /// element it cannot read and keeps the rest, so an element the raw array
-    /// held and the decoded array does not is a dropped one, and the
-    /// arithmetic is the whole test.
+    /// Two shapes are a loss. A member that is not an array at all — a string,
+    /// a number, an object — is one the decode degrades to `nil` whole, so the
+    /// client believes the agent advertised no method; the member itself is
+    /// what that loss names, as the `capabilities` half names its member. A
+    /// `null` member is not that shape: the schema lets the member be absent,
+    /// and `null` is one way of writing absent, so it is no loss.
+    ///
+    /// For an array, the comparison is a COUNT, and never a reading of what an
+    /// element looks like. `AuthMethod` is an enumeration over the wire's own
+    /// union, and this package must not spell what a readable element is. The
+    /// decode drops an element it cannot read and keeps the rest, so an
+    /// element the raw array held and the decoded array does not is a dropped
+    /// one, and the arithmetic is the whole test.
     ///
     /// - Parameters:
     ///   - answer: The members of the raw initialize answer, untyped.
     ///   - authMethods: What the decode made of that answer's `authMethods`.
-    /// - Returns: The loss, naming how many elements were dropped, or `nil`
-    ///   when the agent sent no `authMethods` array or the decode kept every
-    ///   element of it.
+    /// - Returns: The loss, naming the member or how many elements were
+    ///   dropped, or `nil` when the agent sent no `authMethods` member or the
+    ///   decode kept every element of it.
     private static func authMethodsLoss(
         in answer: [String: Any],
         keeping authMethods: [AuthMethod]?
     ) -> DecodeLoss? {
-        guard let sent = answer[authMethodsKey] as? [Any] else { return nil }
-        let dropped = sent.count - (authMethods?.count ?? 0)
+        guard let sent = answer[authMethodsKey], !(sent is NSNull) else { return nil }
+        guard let elements = sent as? [Any] else { return authMethodsShapeLoss }
+        let dropped = elements.count - (authMethods?.count ?? 0)
         guard dropped > 0 else { return nil }
         return DecodeLoss(
             message: """
-                the decode dropped \(dropped) of the \(sent.count) authentication \
+                the decode dropped \(dropped) of the \(elements.count) authentication \
                 methods the agent advertised, because this build cannot read them
                 """,
             fix: """
@@ -618,6 +630,23 @@ struct AgentCommandDoctor: Doctorable {
                 """
         )
     }
+
+    /// The loss for an `authMethods` member that is not an array at all.
+    ///
+    /// The decode degrades such a member to `nil` whole and throws nothing,
+    /// so the row names the member rather than a count: there is no array to
+    /// count, and the whole of it is what the client lost.
+    private static let authMethodsShapeLoss = DecodeLoss(
+        message: """
+            the agent sent an \(authMethodsKey) member that is not an array, and \
+            the decode dropped it whole
+            """,
+        fix: """
+            Send \(authMethodsKey) as the array the negotiated protocol version \
+            states. A member of another shape becomes no method at all, so a \
+            person cannot log in with any of them.
+            """
+    )
 
     /// The names of the `capabilities` members the agent sent and the decode
     /// did not keep.
