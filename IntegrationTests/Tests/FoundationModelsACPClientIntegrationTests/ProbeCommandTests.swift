@@ -2,6 +2,7 @@ import Foundation
 import FoundationModelsACP
 import Testing
 
+@testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
 // These tests drive the real `acp-client probe` binary against a real foreign
@@ -16,6 +17,20 @@ import Testing
 // suite pins the binary to. The protocol version is not spelled again: it comes
 // from the library both the stub agent and the binary negotiate with, so the
 // assertion cannot drift from the handshake.
+//
+// The `--json` form is the one place this file reads the binary's own types.
+// `AcpClientCore` is a library product, so the JSON the binary wrote decodes
+// into its `ProbeReport`, and the test then compares the decoded values with
+// the stub agent's values and renders the plain form from them. That is how
+// "the JSON form equals the human form" is read off one value rather than
+// spelled a second time.
+
+/// The text `acp-client probe` writes after its report, in both forms.
+///
+/// The binary ends the report with one newline, so a person's last line ends
+/// and a script reads one ndJSON record. `ProbeReport.plainText()` carries no
+/// terminator of its own, so a comparison with the captured stdout adds it.
+private let reportTerminator = "\n"
 
 /// The number of minutes this file's suite allows itself.
 ///
@@ -193,6 +208,26 @@ struct ProbeCommandTests {
         #expect(members["authMethods"] != nil)
         #expect(members["slashCommands"] != nil)
         #expect(!plain.contains("{"), "the plain report was \"\(plain)\"")
+    }
+
+    @Test("--json decodes to the values the human form prints")
+    func theJSONFormDecodesToTheValuesTheHumanFormPrints() async throws {
+        let (json, jsonReport) = try await Self.probe(options: ["--json"])
+        let (plain, plainReport) = try await Self.probe()
+
+        #expect(json.exitCode == reportRanExitCode)
+        #expect(plain.exitCode == reportRanExitCode)
+        let decoded = try JSONDecoder().decode(ProbeReport.self, from: json.standardOutput)
+        #expect(decoded.protocolVersion == ACPClient.supportedProtocolVersion)
+        #expect(decoded.authMethods == stubAgentAuthMethods)
+        #expect(decoded.slashCommands == .listed(stubAgentCommands))
+        // The plain form is rendered from the decoded value, so every part the
+        // JSON carries — the capabilities included — must read the same as the
+        // report the binary printed without the flag.
+        #expect(
+            decoded.plainText() + reportTerminator == plainReport,
+            "the JSON form was \"\(jsonReport)\" and the plain form was \"\(plainReport)\""
+        )
     }
 
     @Test("an agent command that is not on PATH exits 1, says so on stderr, and writes no report")
