@@ -69,8 +69,24 @@ comments:
     - evidence: 10 files — edited `Sources/AcpClientCore/InterruptHandler.swift` (the event handler body is one store into an `Atomic<UInt>` flag, and a drain task started in `start()` and cancelled in `stop()` carries the count to `deliver(times:)`); new `Tests/FoundationModelsACPClientTests/InterruptHandlerSourceTests.swift` (source-level: the `setEventHandler` body is one statement, the store into the flag, and no other call; red on the old body, green now); edited `Tests/FoundationModelsACPClientTests/InterruptHandlerTests.swift` (a real `SIGINT` to the test process reaches the first callback; the disposition helper is `async`); edited `IntegrationTests/.../InterruptTests.swift` (the transcript holds `session/cancel` on the one-press row, red until the stub recorded its cancel wait; `secondInterruptRunBudget` of 2 s on the two-press row); edited `IntegrationTests/.../Support/StubAgents.swift` (`waitForLineStatements` records to the transcript; `expectAgentGroupIsGone(ledBy:after:)`); edited `IntegrationTests/.../Support/TransportTestSupport.swift` (`processGroupHasLiveMember(ledBy:)`, `kill(-pgid, 0)`); edited `IntegrationTests/.../AgentProcessTests.swift` (the group probe held true before and false after the teardown), `RunCommandExitTests.swift`, `TimeoutTests.swift`, `NoLeakedAgentTests.swift` (the pid-and-group assertion on the success, timeout and failure reaping rows). `timeout 900 swift test`: 229 tests in 21 suites passed, 0 warnings. `timeout 900 swift test --package-path IntegrationTests`: 92 tests in 13 suites passed, 0 warnings. Every subtask, acceptance row and test row of the card is ticked.
     - next: ready for `/review`.
   timestamp: 2026-09-08T23:00:50.554861+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m21mevtx2hk6q0mjfh7245jp
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 3051c5c), 10 files reviewed, 0 findings
+    - next: none. The task is done.
+  timestamp: 2026-09-08T23:08:11.997123+00:00
+- actor: claude-code
+  id: 01m21mfc8fzz5z3129re1csm4j
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 10 files (Sources/AcpClientCore/InterruptHandler.swift, Tests/FoundationModelsACPClientTests/InterruptHandlerSourceTests.swift, Tests/FoundationModelsACPClientTests/InterruptHandlerTests.swift, and 7 files under IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests)
+    - test: green — swift test 229 passed; swift test --package-path IntegrationTests 92 passed; 0 warnings
+    - commit: 3051c5c
+    - review: clean — 0 findings, task moved to done
+  timestamp: 2026-09-08T23:08:28.815103+00:00
+position_column: done
+position_ordinal: b080
 title: 'N6: --timeout, the interrupt, and the reaping proofs'
 ---
 ## What

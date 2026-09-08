@@ -115,10 +115,13 @@ on. A Noora release can therefore break this package with no red mark
 upstream. The containment rule below is what holds that risk to one file.
 
 The containment rule is: **one file imports Noora.**
-`Sources/AcpClientCore/TerminalOutput.swift` vends a spinner, a
-progress bar and a table, and every other file calls that type. A test
-pins the single import over both source directories of §3, so a swap
-costs one file.
+`Sources/AcpClientCore/TerminalOutput.swift` vends the spinner of §8,
+through `withSpinner(_:_:)`, and every other file calls that type. A
+component reaches this layer when a caller needs it, and not before. A
+table has no caller, because §8 sends the `probe` report and the
+`doctor` report to stdout, and this layer writes to stderr only. A
+progress bar has no total to show. A test pins the single import over
+both source directories of §3, so a swap costs one file.
 
 That file makes two decisions Noora's own defaults do not make:
 
