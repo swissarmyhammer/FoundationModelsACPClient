@@ -155,6 +155,13 @@ struct AgentProcessTests {
 
     /// An agent that spawns a child of its own has that child cleaned up too:
     /// the teardown kills the whole process group.
+    ///
+    /// The group probe is held here in both directions, because this is the
+    /// one place a live group and a reaped group stand under the same reader:
+    /// it reaches the group while the agent and its child live, and it
+    /// reaches nothing once the teardown ran. A probe that answered `false`
+    /// for a live group would pass every reaping row of the CLI suites while
+    /// measuring nothing.
     @Test func agentChildProcessIsCleanedUpWithTheGroup() async throws {
         let childPidFile = temporaryFileURL(prefix: Self.childPidFileNamePrefix)
         defer { try? FileManager.default.removeItem(at: childPidFile) }
@@ -172,9 +179,17 @@ struct AgentProcessTests {
         let childPid = try #require(await reportedChildPid(at: childPidFile.path))
         #expect(processExists(pid))
         #expect(processExists(childPid))
+        #expect(
+            processGroupHasLiveMember(ledBy: pid),
+            "the group probe does not reach the live group the agent \(pid) leads"
+        )
 
         process.shutdown()
         #expect(await eventually { !processExists(pid) })
         #expect(await eventually { !processExists(childPid) })
+        #expect(
+            await eventually { !processGroupHasLiveMember(ledBy: pid) },
+            "the group probe still reaches the group the agent \(pid) led after the teardown"
+        )
     }
 }

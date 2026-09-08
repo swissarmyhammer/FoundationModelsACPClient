@@ -146,3 +146,19 @@ func promptTurnLandsReply(
 func processExists(_ pid: pid_t) -> Bool {
     kill(pid, 0) == 0
 }
+
+/// Tells whether any process of the group `leader` started is still alive.
+///
+/// `kill` addresses a whole process group through the negated group id, and a
+/// signal-0 probe reaches the group when at least one member is alive.
+/// `AgentProcess` spawns the agent as the leader of a group of its own, so the
+/// agent's pid is the group id, and a child the agent left behind is a member
+/// the pid probe of ``processExists(_:)`` cannot see. `cli-plan.md` §11 asks
+/// that no process of that group outlives the run, and this is the probe that
+/// reads the group rather than the one pid.
+///
+/// - Parameter leader: The pid of the agent, which led the group.
+/// - Returns: `true` when a signal-0 probe reaches a member of the group.
+func processGroupHasLiveMember(ledBy leader: pid_t) -> Bool {
+    kill(-leader, 0) == 0
+}

@@ -48,6 +48,24 @@ private let interruptAnswer = "The stub agent answered."
 /// The wire method whose arrival at the agent means the turn has started.
 private let promptMethod = "session/prompt"
 
+/// The wire method the first press sends, which the transcript must hold
+/// after the run.
+private let cancelMethod = "session/cancel"
+
+/// The number of seconds ``secondInterruptRunBudget`` covers.
+private let secondInterruptRunBudgetSeconds = 2
+
+/// The longest a run that ends on the second press may take, from the spawn
+/// to the exit.
+///
+/// §11 gives the second press the end of the run AT ONCE, so the whole run —
+/// the spawn, the handshake, the prompt, the two presses and the reap — is
+/// bounded by what happens BEFORE the presses, and none of that waits on the
+/// agent. Two seconds is generous for it, and it stands far under the bound
+/// `runAcpClient` puts on a run, so a binary that kept waiting after the
+/// second press fails here as a slow run rather than as a killed one.
+private let secondInterruptRunBudget: Duration = .seconds(secondInterruptRunBudgetSeconds)
+
 /// How many presses the first-interrupt rows send.
 private let oneInterrupt = 1
 
@@ -111,7 +129,9 @@ struct InterruptTests {
     /// cancellation with one carrying `cancelled`, so this run can only end at
     /// all if the notification really reached the agent — and a binary that
     /// died on the press instead would carry the signal's own status rather
-    /// than 4.
+    /// than 4. The transcript is read beside the exit code, so the
+    /// cancellation stands in the agent's own record of what reached it, and
+    /// not only in the ending it chose.
     @Test("one SIGINT cancels the turn and exits 4")
     func oneInterruptCancelsTheTurnAndExitsWithTheCancelledCode() async throws {
         let transcript = temporaryFileURL(prefix: Self.transcriptNamePrefix)
@@ -129,6 +149,10 @@ struct InterruptTests {
         )
 
         #expect(result.exitCode == SectionNineExitCode.cancelled)
+        #expect(
+            transcriptHolds(transcript, method: cancelMethod),
+            "no \(cancelMethod) reached the agent before the exit"
+        )
     }
 
     /// §11 prints the text that arrived, and §8 gives standard output the
@@ -181,7 +205,7 @@ struct InterruptTests {
 
         #expect(result.exitCode == SectionNineExitCode.cancelled)
         let pid = try recordedAgentPid(in: pidFile)
-        #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
+        expectAgentGroupIsGone(ledBy: pid, after: "the run")
     }
 
     /// §11 gives the second `Ctrl-C` the end of the run at once, and §9 still
@@ -207,6 +231,11 @@ struct InterruptTests {
     /// nothing else. Empty and whole both pass, whichever side of the race the
     /// chunk lands on; a cursor escape, a spinner frame or a trailing newline
     /// fails, whichever side it lands on.
+    ///
+    /// The elapsed time is asserted beside the exit code, because "at once"
+    /// is a claim about time: a binary that cancelled on the second press and
+    /// then waited for an `idle` that never comes would still exit 4 when the
+    /// run's own bound killed the agent under it.
     @Test("two SIGINTs end a run whose agent ignores the cancellation, and still exit 4")
     func twoInterruptsEndARunWhoseAgentIgnoresTheCancellation() async throws {
         let transcript = temporaryFileURL(prefix: Self.transcriptNamePrefix)
@@ -220,13 +249,17 @@ struct InterruptTests {
         )
         defer { removeAgentScript(script) }
 
+        let clock = ContinuousClock()
+        let started = clock.now
         let result = try await Self.runInterrupted(
             agent: script,
             transcript: transcript,
             presses: twoInterrupts
         )
+        let elapsed = clock.now - started
 
         #expect(result.exitCode == SectionNineExitCode.cancelled)
+        #expect(elapsed < secondInterruptRunBudget, "the run took \(elapsed)")
         #expect(
             Data(interruptAnswer.utf8).starts(with: result.standardOutput),
             "stdout was \"\(String(decoding: result.standardOutput, as: UTF8.self))\""
@@ -235,7 +268,7 @@ struct InterruptTests {
         // that was cut short without a word is a run nobody can debug.
         #expect(!result.standardError.isEmpty, "an interrupted run must say so on stderr")
         let pid = try recordedAgentPid(in: pidFile)
-        #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
+        expectAgentGroupIsGone(ledBy: pid, after: "the run")
     }
 
     /// The handler changes nothing about a run no signal reaches. §11 replaces

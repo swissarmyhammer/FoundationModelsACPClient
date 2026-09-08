@@ -292,7 +292,13 @@ struct NoLeakedAgentTests {
             pids.count == scenario.recordedPidCount,
             "\(scenario) recorded \(pids.count) pids rather than \(scenario.recordedPidCount)"
         )
-        for pid in pids {
+        // The agent records its own pid first, and the agent is the leader of
+        // the group `AgentProcess` spawned it into, so the first pid is the
+        // one the group probe reads. Every later pid is a child the agent
+        // recorded, and each is probed on its own beside the group.
+        let leader = try #require(pids.first, "\(scenario) recorded no pid")
+        expectAgentGroupIsGone(ledBy: leader, after: "\(scenario)")
+        for pid in pids.dropFirst() {
             #expect(
                 !processExists(pid),
                 "the process with pid \(pid) outlived \(scenario)"
@@ -357,9 +363,6 @@ struct NoLeakedAgentTests {
         )
         #expect(next.exitCode == SectionNineExitCode.success)
         let pid = try recordedAgentPid(in: pidFile)
-        #expect(
-            !processExists(pid),
-            "the agent with pid \(pid) outlived the run that followed a failed spawn"
-        )
+        expectAgentGroupIsGone(ledBy: pid, after: "the run that followed a failed spawn")
     }
 }

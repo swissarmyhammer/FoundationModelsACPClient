@@ -1036,6 +1036,37 @@ func recordedAgentPid(in file: URL) throws -> pid_t {
     try #require(recordedAgentPids(in: file).first, "the pid file at \(file.path) holds no pid")
 }
 
+/// Asserts that the agent with `pid`, and every process of the group it led,
+/// are gone.
+///
+/// `cli-plan.md` §11 lets no agent outlive the run, and it asks the same of
+/// the whole group: a child the agent left behind holds the machine as the
+/// agent would. The pid probe answers for the agent, and the group probe of
+/// ``processGroupHasLiveMember(ledBy:)`` answers for whatever it spawned, so
+/// the two stand together on every reaping row.
+///
+/// - Parameters:
+///   - pid: The agent's pid, which is the id of the group it led.
+///   - run: The run the assertion is about, as the failure message names it.
+///   - sourceLocation: Where the assertion stands, so a failure names the row
+///     and not this helper.
+func expectAgentGroupIsGone(
+    ledBy pid: pid_t,
+    after run: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(
+        !processExists(pid),
+        "the agent with pid \(pid) outlived \(run)",
+        sourceLocation: sourceLocation
+    )
+    #expect(
+        !processGroupHasLiveMember(ledBy: pid),
+        "a process of the group the agent \(pid) led outlived \(run)",
+        sourceLocation: sourceLocation
+    )
+}
+
 /// Answers whether a stub agent has already read a request naming `method`.
 ///
 /// The transcript is where a stub agent appends every request line it reads,
@@ -1125,9 +1156,9 @@ private func requestLoop(
     """
     \(recordPidStatement(writingTo: pidFile))
     \(recordArgumentsStatement(writingTo: argumentsFile))
-    while IFS= read -r line; do
-      \(recordRequestStatement(appendingTo: transcript))
-      case "$line" in
+    while IFS= read -r \(requestLineVariable); do
+      \(recordRequestStatement(of: requestLineVariable, appendingTo: transcript))
+      case "$\(requestLineVariable)" in
         *'"method":"initialize"'*)
           \(try printfLine(initializeAnswer(initialize)))
           ;;
@@ -1140,14 +1171,21 @@ private func requestLoop(
           ;;
         *'"method":"session/prompt"'*)
           \(try printfLine(promptAnswer()))
-          \(try permissionExchangeStatements(asking: asksPermission))
+          \(try permissionExchangeStatements(asking: asksPermission, transcript: transcript))
           \(try printfLine(messageChunk(answer)))
-          \(try turnEndStatements(turnEnd, stopReason: stopReason))
+          \(try turnEndStatements(turnEnd, stopReason: stopReason, transcript: transcript))
           ;;
       esac
     done
     """
 }
+
+/// The shell variable the main request loop of a stub agent reads each line
+/// into.
+///
+/// The waits a turn holds — for a permission answer, for a cancellation — read
+/// into names of their own, so no wait can read the request loop's last line.
+private let requestLineVariable = "line"
 
 /// Renders the shell statement that reports the agent's slash commands.
 ///
@@ -1179,19 +1217,21 @@ private func recordPidStatement(writingTo path: String?) -> String {
     return "printf '%s\\n' \"$$\" > \(shellSingleQuoted(path))"
 }
 
-/// Renders the shell statement that appends the request line just read to a
-/// transcript file.
+/// Renders the shell statement that appends the line a read loop just read to
+/// a transcript file.
 ///
 /// A `/bin/sh` agent has no JSON parser, so it cannot answer WITH what it was
-/// sent. Writing each raw request line to a file is what lets a test assert
-/// what reached the agent — the prompt text among it.
+/// sent. Writing each raw line to a file is what lets a test assert what
+/// reached the agent — the prompt text among it, and the cancellation a wait
+/// read.
 ///
-/// - Parameter path: Where to append each request line, or `nil` to record
-///   none.
+/// - Parameters:
+///   - variable: The shell variable the read loop put the line into.
+///   - path: Where to append each line, or `nil` to record none.
 /// - Returns: One shell statement, or the empty string.
-private func recordRequestStatement(appendingTo path: String?) -> String {
+private func recordRequestStatement(of variable: String, appendingTo path: String?) -> String {
     guard let path else { return "" }
-    return "printf '%s\\n' \"$line\" >> \(shellSingleQuoted(path))"
+    return "printf '%s\\n' \"$\(variable)\" >> \(shellSingleQuoted(path))"
 }
 
 /// Renders the shell statement that records the agent's own arguments, one per
@@ -1222,14 +1262,21 @@ private func recordArgumentsStatement(writingTo path: String?) -> String {
 /// send other messages before its answer. It ends on the line carrying this
 /// request's id, which is the answer by JSON-RPC's own correlation rule.
 ///
-/// - Parameter asking: Whether the agent asks at all.
+/// - Parameters:
+///   - asking: Whether the agent asks at all.
+///   - transcript: Where the wait appends each line it reads, or `nil` to
+///     record none.
 /// - Returns: The shell statements, or the empty string.
 /// - Throws: A JSON-encoding failure.
-private func permissionExchangeStatements(asking: Bool) throws -> String {
+private func permissionExchangeStatements(asking: Bool, transcript: String?) throws -> String {
     guard asking else { return "" }
     return """
         \(printfLine(try permissionRequest()))
-        \(waitForLineStatements(holding: "\"id\":\(permissionRequestID)", into: "permissionAnswer"))
+        \(waitForLineStatements(
+            holding: "\"id\":\(permissionRequestID)",
+            into: "permissionAnswer",
+            appendingTo: transcript
+        ))
         """
 }
 
@@ -1243,12 +1290,19 @@ private let cancelMethodMarker = "\"method\":\"session/cancel\""
 /// Renders the shell statements that wait for `session/cancel` and then end
 /// the turn.
 ///
-/// - Parameter stopReason: The stop reason the closing `idle` update carries.
+/// - Parameters:
+///   - stopReason: The stop reason the closing `idle` update carries.
+///   - transcript: Where the wait appends each line it reads, or `nil` to
+///     record none. A test reads it to learn that the cancellation really
+///     reached the agent, and not only that the agent ended its turn.
 /// - Returns: The shell statements.
 /// - Throws: A JSON-encoding failure.
-private func cancelWaitStatements(thenReporting stopReason: StopReason?) throws -> String {
+private func cancelWaitStatements(
+    thenReporting stopReason: StopReason?,
+    transcript: String?
+) throws -> String {
     """
-    \(waitForLineStatements(holding: cancelMethodMarker, into: "cancelLine"))
+    \(waitForLineStatements(holding: cancelMethodMarker, into: "cancelLine", appendingTo: transcript))
     \(printfLine(try idleState(stopReason)))
     """
 }
@@ -1257,16 +1311,25 @@ private func cancelWaitStatements(thenReporting stopReason: StopReason?) throws 
 /// `marker`, and then stop reading.
 ///
 /// The wait is a read loop rather than a single `read`, because the client may
-/// send other messages before the one this agent is waiting for.
+/// send other messages before the one this agent is waiting for. Every line
+/// the wait reads is appended to the transcript, as the main request loop
+/// appends its own, so the transcript holds every line that reached the agent
+/// whichever loop read it.
 ///
 /// - Parameters:
 ///   - marker: The literal text the awaited line holds.
 ///   - variable: The shell variable each read line goes into. Two waits in one
 ///     script take two names, so neither can read the other's last line.
+///   - transcript: Where to append each line read, or `nil` to record none.
 /// - Returns: The shell statements.
-private func waitForLineStatements(holding marker: String, into variable: String) -> String {
+private func waitForLineStatements(
+    holding marker: String,
+    into variable: String,
+    appendingTo transcript: String?
+) -> String {
     """
     while IFS= read -r \(variable); do
+      \(recordRequestStatement(of: variable, appendingTo: transcript))
       case "$\(variable)" in
         *\(shellSingleQuoted(marker))*) break ;;
       esac
@@ -1346,11 +1409,14 @@ private enum StubAgentTurnEnd {
 ///   - turnEnd: What the agent does once it has streamed its answer chunk.
 ///   - stopReason: The stop reason to report, or `nil` to report none. A
 ///     ``StubAgentTurnEnd/never`` agent sends no update to carry it.
+///   - transcript: Where an ending that waits appends each line it reads, or
+///     `nil` to record none.
 /// - Returns: The shell statements, or the empty string.
 /// - Throws: A JSON-encoding failure.
 private func turnEndStatements(
     _ turnEnd: StubAgentTurnEnd,
-    stopReason: StopReason?
+    stopReason: StopReason?,
+    transcript: String?
 ) throws -> String {
     switch turnEnd {
     case .atOnce:
@@ -1358,7 +1424,7 @@ private func turnEndStatements(
     case .afterSeconds(let seconds):
         return "sleep \(seconds)\n\(printfLine(try idleState(stopReason)))"
     case .afterCancel:
-        return try cancelWaitStatements(thenReporting: stopReason)
+        return try cancelWaitStatements(thenReporting: stopReason, transcript: transcript)
     case .never:
         return ""
     case .byExiting:

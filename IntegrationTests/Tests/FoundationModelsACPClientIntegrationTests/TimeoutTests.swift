@@ -195,7 +195,7 @@ struct TimeoutTests {
 
         #expect(result.exitCode == SectionNineExitCode.timeout)
         let pid = try recordedAgentPid(in: pidFile)
-        #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
+        expectAgentGroupIsGone(ledBy: pid, after: "the run")
     }
 
     /// §9 gives a mistake on the command line the code 2, and a limit that is

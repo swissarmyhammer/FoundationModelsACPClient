@@ -306,7 +306,7 @@ struct RunCommandExitTests {
         _ = try await runAcpClient(runArguments(prompt: Self.prompt, script: script))
 
         let pid = try recordedAgentPid(in: pidFile)
-        #expect(!processExists(pid), "the agent with pid \(pid) outlived the run")
+        expectAgentGroupIsGone(ledBy: pid, after: "the run")
     }
 
     @Test(

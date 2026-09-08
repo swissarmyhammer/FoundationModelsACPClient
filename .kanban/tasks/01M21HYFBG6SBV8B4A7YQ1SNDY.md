@@ -36,8 +36,24 @@ comments:
     - evidence: 1 file — /Users/wballard/github/swissarmyhammer/FoundationModelsACPClient/IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/ProbeCommandTests.swift. `swift test`: 227 tests in 20 suites passed, 0 warnings. `swift test --package-path IntegrationTests`: 92 tests in 13 suites passed, 0 warnings.
     - next: `/review`
   timestamp: 2026-09-08T22:37:36.919745+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m21k105x779rzkf6ft6h0rax
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit b8343db). 0 findings. 7 validators ran, 0 failed. 1 file reviewed. 2 `.kanban/` files skipped by `.reviewignore`.
+    - next: none. The task is in `done`.
+  timestamp: 2026-09-08T22:43:09.117353+00:00
+- actor: claude-code
+  id: 01m21k1eqrs19xhez4nk20rrhd
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 1 file (IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/ProbeCommandTests.swift)
+    - test: green — swift test 227 passed; swift test --package-path IntegrationTests 92 passed; 0 warnings
+    - commit: b8343db
+    - review: clean — 0 findings, task moved to done
+  timestamp: 2026-09-08T22:43:24.024521+00:00
+position_column: done
+position_ordinal: af80
 title: 'N3+N4: --frames and probe'
 ---
 ## What

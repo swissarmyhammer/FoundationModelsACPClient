@@ -181,11 +181,15 @@ private func standingInterruptDisposition() -> Int {
 /// measured whatever it happened to find would measure a different claim on
 /// every host. So the starting disposition is pinned rather than read.
 ///
+/// The work may await, because the row that sends a real signal waits for the
+/// callback it owes, and the disposition has to stand for the whole of that
+/// wait.
+///
 /// - Parameter body: The work to run while `SIGINT` stands at `SIG_DFL`.
-private func withDefaultInterruptDisposition(_ body: () -> Void) {
+private func withDefaultInterruptDisposition(_ body: () async -> Void) async {
     let host = signal(interruptSignalNumber, SIG_DFL)
     defer { signal(interruptSignalNumber, host) }
-    body()
+    await body()
 }
 
 /// What ``InterruptHandler`` does to the process-wide `SIGINT` disposition.
@@ -200,11 +204,11 @@ struct InterruptDispositionTests {
     /// default that ends the process and the first press kills the run with
     /// the answer bytes unflushed and the agent unreaped.
     @Test("start installs SIG_IGN over the disposition that stood")
-    func startInstallsIgnoreOverTheDispositionThatStood() {
+    func startInstallsIgnoreOverTheDispositionThatStood() async {
         let record = ThreadSafeBuffer<InterruptCallback>()
         let interrupts = handler(recordingInto: record)
 
-        withDefaultInterruptDisposition {
+        await withDefaultInterruptDisposition {
             interrupts.start()
             defer { interrupts.stop() }
 
@@ -221,11 +225,11 @@ struct InterruptDispositionTests {
     /// saved" would restore NOTHING on exactly that path, and `SIGINT` would
     /// stay ignored for the life of the process.
     @Test("stop puts back the SIG_DFL that stood before start")
-    func stopPutsBackTheDefaultDispositionThatStoodBeforeStart() {
+    func stopPutsBackTheDefaultDispositionThatStoodBeforeStart() async {
         let record = ThreadSafeBuffer<InterruptCallback>()
         let interrupts = handler(recordingInto: record)
 
-        withDefaultInterruptDisposition {
+        await withDefaultInterruptDisposition {
             interrupts.start()
             interrupts.stop()
 
@@ -245,11 +249,11 @@ struct InterruptDispositionTests {
     /// `SIG_IGN` back as the disposition to save — so one hit anywhere in the
     /// hammering below stands at the end of it.
     @Test("arming and disarming from many workers still puts the disposition back")
-    func armingAndDisarmingFromManyWorkersStillPutsTheDispositionBack() {
+    func armingAndDisarmingFromManyWorkersStillPutsTheDispositionBack() async {
         let record = ThreadSafeBuffer<InterruptCallback>()
         let interrupts = handler(recordingInto: record)
 
-        withDefaultInterruptDisposition {
+        await withDefaultInterruptDisposition {
             DispatchQueue.concurrentPerform(iterations: interleavedWorkerCount) { _ in
                 for _ in 0..<interleavedRoundsPerWorker {
                     interrupts.start()
@@ -259,6 +263,32 @@ struct InterruptDispositionTests {
             interrupts.stop()
 
             #expect(standingInterruptDisposition() == pointerValue(of: SIG_DFL))
+        }
+    }
+
+    /// A real `SIGINT` reaches the first callback while the handler is armed.
+    ///
+    /// The counting rows drive ``InterruptHandler/deliver(times:)`` by hand,
+    /// so none of them proves that a signal the kernel delivers gets there at
+    /// all. This row sends one to the test process itself: the disposition is
+    /// `SIG_IGN`, so the process survives the press, and the armed source is
+    /// the only thing that can move the record. The wait is bounded by
+    /// `eventually`, so a handler that never delivers fails here rather than
+    /// hanging.
+    @Test("a real SIGINT reaches the first callback while the handler is armed")
+    func aRealInterruptReachesTheFirstCallbackWhileArmed() async {
+        let record = ThreadSafeBuffer<InterruptCallback>()
+        let interrupts = handler(recordingInto: record)
+
+        await withDefaultInterruptDisposition {
+            interrupts.start()
+            defer { interrupts.stop() }
+            kill(getpid(), interruptSignalNumber)
+
+            #expect(
+                await eventually { record.elements == [.first] },
+                "the press never reached the callback; the record holds \(record.elements)"
+            )
         }
     }
 }
