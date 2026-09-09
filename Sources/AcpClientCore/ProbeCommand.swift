@@ -16,8 +16,9 @@ import FoundationModelsACPClient
 // Three decisions here are not free choices.
 //
 // 1. **The report goes to stdout.** §8 keeps stdout for the answer text alone
-//    and then names `probe` and `doctor` as its exceptions: their report IS
-//    their output. Nothing else this file writes can reach stdout.
+//    and then names `probe` as its one exception: its report IS its output.
+//    The human `doctor` report goes to stderr instead, and only `--json` puts
+//    a doctor report on stdout. Nothing else this file writes can reach stdout.
 // 2. **A session opens, and no prompt is sent.** The slash commands are in
 //    neither the `initialize` answer nor the `session/new` answer. In v2 they
 //    arrive as an `available_commands_update` session update, so the only way

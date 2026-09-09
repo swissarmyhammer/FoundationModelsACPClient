@@ -6,23 +6,29 @@ import FoundationModelsExtras
 // agent is usable, and carries the verdict in its exit code.
 //
 // The checks are not here. `AgentCommandDoctor` owns the seven rows of §10, and
-// `FoundationModelsExtras` owns the runner, the report and the renderer. What
-// this file owns is the three things a SUBCOMMAND adds: the report reaches
-// standard output, `--json` writes the same findings as JSON, and the worst
-// finding becomes the exit code.
+// `FoundationModelsExtras` owns the runner, the report and the plain renderer.
+// What this file owns is the three things a SUBCOMMAND adds: the human report
+// reaches standard error through the terminal layer of §5, `--json` writes the
+// same findings as JSON to standard output, and the worst finding becomes the
+// exit code.
 //
 // Four decisions here are not free choices.
 //
-// 1. **The report goes to stdout, and the doctor writes nothing of its own to
-//    stderr.** §8 keeps stdout for the answer text alone and then names `probe`
-//    and `doctor` as its exceptions: their report IS their output. `run` and
-//    `probe` each put a line on stderr when they fail, because a failure ends
-//    those commands with no output of their own. A doctor has no such failure:
+// 1. **The human report goes to stderr, and only `--json` reaches stdout.** §8
+//    keeps stdout for the answer text alone and names `probe` as its one
+//    exception. A doctor report is a diagnostic a person reads, so it goes
+//    where §8 sends every diagnostic, through ``TerminalOutput/doctorReport(_:)``:
+//    Noora's table when stderr is a terminal, and the plain text of the Extras
+//    renderer when it is not. `--json` is the one form a script reads, and a
+//    script reads stdout, so that form alone goes there. Beside the report the
+//    doctor writes no line of its own. `run` and `probe` each put a line on
+//    stderr when they fail, because a failure ends those commands with no
+//    output of their own; a doctor has no such failure, because
 //    `runHealthChecks()` does not throw, and every defect it meets — a command
-//    that resolves to nothing included — becomes a ROW of the report. A second
-//    copy on stderr would say what the report already says. The one thing that
-//    reaches stderr is the exchange itself, under `--frames` (decision 4), and
-//    those are the agent's words and this client's, not the doctor's.
+//    that resolves to nothing included — becomes a ROW of the report. The
+//    frames of `--frames` (decision 4) stand on the same stream, ahead of the
+//    report and each under its direction mark, and those are the agent's words
+//    and this client's, not the doctor's.
 // 2. **The exit code comes from ``AcpClientExitCode/forDoctorStatus(_:)``, and
 //    never from `DoctorReport.exitCode`.** The two answer the same three
 //    numbers today. They are still two tables: the Extras one is that library's
@@ -37,13 +43,14 @@ import FoundationModelsExtras
 //    the reason the binary exists, and the defect §10 catches best — an agent
 //    that writes a banner to stdout — is the one a person then wants to SEE
 //    on the wire. `AgentCommandDoctor` owns the tee its rows read, so the flag
-//    reaches it through ``frameSink(frames:)``: a sink the doctor calls for
-//    each teed line, beside the two readings its rows rest on, and nothing
-//    when the flag is absent. The other four shape nothing here: `--cwd` names
-//    the working directory of a SESSION, and the rows open none — they send
-//    one `initialize` and stop; `--quiet` and `--verbose` shape standard
-//    error, where decision 1 lets nothing but those frames through; and
-//    `--timeout` is decision 3.
+//    reaches it through ``frameSink(frames:terminal:)``: a sink the doctor
+//    calls for each teed line, beside the two readings its rows rest on, and
+//    nothing when the flag is absent. The other four shape nothing here:
+//    `--cwd` names the working directory of a SESSION, and the rows open none
+//    — they send one `initialize` and stop; `--quiet` and `--verbose` shape
+//    the events and the errors of standard error, and decision 1 lets neither
+//    kind of line through, only the report and the frames, which go out at
+//    every verbosity; and `--timeout` is decision 3.
 
 /// What closes the JSON form of the report.
 ///
@@ -80,8 +87,14 @@ struct DoctorCommand: AsyncParsableCommand {
     /// The agent command that follows the `--` separator.
     @OptionGroup var invocation: AgentInvocation
 
-    /// Runs the checks of `cli-plan.md` §10, writes the report to standard
-    /// output, and exits with the verdict.
+    /// Runs the checks of `cli-plan.md` §10, writes the report — to standard
+    /// error, or to standard output under `--json` — and exits with the verdict.
+    ///
+    /// One terminal layer serves the whole run: the frames of `--frames` and
+    /// the report both go through it, so both read one answer to "is standard
+    /// error a terminal". It is built at `.quiet`, because the doctor writes
+    /// no event and no error line of its own (decision 1), and neither the
+    /// frames nor the report read the verbosity at all.
     ///
     /// - Throws: `ValidationError` for an invocation naming no agent, which
     ///   ArgumentParser turns into the usage text on stderr and the usage row of
@@ -89,9 +102,13 @@ struct DoctorCommand: AsyncParsableCommand {
     ///   report that is not wholly `ok`.
     func run() async throws {
         let agent = try invocation.command()
-        let doctor = Self.doctor(for: agent, frameSink: Self.frameSink(frames: options.frames))
+        let terminal = TerminalOutput(verbosity: .quiet)
+        let doctor = Self.doctor(
+            for: agent,
+            frameSink: Self.frameSink(frames: options.frames, terminal: terminal)
+        )
         let findings = await DoctorRunner(components: [doctor]).run()
-        try Self.write(findings, asJSON: report.json)
+        try Self.write(findings, asJSON: report.json, terminal: terminal)
 
         // §9 and not `DoctorReport.exitCode`: see decision 2 at the head of this
         // file. Code 5 is the row that needs the reason said out loud. The Rust
@@ -118,7 +135,7 @@ struct DoctorCommand: AsyncParsableCommand {
     /// - Parameters:
     ///   - agent: The agent executable and its own arguments.
     ///   - frameSink: Where each line of the exchange goes, or `nil` for a run
-    ///     that asked for no frames. See ``frameSink(frames:)``.
+    ///     that asked for no frames. See ``frameSink(frames:terminal:)``.
     /// - Returns: The doctor over that command.
     private static func doctor(
         for agent: AgentCommand,
@@ -137,39 +154,43 @@ struct DoctorCommand: AsyncParsableCommand {
     /// The sink writes through ``TerminalOutput/frame(_:)``, for the reason
     /// ``RunCommand/sessionTransport(over:frames:terminal:)`` gives: `--frames`
     /// is a debugging switch and not a verbosity level, so that member writes
-    /// at every verbosity and whether or not stderr is a terminal. The layer is
-    /// built at `.quiet`, because the doctor writes the frames through it and
-    /// nothing else — decision 4 at the head of this file — and `frame(_:)`
-    /// reads no verbosity at all. Without the flag no layer is built, so a
-    /// default run pays nothing for a switch it did not ask for.
+    /// at every verbosity and whether or not stderr is a terminal. Without the
+    /// flag there is no sink, so a default run tees nothing for a switch it
+    /// did not ask for.
     ///
-    /// - Parameter frames: Whether the command line carried `--frames`.
+    /// - Parameters:
+    ///   - frames: Whether the command line carried `--frames`.
+    ///   - terminal: The layer that owns standard error, which the report goes
+    ///     through as well.
     /// - Returns: The sink, or `nil` for a run that asked for no frames.
-    private static func frameSink(frames: Bool) -> FrameLineSink? {
+    private static func frameSink(frames: Bool, terminal: TerminalOutput) -> FrameLineSink? {
         guard frames else { return nil }
-        let terminal = TerminalOutput(verbosity: .quiet)
         return { terminal.frame($0) }
     }
 
-    /// Writes one report to standard output.
+    /// Writes one report: the human form to standard error, or the JSON form
+    /// to standard output.
     ///
-    /// `cli-plan.md` §8 makes `doctor` an exception to its own stdout rule,
-    /// because the report IS the output of this subcommand.
-    ///
-    /// The plain form comes from `PlainTextDoctorRenderer`, which draws ASCII
-    /// and no terminal escape whatever the destination is — so a terminal, a
-    /// pipe and a file each receive the same bytes, and a test can compare the
-    /// report byte for byte. The JSON form is one line, for the reason
-    /// ``ProbeCommand`` gives: a report a script reads is one ndJSON record.
+    /// The human form goes through ``TerminalOutput/doctorReport(_:)``, which
+    /// is decision 1 at the head of this file: a table on a terminal, and the
+    /// plain text of `PlainTextDoctorRenderer` on a pipe or a file, whose bytes
+    /// hold no escape and never change between two runs over the same
+    /// findings. The JSON form is one line, for the reason ``ProbeCommand``
+    /// gives: a report a script reads is one ndJSON record.
     ///
     /// - Parameters:
     ///   - findings: What the checks found.
     ///   - json: Whether the command line carried `--json`.
+    ///   - terminal: The layer that owns standard error.
     /// - Throws: The encoding failure of the JSON form, or the write failure of
     ///   standard output.
-    private static func write(_ findings: DoctorReport, asJSON json: Bool) throws {
+    private static func write(
+        _ findings: DoctorReport,
+        asJSON json: Bool,
+        terminal: TerminalOutput
+    ) throws {
         guard json else {
-            try PlainTextDoctorRenderer().write(findings, to: .standardOutput)
+            terminal.doctorReport(findings)
             return
         }
         let encoded = try findings.jsonData()

@@ -163,11 +163,12 @@ struct AgentCommandDoctor: Doctorable {
 
     /// The terminal layer the connection behind rows three to five writes to.
     ///
-    /// It writes nowhere. `cli-plan.md` §8 makes the doctor's REPORT its
-    /// output, so a check that put a line of its own on standard error would
-    /// break the report a caller is rendering. Both readings the layer takes
-    /// are injected here rather than left to their defaults, so no descriptor
-    /// of this process is read and none is written.
+    /// It writes nowhere. The doctor's REPORT is the whole output of `doctor`,
+    /// and `cli-plan.md` §8 sends it to standard error, so a check that put a
+    /// line of its own there would write on the report a caller is rendering.
+    /// Both readings the layer takes are injected here rather than left to
+    /// their defaults, so no descriptor of this process is read and none is
+    /// written.
     private static let silentTerminal = TerminalOutput(
         verbosity: .quiet,
         isStandardErrorATerminal: { false },

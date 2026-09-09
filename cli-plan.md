@@ -116,12 +116,16 @@ upstream. The containment rule below is what holds that risk to one file.
 
 The containment rule is: **one file imports Noora.**
 `Sources/AcpClientCore/TerminalOutput.swift` vends the spinner of §8,
-through `withSpinner(_:_:)`, and every other file calls that type. A
-component reaches this layer when a caller needs it, and not before. A
-table has no caller, because §8 sends the `probe` report and the
-`doctor` report to stdout, and this layer writes to stderr only. A
-progress bar has no total to show. A test pins the single import over
-both source directories of §3, so a swap costs one file.
+through `withSpinner(_:_:)`, and the doctor table of §10, through
+`doctorReport(_:)`, and every other file calls that type. A component
+reaches this layer when a caller needs it, and not before. The table has
+one caller: §8 sends the human `doctor` report to stderr, and this layer
+draws it as Noora's table when stderr is a terminal, and as the plain
+text of the Extras renderer when it is not, so a pipe receives the report
+whole and with no escape. The `probe` report has no table, because §8
+sends it to stdout, and this layer writes to stderr only. A progress bar
+has no total to show. A test pins the single import over both source
+directories of §3, so a swap costs one file.
 
 That file makes two decisions Noora's own defaults do not make:
 
@@ -135,8 +139,10 @@ That file makes two decisions Noora's own defaults do not make:
   `Terminal.isColored()` reads stdout.
 
 The rule is absolute: the terminal package writes to **stderr** only, and
-it draws nothing when stderr is not a terminal. §8 holds stdout to the
-answer text alone.
+it draws nothing when stderr is not a terminal. The doctor report is the
+one thing this layer writes to a stderr that is not a terminal, and it
+writes it as plain text, because that report is the output of `doctor`.
+§8 holds stdout to the answer text alone.
 
 ## 6. The subcommands
 
@@ -207,12 +213,13 @@ Every option of the table above shapes `run`:
 | Subcommand | The inert options | Why |
 |---|---|---|
 | `probe` | `--timeout` | `probe` runs no turn, and the limit bounds a turn. |
-| `doctor` | `--cwd`, `--timeout`, `--verbose`, `--quiet` | `doctor` opens no session, so `--cwd` names nothing. It writes its whole report to stdout, and nothing of its own to stderr, so `--verbose` and `--quiet` shape nothing. Each of its rows keeps a time limit of its own, so `--timeout` is not that limit. |
+| `doctor` | `--cwd`, `--timeout`, `--verbose`, `--quiet` | `doctor` opens no session, so `--cwd` names nothing. Its whole output is its report, on stderr, and it writes no event and no error line of its own, so `--verbose` and `--quiet` shape nothing. Each of its rows keeps a time limit of its own, so `--timeout` is not that limit. |
 
 `--frames` shapes all three. The check runner of `doctor` owns the frame
 tee its rows read, so `doctor` hands it a sink for those frames, and the
 runner calls the sink beside its own readings. The frames then reach
-stderr, and the report on stdout is the same as without the flag.
+stderr ahead of the report, each under its direction mark, and the
+report is the same as without the flag.
 
 An inert option is still parsed, and it is still checked. A `--timeout`
 of zero or less gives the turn no time at all, so it is a usage error on
@@ -253,8 +260,14 @@ value it hands `AgentProcess` is a value `AgentProcess` accepts. `run`,
   in a pipe alike. The output is data, and a rule that changes with a
   terminal cannot be tested byte for byte.
 - stdout gets nothing more. Not a session id, not a stop reason.
-- `probe` and `doctor` are the exceptions. Their report **is** their
-  output, so it goes to stdout.
+- `probe` is the exception. Its report **is** its output, so it goes to
+  stdout.
+- The human `doctor` report goes to **stderr**, because a doctor report
+  is a diagnostic a person reads. It goes through the terminal layer of
+  §5: Noora's table when stderr is a terminal, and the plain text of the
+  Extras renderer when it is not. Only `--json` writes a doctor report to
+  stdout, because a script reads that form, and a `--json` run writes no
+  report to stderr.
 - A default run writes nothing to stderr until it fails. `--verbose`
   writes the session events, one line each. `--frames` writes the
   messages. `--quiet` writes nothing but errors.
@@ -367,7 +380,8 @@ verdict is a WARNING and never an error: such an agent answered every
 request, so it is usable, and it leaks. §9 gives that verdict exit code
 5, and this row is the reason that code exists.
 
-`doctor` exits 0, 1 or 5 (§9). `--json` writes the report to stdout.
+`doctor` exits 0, 1 or 5 (§9). The human report goes to stderr (§8), and
+`--json` writes the report to stdout.
 
 ## 11. Interrupt and process ownership
 
@@ -478,6 +492,7 @@ question.
 | `probe` prints the stub agent's capabilities, and runs no turn. | none |
 | `doctor` against a stub that writes a banner to stdout reports that row as an error. | none |
 | `doctor` against a stub that never answers `initialize` reports a timeout, not a hang. | none |
+| `doctor` without `--json` writes the report to stderr and stdout stays empty; with `--json` the report is on stdout and stderr stays empty. | none |
 | The stop reasons and the doctor statuses map to the exit codes of §9. | none |
 | A timeout ends the run, and it reaps the agent. | none |
 | An interrupt gives exit 4, and it reaps the agent. | none |

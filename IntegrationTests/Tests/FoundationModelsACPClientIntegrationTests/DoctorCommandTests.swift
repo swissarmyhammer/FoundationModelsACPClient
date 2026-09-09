@@ -5,15 +5,23 @@ import Testing
 @testable import AcpClientCore
 
 // These tests drive the real `acp-client doctor` binary against a real foreign
-// agent, and assert what `cli-plan.md` §10 and §9 promise: the report on
-// stdout, and an exit code that carries the verdict.
+// agent, and assert what `cli-plan.md` §10, §9 and §8 promise: the human report
+// on stderr, the `--json` report on stdout, and an exit code that carries the
+// verdict.
 //
 // `AgentCommandDoctorTests` asserts each ROW of the check table, over the
-// `Doctorable` directly. This file asserts what the SUBCOMMAND adds: the report
-// reaches standard output, `--json` writes the same findings as JSON,
-// `--frames` puts the handshake on standard error and leaves the report alone,
-// and the worst finding decides the exit code. Nothing here re-asserts a row's
-// status, which is that file's work.
+// `Doctorable` directly. This file asserts what the SUBCOMMAND adds: the human
+// report reaches standard error and leaves standard output empty, `--json`
+// writes the same findings as JSON to standard output and leaves standard error
+// empty, `--frames` puts the handshake on standard error ahead of the report
+// and changes the report not at all, and the worst finding decides the exit
+// code. Nothing here re-asserts a row's status, which is that file's work.
+//
+// Every stream of a run in this suite is a pipe, so the human report the binary
+// writes is the plain rendering of `FoundationModelsExtras`, and never Noora's
+// table: `cli-plan.md` §5 draws the table on a terminal alone, and a test
+// process cannot make the binary's standard error a terminal. The terminal path
+// is proven over a buffer in the unit suite, `TerminalOutputTests`.
 //
 // The exit codes are spelled again below rather than read from
 // `AcpClientExitCode`, for the reason `ProbeCommandTests` states: a test that
@@ -64,6 +72,12 @@ private let usageErrorExitCode: Int32 = 2
 /// error.
 private let doctorFoundWarningsExitCode: Int32 = 5
 
+/// The option of `cli-plan.md` §6.1 that asks for the report as JSON.
+private let jsonOptionName = "--json"
+
+/// The option of `cli-plan.md` §6.1 that puts the exchange on standard error.
+private let framesOptionName = "--frames"
+
 /// The member of a `--json` check entry that names what was checked.
 private let checkNameKey = "name"
 
@@ -108,6 +122,65 @@ private let agentPidPlaceholder = "<pid>"
 /// reached a destination that is not a terminal.
 private let escapeByte: UInt8 = 0x1B
 
+/// The two forms `doctor` writes, and the stream `cli-plan.md` §8 gives each.
+///
+/// The human form goes to standard error, because a report a person reads is a
+/// diagnostic, and the `--json` form goes to standard output, because a script
+/// reads it. A test names the form it reads, and the form names the stream, so
+/// no test reads a descriptor by habit.
+private enum ReportForm {
+    /// The human report, on standard error.
+    case plain
+
+    /// The `--json` report, on standard output.
+    case json
+
+    /// The option that asks for this form, or nothing for the default form.
+    var options: [String] {
+        switch self {
+        case .plain: []
+        case .json: [jsonOptionName]
+        }
+    }
+
+    /// The report of one finished run, read off the stream this form goes to.
+    ///
+    /// - Parameter result: The finished run.
+    /// - Returns: The bytes of that stream, as text.
+    func report(in result: CLIResult) -> String {
+        switch self {
+        case .plain: text(result.standardError)
+        case .json: text(result.standardOutput)
+        }
+    }
+
+    /// The bytes of the stream this form does NOT go to, which §8 keeps empty.
+    ///
+    /// - Parameter result: The finished run.
+    /// - Returns: The bytes of the other stream.
+    func otherStream(in result: CLIResult) -> Data {
+        switch self {
+        case .plain: result.standardOutput
+        case .json: result.standardError
+        }
+    }
+}
+
+/// The lines of one human report, with the teed frames set aside.
+///
+/// `--frames` puts each teed line on standard error too, ahead of the report
+/// and under its direction mark. The lines that carry no mark are the report,
+/// so this is what two runs are compared on when one of them carried the flag.
+///
+/// - Parameter report: The text of standard error.
+/// - Returns: The lines that carry no direction mark.
+private func reportLines(of report: String) -> [String] {
+    lines(of: Data(report.utf8)).filter { line in
+        !line.hasPrefix(FrameTeeTransport.outboundMark)
+            && !line.hasPrefix(FrameTeeTransport.inboundMark)
+    }
+}
+
 /// `acp-client doctor` end to end: the report, the JSON form, and the verdict.
 ///
 /// Serialized and time-limited, in the same way as every other suite in this
@@ -125,18 +198,25 @@ struct DoctorCommandTests {
     ///
     /// - Parameters:
     ///   - script: The absolute path of the stub-agent script.
-    ///   - options: The options of §6.1 to put before the separator.
-    /// - Returns: The finished run, and everything it wrote to standard output.
+    ///   - form: The form to ask for, which is also the stream the report is
+    ///     read off.
+    ///   - options: The other options of §6.1 to put before the separator.
+    /// - Returns: The finished run, and the report on the stream of `form`.
     /// - Throws: A run failure, or the bound of ``doctorRunBound``.
     private static func doctor(
         over script: String,
+        as form: ReportForm,
         options: [String] = []
     ) async throws -> (result: CLIResult, report: String) {
         let result = try await runAcpClient(
-            agentCommandArguments(doctorSubcommandName, options: options, script: script),
+            agentCommandArguments(
+                doctorSubcommandName,
+                options: options + form.options,
+                script: script
+            ),
             within: doctorRunBound
         )
-        return (result, String(decoding: result.standardOutput, as: UTF8.self))
+        return (result, form.report(in: result))
     }
 
     /// Reads the `--json` report of one run as a list of check entries.
@@ -147,7 +227,7 @@ struct DoctorCommandTests {
     ///   objects.
     private static func checkEntries(in result: CLIResult) throws -> [[String: Any]] {
         let parsed = try JSONSerialization.jsonObject(with: result.standardOutput)
-        let report = String(decoding: result.standardOutput, as: UTF8.self)
+        let report = ReportForm.json.report(in: result)
         return try #require(parsed as? [[String: Any]], "the report was \"\(report)\"")
     }
 
@@ -158,7 +238,7 @@ struct DoctorCommandTests {
     ///   - entry: The check entry to read it from.
     /// - Returns: The member's text.
     /// - Throws: A requirement failure when the entry carries no such member.
-    private static func text(_ key: String, of entry: [String: Any]) throws -> String {
+    private static func member(_ key: String, of entry: [String: Any]) throws -> String {
         try #require(entry[key] as? String, "the check entry \(entry) carries no \(key)")
     }
 
@@ -169,19 +249,23 @@ struct DoctorCommandTests {
     /// writes the file whole and a second run over the same script would
     /// replace the first pid.
     ///
-    /// - Parameter options: The options of §6.1 to put before the separator.
+    /// - Parameters:
+    ///   - form: The form to ask for, which is also the stream the report is
+    ///     read off.
+    ///   - options: The other options of §6.1 to put before the separator.
     /// - Returns: The finished run, and its report with the pid replaced.
     /// - Throws: A run failure, the bound of ``doctorRunBound``, or a
     ///   requirement failure when the report does not name the pid at all.
     private static func doctorReportWithoutAgentPid(
-        options: [String]
+        as form: ReportForm,
+        options: [String] = []
     ) async throws -> (result: CLIResult, report: String) {
         let pidFile = temporaryFileURL(prefix: pidFileNamePrefix)
         defer { try? FileManager.default.removeItem(at: pidFile) }
         let script = try makeWellBehavedAgent(pidFile: pidFile.path)
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await doctor(over: script, options: options)
+        let (result, report) = try await doctor(over: script, as: form, options: options)
 
         // The replacement means something only when the report names the
         // pid, so a report that does not is a failure of this helper.
@@ -190,22 +274,24 @@ struct DoctorCommandTests {
         return (result, report.replacingOccurrences(of: pid, with: agentPidPlaceholder))
     }
 
-    @Test("a well-behaved agent gets a report on stdout, nothing on stderr, and exit 0")
-    func aWellBehavedAgentPassesAndExitsZero() async throws {
+    @Test(
+        "each form of the report goes to its own stream, and the other stream stays empty",
+        arguments: [ReportForm.plain, .json]
+    )
+    fileprivate func eachFormGoesToItsOwnStreamAlone(form: ReportForm) async throws {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await Self.doctor(over: script)
+        let (result, report) = try await Self.doctor(over: script, as: form)
 
         #expect(result.exitCode == doctorPassedExitCode)
         #expect(!report.isEmpty)
-        // §8 makes the doctor's REPORT its output, so stdout carries it and
-        // stderr stays empty even though a check failing is what this command
-        // is for.
-        #expect(
-            result.standardError.isEmpty,
-            "stderr was \"\(String(decoding: result.standardError, as: UTF8.self))\""
-        )
+        // §8 sends the human report to stderr, because a person reads it as a
+        // diagnostic, and the `--json` form to stdout, because a script reads
+        // it as data. Each form leaves the other stream empty, so a script
+        // that reads one stream never meets the other form.
+        let other = form.otherStream(in: result)
+        #expect(other.isEmpty, "the other stream held \"\(text(other))\"")
     }
 
     @Test("the plain report holds a line for every row of the check table")
@@ -213,19 +299,23 @@ struct DoctorCommandTests {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 
-        let (_, report) = try await Self.doctor(over: script)
+        let (_, report) = try await Self.doctor(over: script, as: .plain)
 
         for name in AgentCommandDoctor.checkNamesInOrder {
             #expect(report.contains(name), "the report holds no \(name) row: \"\(report)\"")
         }
     }
 
-    @Test("--frames writes the marked initialize request and answer to standard error")
+    @Test("--frames writes the marked initialize request and answer to standard error, beside the report")
     func framesWritesTheHandshakeToStandardError() async throws {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 
-        let (result, _) = try await Self.doctor(over: script, options: ["--frames"])
+        let (result, report) = try await Self.doctor(
+            over: script,
+            as: .plain,
+            options: [framesOptionName]
+        )
 
         #expect(result.exitCode == doctorPassedExitCode)
         let reported = lines(of: result.standardError)
@@ -239,22 +329,31 @@ struct DoctorCommandTests {
             inbound.contains { $0.contains(stubAgentName) },
             "no inbound line carried the initialize answer: \(reported)"
         )
-        // Every line carried a direction mark, so the report reached standard
-        // error not at all: the frames are the one thing the flag adds there.
-        #expect(outbound.count + inbound.count == reported.count, "stderr held \(reported)")
+        // The frames are the one thing the flag adds, and the report still
+        // stands on the same stream beside them: every row is among the lines
+        // that carry no direction mark, and stdout stays empty.
+        let unmarked = reportLines(of: report)
+        for name in AgentCommandDoctor.checkNamesInOrder {
+            #expect(unmarked.contains { $0.contains(name) }, "no report line names \(name): \(unmarked)")
+        }
+        #expect(result.standardOutput.isEmpty, "stdout held \"\(text(result.standardOutput))\"")
     }
 
-    @Test("the report on stdout is the same with --frames and without, apart from the pid")
-    func framesLeavesTheReportOnStandardOutputUnchanged() async throws {
-        let plain = try await Self.doctorReportWithoutAgentPid(options: [])
-        let framed = try await Self.doctorReportWithoutAgentPid(options: ["--frames"])
+    @Test("the report is the same with --frames and without, apart from the pid")
+    func framesLeavesTheReportUnchanged() async throws {
+        let plain = try await Self.doctorReportWithoutAgentPid(as: .plain)
+        let framed = try await Self.doctorReportWithoutAgentPid(
+            as: .plain,
+            options: [framesOptionName]
+        )
 
         #expect(plain.result.exitCode == doctorPassedExitCode)
         #expect(framed.result.exitCode == doctorPassedExitCode)
-        // Byte equality is what pins "the frames reach stdout not at all": one
-        // teed line on the wrong descriptor fails this.
+        // Line equality of the unmarked lines is what pins "the frames change
+        // the report not at all": one teed line that lost its mark, or one
+        // report line moved or reworded, fails this.
         #expect(
-            Data(framed.report.utf8) == Data(plain.report.utf8),
+            reportLines(of: framed.report) == reportLines(of: plain.report),
             "the --frames report was \"\(framed.report)\", the plain report \"\(plain.report)\""
         )
     }
@@ -264,7 +363,7 @@ struct DoctorCommandTests {
         let script = try makeBannerOnStdoutAgent()
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await Self.doctor(over: script)
+        let (result, report) = try await Self.doctor(over: script, as: .plain)
 
         #expect(result.exitCode == doctorFoundAnErrorExitCode)
         #expect(
@@ -282,7 +381,7 @@ struct DoctorCommandTests {
         let script = try makeSilentAgent()
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await Self.doctor(over: script)
+        let (result, report) = try await Self.doctor(over: script, as: .plain)
 
         // The run returned at all, inside a bound far under the suite's own
         // backstop, which is what tells a reported timeout from a hang.
@@ -298,7 +397,7 @@ struct DoctorCommandTests {
         let script = try makeLingeringAgent()
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await Self.doctor(over: script)
+        let (result, report) = try await Self.doctor(over: script, as: .plain)
 
         // Such an agent answered every request, so it is usable, and it leaks.
         // §9 gives that verdict its own code so a script never reads it as the
@@ -322,9 +421,9 @@ struct DoctorCommandTests {
 
         #expect(result.exitCode == doctorFoundAnErrorExitCode)
         // The command that could not be found is a FINDING of the report, and
-        // not an error on stderr: the report is what a person reads to repair
+        // not a bare error line: the report is what a person reads to repair
         // the agent, so it has to name what was typed.
-        let report = String(decoding: result.standardOutput, as: UTF8.self)
+        let report = ReportForm.plain.report(in: result)
         #expect(report.contains(missingCommand), "the report was \"\(report)\"")
     }
 
@@ -333,15 +432,15 @@ struct DoctorCommandTests {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 
-        let (result, _) = try await Self.doctor(over: script, options: ["--json"])
+        let (result, _) = try await Self.doctor(over: script, as: .json)
 
         #expect(result.exitCode == doctorPassedExitCode)
         let entries = try Self.checkEntries(in: result)
         var names: [String] = []
         for entry in entries {
-            let status = try Self.text(checkStatusKey, of: entry)
-            let message = try Self.text(checkMessageKey, of: entry)
-            names.append(try Self.text(checkNameKey, of: entry))
+            let status = try Self.member(checkStatusKey, of: entry)
+            let message = try Self.member(checkMessageKey, of: entry)
+            names.append(try Self.member(checkNameKey, of: entry))
             #expect(!status.isEmpty)
             #expect(!message.isEmpty)
         }
@@ -353,14 +452,14 @@ struct DoctorCommandTests {
         let script = try makeBannerOnStdoutAgent()
         defer { removeAgentScript(script) }
 
-        let (result, _) = try await Self.doctor(over: script, options: ["--json"])
+        let (result, _) = try await Self.doctor(over: script, as: .json)
 
         var reportedAnError = false
         for entry in try Self.checkEntries(in: result) {
-            let status = try Self.text(checkStatusKey, of: entry)
+            let status = try Self.member(checkStatusKey, of: entry)
             if status == errorStatusValue {
                 reportedAnError = true
-                let fix = try Self.text(checkFixKey, of: entry)
+                let fix = try Self.member(checkFixKey, of: entry)
                 #expect(!fix.isEmpty, "\(entry)")
             }
         }
@@ -372,8 +471,8 @@ struct DoctorCommandTests {
 
     @Test("--json decodes to the checks the plain report draws")
     func theJSONFormDecodesToTheChecksThePlainReportDraws() async throws {
-        let plain = try await Self.doctorReportWithoutAgentPid(options: [])
-        let encoded = try await Self.doctorReportWithoutAgentPid(options: ["--json"])
+        let plain = try await Self.doctorReportWithoutAgentPid(as: .plain)
+        let encoded = try await Self.doctorReportWithoutAgentPid(as: .json)
 
         #expect(plain.result.exitCode == doctorPassedExitCode)
         #expect(encoded.result.exitCode == doctorPassedExitCode)
@@ -394,19 +493,19 @@ struct DoctorCommandTests {
         let script = try makeBannerOnStdoutAgent()
         defer { removeAgentScript(script) }
 
-        let (result, report) = try await Self.doctor(over: script)
+        let (result, report) = try await Self.doctor(over: script, as: .plain)
 
         // The banner agent fails a row, so this report holds passing rows, an
         // error row and a fix line: every row a decorated table would color.
         // Both streams of the run are pipes, and neither may carry an escape.
         #expect(result.exitCode == doctorFoundAnErrorExitCode)
         #expect(
-            !result.standardOutput.contains(escapeByte),
-            "stdout carried an escape: \"\(report)\""
+            !result.standardError.contains(escapeByte),
+            "stderr carried an escape: \"\(report)\""
         )
         #expect(
-            !result.standardError.contains(escapeByte),
-            "stderr carried an escape: \"\(String(decoding: result.standardError, as: UTF8.self))\""
+            !result.standardOutput.contains(escapeByte),
+            "stdout carried an escape: \"\(text(result.standardOutput))\""
         )
     }
 
@@ -432,7 +531,7 @@ struct DoctorCommandTests {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 
-        let (result, _) = try await Self.doctor(over: script, options: option + ["--json"])
+        let (result, _) = try await Self.doctor(over: script, as: .json, options: option)
 
         // `--timeout` bounds the TURN of `cli-plan.md` §6.1, and `doctor` runs
         // no turn, so the doctor keeps its own limit whatever the option says.
@@ -441,7 +540,7 @@ struct DoctorCommandTests {
         // them would report a failure this agent does not have.
         #expect(result.exitCode == doctorPassedExitCode)
         for entry in try Self.checkEntries(in: result) {
-            #expect(try Self.text(checkStatusKey, of: entry) == okStatusValue, "\(entry)")
+            #expect(try Self.member(checkStatusKey, of: entry) == okStatusValue, "\(entry)")
         }
     }
 }

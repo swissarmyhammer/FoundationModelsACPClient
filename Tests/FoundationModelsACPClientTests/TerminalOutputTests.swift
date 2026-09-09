@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModelsExtras
 import Testing
 
 @testable import AcpClientCore
@@ -11,6 +12,12 @@ import Testing
 // agent-owned terminal's output — so importing both packages here makes the
 // name ambiguous. The logger test needs no ACP type by name: it reads
 // `TerminalOutput.logger` and calls `log(_:)` on what comes back.
+//
+// `FoundationModelsExtras` is imported for `DoctorReport`, `HealthCheck` and
+// `PlainTextDoctorRenderer`. The doctor-report tests build one report and
+// drive it through both paths of ``TerminalOutput/doctorReport(_:)``: the
+// plain path is compared byte for byte with the Extras renderer's own drawing,
+// and the terminal path is read for the rows and for Noora's table border.
 //
 // Every test builds the layer over a buffer sink and over a chosen answer to
 // "is standard error a terminal", and then asserts the bytes the buffer holds.
@@ -115,6 +122,76 @@ private enum SpinnerText {
     /// `false` on every machine, so an assertion that the drawing still
     /// happened is an assertion that the default was never asked.
     static let nooraNonInteractiveVariable = "NO_TTY"
+}
+
+/// The report the doctor-report tests draw, and the text its rows carry.
+///
+/// One row of each status, so the drawing has a passing row, a row with a
+/// fix under a warning, and a row with a fix under an error: every shape the
+/// table and the plain rendering draw differently.
+///
+/// Every text is short on purpose. Noora lays its table out against the width
+/// of standard OUTPUT, which is a pipe under the test runner, so the layout
+/// falls back to 80 columns and cuts each cell that does not fit with an
+/// ellipsis. Texts this short fit whole at that width, so the table test can
+/// read each one back. The cut is Noora's layout and not this layer's, and
+/// the agent CLI of this family draws the same table.
+private enum DoctorReportFixture {
+    /// The name of the row that passed.
+    static let passedName = "command"
+
+    /// The message of the row that passed.
+    static let passedMessage = "resolved"
+
+    /// The name of the row that warned.
+    static let warnedName = "teardown"
+
+    /// The message of the row that warned.
+    static let warnedMessage = "still running"
+
+    /// The fix of the row that warned.
+    static let warnedFix = "end the agent"
+
+    /// The name of the row that failed.
+    static let failedName = "initialize"
+
+    /// The message of the row that failed.
+    static let failedMessage = "no answer"
+
+    /// The fix of the row that failed.
+    static let failedFix = "answer in time"
+
+    /// The group every row belongs to.
+    static let category = "agent"
+
+    /// Every text a drawing of ``report`` must carry, whatever its shape.
+    static let rowTexts = [
+        passedName, passedMessage,
+        warnedName, warnedMessage, warnedFix,
+        failedName, failedMessage, failedFix,
+    ]
+
+    /// The status marks the table draws, one for each status of ``report``.
+    ///
+    /// They are the marks the agent CLI of this family draws in its own
+    /// doctor table, so the two CLIs draw alike: the passing mark, the
+    /// warning mark and the failure mark.
+    static let statusMarks = ["✔︎", "!", "⨯"]
+
+    /// The vertical border Noora's rounded table style draws between two
+    /// cells.
+    ///
+    /// The plain rendering holds no such character, so this one in the
+    /// buffer is the proof that the terminal path drew a table and not the
+    /// plain text.
+    static let tableBorder = "│"
+
+    /// The report, one row of each status.
+    static let report = DoctorReport(checks: [
+        .ok(name: passedName, message: passedMessage, category: category),
+        .warning(name: warnedName, message: warnedMessage, fix: warnedFix, category: category),
+        .error(name: failedName, message: failedMessage, fix: failedFix, category: category),
+    ])
 }
 
 @Suite("acp-client stderr terminal layer")
@@ -337,5 +414,53 @@ struct TerminalOutputTests {
         harness.output.logger.log(SpinnerText.event)
 
         #expect(harness.buffer.text.isEmpty)
+    }
+
+    /// `cli-plan.md` §8 sends the human doctor report to standard error, and a
+    /// pipe or a file gets the Extras plain rendering: the same bytes the
+    /// renderer draws on its own, so a script reads a stable report. The
+    /// report is the output of `doctor`, so `--quiet` does not silence it.
+    @Test(
+        "the doctor report outside a terminal is the plain rendering, at every verbosity",
+        arguments: [TerminalVerbosity.quiet, .normal, .verbose]
+    )
+    func theDoctorReportOutsideATerminalIsThePlainRendering(verbosity: TerminalVerbosity) {
+        let harness = TerminalOutputHarness(
+            verbosity: verbosity,
+            standardErrorIsATerminal: false
+        )
+
+        harness.output.doctorReport(DoctorReportFixture.report)
+
+        #expect(
+            harness.buffer.text == PlainTextDoctorRenderer().render(DoctorReportFixture.report)
+        )
+    }
+
+    /// `cli-plan.md` §5 gives the doctor report to the terminal layer when
+    /// standard error is a terminal, and the layer draws Noora's table: every
+    /// row with its status mark, its message and its fix, inside the table
+    /// border. The report is the output of `doctor`, so `--quiet` does not
+    /// silence it.
+    @Test(
+        "the doctor report in a terminal is a table holding every row, at every verbosity",
+        arguments: [TerminalVerbosity.quiet, .normal, .verbose]
+    )
+    func theDoctorReportInATerminalIsATable(verbosity: TerminalVerbosity) {
+        let harness = TerminalOutputHarness(
+            verbosity: verbosity,
+            standardErrorIsATerminal: true
+        )
+
+        harness.output.doctorReport(DoctorReportFixture.report)
+
+        let drawn = harness.buffer.text
+        for rowText in DoctorReportFixture.rowTexts + DoctorReportFixture.statusMarks {
+            #expect(drawn.contains(rowText), "the table holds no \"\(rowText)\": \"\(drawn)\"")
+        }
+        #expect(
+            drawn.contains(DoctorReportFixture.tableBorder),
+            "the drawing holds no table border: \"\(drawn)\""
+        )
     }
 }

@@ -7,7 +7,11 @@
 //
 // The rule this file exists to keep is absolute. Every byte that is not the
 // answer text goes to **stderr**, and nothing is drawn when stderr is not a
-// terminal. stdout carries the answer and nothing else (§8).
+// terminal. stdout carries the answer and nothing else (§8). The doctor
+// report of §10 is the one thing this layer writes to a stderr that is not a
+// terminal, and it writes it as the plain text of the Extras renderer, which
+// draws nothing and holds no escape: the report is the output of `doctor`,
+// so a pipe must receive it whole.
 //
 // Noora does not keep that rule on its own. Three of its defaults work
 // against it, and each one needs a deliberate setting here:
@@ -51,6 +55,7 @@
 import Darwin
 import Foundation
 import FoundationModelsACP
+import FoundationModelsExtras
 import Noora
 
 /// How much of a run the terminal layer writes (`cli-plan.md` §8).
@@ -87,9 +92,9 @@ enum TerminalVerbosity: Sendable {
 /// Everything the binary writes that is not the answer text.
 ///
 /// One value owns the whole of stderr: the session events of `--verbose`, the
-/// error lines, the progress drawing, and the connection's own diagnostics
-/// through ``logger``. Nothing here can reach stdout, because nothing here
-/// holds a way to write to it.
+/// error lines, the progress drawing, the doctor report, and the connection's
+/// own diagnostics through ``logger``. Nothing here can reach stdout, because
+/// nothing here holds a way to write to it.
 struct TerminalOutput: Sendable {
     /// How much of the run this layer writes.
     let verbosity: TerminalVerbosity
@@ -185,6 +190,89 @@ struct TerminalOutput: Sendable {
     ///   the line ending.
     func error(_ line: String) {
         writeLine(line)
+    }
+
+    /// Writes the doctor report to standard error, at every verbosity.
+    ///
+    /// `cli-plan.md` §8 sends the human doctor report to standard error, and
+    /// §5 gives it to this layer. In a terminal the report is Noora's table,
+    /// the same four columns the agent CLI of this family draws, so the two
+    /// CLIs draw alike. A pipe or a file gets the plain rendering of
+    /// `FoundationModelsExtras` instead: its bytes hold no escape, and two
+    /// runs over the same findings write the same bytes, so a script reads a
+    /// stable report. The report is the whole output of `doctor`, so `--quiet`
+    /// does not silence it, which is what §6.2 means when it calls that
+    /// option inert for `doctor`.
+    ///
+    /// Noora lays the table out against `Terminal.size()`, which reads the
+    /// width of standard OUTPUT. A run whose stdout is a pipe while stderr is
+    /// a terminal is laid out at Noora's fallback width, and a cell that does
+    /// not fit is cut short with an ellipsis rather than wrapped.
+    ///
+    /// - Parameter report: The findings to draw.
+    func doctorReport(_ report: DoctorReport) {
+        guard standardErrorIsATerminal else {
+            sink(PlainTextDoctorRenderer().render(report))
+            return
+        }
+        noora.table(
+            headers: Self.plainCells([Self.doctorStatusHeader] + Self.doctorColumnHeaders),
+            rows: report.checks.map(Self.doctorRow(for:)),
+            renderer: Renderer()
+        )
+    }
+
+    /// The header of the status column of the drawn doctor table.
+    private static let doctorStatusHeader = "Status"
+
+    /// The headers of the doctor table after the status column, in the order
+    /// the plain rendering carries the same three texts.
+    private static let doctorColumnHeaders = ["Check", "Message", "Fix"]
+
+    /// The status cell of a row whose check passed.
+    private static let doctorPassedMark = "✔︎"
+
+    /// The status cell of a row whose check needs attention.
+    private static let doctorWarnedMark = "!"
+
+    /// The status cell of a row whose check failed.
+    private static let doctorFailedMark = "⨯"
+
+    /// The fix cell of a row whose check states no fix.
+    private static let doctorNoFixText = ""
+
+    /// The drawn row of one finding: its status mark, its name, its message,
+    /// and its fix.
+    ///
+    /// - Parameter check: The finding to draw.
+    /// - Returns: One cell for the status column and one for each of
+    ///   ``doctorColumnHeaders``.
+    private static func doctorRow(for check: HealthCheck) -> StyledTableRow {
+        [statusCell(for: check.status)]
+            + plainCells([check.name, check.message, check.fix ?? doctorNoFixText])
+    }
+
+    /// The status cell of one health status, in the color of the status.
+    ///
+    /// The switch is total and declares no `default`: a status Extras gains
+    /// later must be drawn on purpose, and the compiler is what asks for that.
+    ///
+    /// - Parameter status: The status the check reported.
+    /// - Returns: The styled cell.
+    private static func statusCell(for status: HealthStatus) -> TableCellStyle {
+        switch status {
+        case .ok: .success(doctorPassedMark)
+        case .warning: .warning(doctorWarnedMark)
+        case .error: .danger(doctorFailedMark)
+        }
+    }
+
+    /// Cells that carry text and no color.
+    ///
+    /// - Parameter texts: The texts, in column order.
+    /// - Returns: One cell for each text.
+    private static func plainCells(_ texts: [String]) -> [TableCellStyle] {
+        texts.map { .plain($0) }
     }
 
     /// Hands one line and its terminator to ``sink``.
