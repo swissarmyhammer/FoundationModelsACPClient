@@ -128,7 +128,7 @@ private let escapeByte: UInt8 = 0x1B
 /// diagnostic, and the `--json` form goes to standard output, because a script
 /// reads it. A test names the form it reads, and the form names the stream, so
 /// no test reads a descriptor by habit.
-private enum ReportForm {
+enum ReportForm: CaseIterable, Sendable {
     /// The human report, on standard error.
     case plain
 
@@ -276,9 +276,9 @@ struct DoctorCommandTests {
 
     @Test(
         "each form of the report goes to its own stream, and the other stream stays empty",
-        arguments: [ReportForm.plain, .json]
+        arguments: ReportForm.allCases
     )
-    fileprivate func eachFormGoesToItsOwnStreamAlone(form: ReportForm) async throws {
+    func eachFormGoesToItsOwnStreamAlone(form: ReportForm) async throws {
         let script = try makeWellBehavedAgent()
         defer { removeAgentScript(script) }
 

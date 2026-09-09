@@ -35,7 +35,7 @@ import FoundationModelsExtras
 //    own convention, and §9 is this binary's, which also has to hold `refusal`,
 //    `cancelled`, a timeout and a usage error apart. Reading the §9 table here
 //    is what keeps every outcome of this binary in one place.
-// 3. **`--timeout` never reaches the doctor.** See ``doctor(for:frameSink:)``.
+// 3. **`--timeout` never reaches the doctor.** See ``makeDoctor(for:frameSink:)``.
 // 4. **The §6.1 option group is declared, and one option of it shapes the
 //    diagnosis.** §6.1 gives those options to every subcommand, so `doctor`
 //    has to PARSE them or the grammar of the three subcommands would differ.
@@ -43,7 +43,7 @@ import FoundationModelsExtras
 //    the reason the binary exists, and the defect §10 catches best — an agent
 //    that writes a banner to stdout — is the one a person then wants to SEE
 //    on the wire. `AgentCommandDoctor` owns the tee its rows read, so the flag
-//    reaches it through ``frameSink(frames:terminal:)``: a sink the doctor
+//    reaches it through ``makeFrameSink(frames:terminal:)``: a sink the doctor
 //    calls for each teed line, beside the two readings its rows rest on, and
 //    nothing when the flag is absent. The other four shape nothing here:
 //    `--cwd` names the working directory of a SESSION, and the rows open none
@@ -103,9 +103,9 @@ struct DoctorCommand: AsyncParsableCommand {
     func run() async throws {
         let agent = try invocation.command()
         let terminal = TerminalOutput(verbosity: .quiet)
-        let doctor = Self.doctor(
+        let doctor = Self.makeDoctor(
             for: agent,
-            frameSink: Self.frameSink(frames: options.frames, terminal: terminal)
+            frameSink: Self.makeFrameSink(frames: options.frames, terminal: terminal)
         )
         let findings = await DoctorRunner(components: [doctor]).run()
         try Self.write(findings, asJSON: report.json, terminal: terminal)
@@ -135,9 +135,9 @@ struct DoctorCommand: AsyncParsableCommand {
     /// - Parameters:
     ///   - agent: The agent executable and its own arguments.
     ///   - frameSink: Where each line of the exchange goes, or `nil` for a run
-    ///     that asked for no frames. See ``frameSink(frames:terminal:)``.
+    ///     that asked for no frames. See ``makeFrameSink(frames:terminal:)``.
     /// - Returns: The doctor over that command.
-    private static func doctor(
+    private static func makeDoctor(
         for agent: AgentCommand,
         frameSink: FrameLineSink?
     ) -> AgentCommandDoctor {
@@ -163,7 +163,7 @@ struct DoctorCommand: AsyncParsableCommand {
     ///   - terminal: The layer that owns standard error, which the report goes
     ///     through as well.
     /// - Returns: The sink, or `nil` for a run that asked for no frames.
-    private static func frameSink(frames: Bool, terminal: TerminalOutput) -> FrameLineSink? {
+    private static func makeFrameSink(frames: Bool, terminal: TerminalOutput) -> FrameLineSink? {
         guard frames else { return nil }
         return { terminal.frame($0) }
     }
