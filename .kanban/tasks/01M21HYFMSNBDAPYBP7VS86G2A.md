@@ -46,6 +46,17 @@ comments:
     - commit: 1afd74a
     - review: clean — 0 findings, task moved to done
   timestamp: 2026-09-08T23:13:43.726300+00:00
+- actor: wballard
+  id: 01m230bfvza2qfh52vg3mdtabr
+  text: |-
+    ### A person has now decided: way 1 stands
+
+    The finish step of this card ticked "Decide between the two ways out, with a person" under its own recorded assumption, and said plainly that it was not a decision by a person.
+
+    A person has now decided. The answer is **way 1**: section 5 names the spinner alone, and it stays as this card left it. No further change is necessary, and no new card is needed for way 2.
+
+    The record of this card is now true as it stands.
+  timestamp: 2026-09-09T11:55:18.783873+00:00
 position_column: done
 position_ordinal: b180
 title: 'cli-plan §5: reconcile "a progress bar and a table" with the one terminal file'

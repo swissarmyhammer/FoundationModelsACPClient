@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModelsExtras
 import Testing
 
 @testable import AcpClientCore
@@ -20,6 +21,11 @@ import Testing
 // binary reads. The ROW NAMES are not spelled again — they come from
 // `AgentCommandDoctor`, which is the one place `cli-plan.md` §10 is written as
 // code, and the binary and this suite link the same library.
+//
+// `FoundationModelsExtras` is imported for `DoctorReport` and
+// `PlainTextDoctorRenderer`. The test that decodes the `--json` form draws the
+// decoded checks through the same renderer the binary uses, so the comparison
+// is that renderer's own bytes and not a second drawing written here.
 
 /// The number of minutes this file's suite allows itself.
 ///
@@ -91,6 +97,16 @@ private let initializeMethodMember = #""method":"initialize""#
 /// two agents, so the pid is the one part of the report that changes from run
 /// to run while the report stays the same.
 private let agentPidPlaceholder = "<pid>"
+
+/// The byte that opens every ANSI escape sequence.
+///
+/// A renderer that colors a row, or that moves the cursor, writes a sequence
+/// that opens with this byte. A pipe or a file must receive none of them: the
+/// report a script reads has to be the same bytes every time, so a test can
+/// compare it byte for byte. Every stream of a run in this suite is a pipe, so
+/// one occurrence of this byte on either stream is a decorated report that
+/// reached a destination that is not a terminal.
+private let escapeByte: UInt8 = 0x1B
 
 /// `acp-client doctor` end to end: the report, the JSON form, and the verdict.
 ///
@@ -352,6 +368,46 @@ struct DoctorCommandTests {
         // nothing about how to repair it, so the agent this test drives is one
         // that fails a row.
         #expect(reportedAnError, "no check of this report reported an error")
+    }
+
+    @Test("--json decodes to the checks the plain report draws")
+    func theJSONFormDecodesToTheChecksThePlainReportDraws() async throws {
+        let plain = try await Self.doctorReportWithoutAgentPid(options: [])
+        let encoded = try await Self.doctorReportWithoutAgentPid(options: ["--json"])
+
+        #expect(plain.result.exitCode == doctorPassedExitCode)
+        #expect(encoded.result.exitCode == doctorPassedExitCode)
+        let decoded = try JSONDecoder().decode(DoctorReport.self, from: Data(encoded.report.utf8))
+        #expect(decoded.checks.map(\.name) == AgentCommandDoctor.checkNamesInOrder)
+        // The plain report is the renderer's own drawing of the checks the
+        // binary found, so drawing the decoded checks through that renderer
+        // again must give the plain run's bytes. One entry dropped, one status
+        // changed, or one message reworded on either form fails this.
+        #expect(
+            PlainTextDoctorRenderer().render(decoded) == plain.report,
+            "the decoded --json report was \"\(encoded.report)\", the plain report \"\(plain.report)\""
+        )
+    }
+
+    @Test("a report written to a pipe holds no ANSI escape on either stream")
+    func aReportWrittenToAPipeHoldsNoEscape() async throws {
+        let script = try makeBannerOnStdoutAgent()
+        defer { removeAgentScript(script) }
+
+        let (result, report) = try await Self.doctor(over: script)
+
+        // The banner agent fails a row, so this report holds passing rows, an
+        // error row and a fix line: every row a decorated table would color.
+        // Both streams of the run are pipes, and neither may carry an escape.
+        #expect(result.exitCode == doctorFoundAnErrorExitCode)
+        #expect(
+            !result.standardOutput.contains(escapeByte),
+            "stdout carried an escape: \"\(report)\""
+        )
+        #expect(
+            !result.standardError.contains(escapeByte),
+            "stderr carried an escape: \"\(String(decoding: result.standardError, as: UTF8.self))\""
+        )
     }
 
     @Test("an invocation naming no agent exits 2, and writes no report")

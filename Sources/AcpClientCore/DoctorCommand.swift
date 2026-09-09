@@ -156,10 +156,10 @@ struct DoctorCommand: AsyncParsableCommand {
     /// `cli-plan.md` §8 makes `doctor` an exception to its own stdout rule,
     /// because the report IS the output of this subcommand.
     ///
-    /// The plain form comes from `PlainTextDoctorRenderer`, which reads the
-    /// destination itself and writes color only into a terminal — so a report a
-    /// person reads is decorated and a report a pipe or a file receives is the
-    /// same bytes every time. The JSON form is one line, for the reason
+    /// The plain form comes from `PlainTextDoctorRenderer`, which draws ASCII
+    /// and no terminal escape whatever the destination is — so a terminal, a
+    /// pipe and a file each receive the same bytes, and a test can compare the
+    /// report byte for byte. The JSON form is one line, for the reason
     /// ``ProbeCommand`` gives: a report a script reads is one ndJSON record.
     ///
     /// - Parameters:
