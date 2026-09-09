@@ -30,8 +30,24 @@ comments:
     - Not this card: the tree also holds changes to `.kanban/tasks/01M21HYFG1QKBV6R9R4MAN82W6.*`. They belong to card ^an82w6 and this step did not touch them.
     - next: review
   timestamp: 2026-09-08T23:11:12.536890+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m21mrewrhpxbws5wy778rgwr
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 1afd74a) — 0 findings. The engine did not review `cli-plan.md` because no validator matches that file. It did not review the four `.kanban/` files because `.reviewignore` excludes them.
+    - next: none. The task moved from `review` to `done`.
+  timestamp: 2026-09-08T23:13:26.424709+00:00
+- actor: claude-code
+  id: 01m21mrzsefphnwaqvavgf480a
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 1 file (cli-plan.md §5), decision way 1 under the recorded assumption
+    - test: green — swift test 229 passed; swift test --package-path IntegrationTests 92 passed; 0 warnings
+    - commit: 1afd74a
+    - review: clean — 0 findings, task moved to done
+  timestamp: 2026-09-08T23:13:43.726300+00:00
+position_column: done
+position_ordinal: b180
 title: 'cli-plan §5: reconcile "a progress bar and a table" with the one terminal file'
 ---
 ## What
