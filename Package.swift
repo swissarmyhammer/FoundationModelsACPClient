@@ -12,8 +12,9 @@ let package = Package(
     ],
     products: [
         // The ACP Client role: an observable container that a UI layer can
-        // bind to. This library knows the ACP wire, Observation, and the
-        // family leaf `FoundationModelsExtras`.
+        // bind to. This library knows the ACP wire, Observation, the family
+        // leaf `FoundationModelsExtras`, and the Tracing, Logging and Metrics
+        // APIs.
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
         // Everything the `acp-client` binary does, as a library. It is a
         // product, and not a target alone, because a package can import only a
@@ -73,6 +74,17 @@ let package = Package(
         // `tuist/path` into this graph. Those three are the cost, and this
         // comment is where it is visible.
         .package(url: "https://github.com/tuist/Noora.git", .upToNextMinor(from: "0.57.0")),
+        // The tracing API, the logging API and the metrics API of the library
+        // target (the OpenTelemetry design of 2026-09-28). API only: no
+        // library target links a backend or bootstraps one. Only the
+        // `acp-client` executable bootstraps a backend, and no target here
+        // links swift-otel yet. Until a backend is bootstrapped, each span,
+        // each logger and each metric of the library does nothing. The
+        // floors are the floors of `FoundationModelsExtras`, which already
+        // puts these three packages into the graph.
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.15.1"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.11.0"),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -84,6 +96,11 @@ let package = Package(
             dependencies: [
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
+                // The names of `ACPClientTelemetry` go to these three APIs.
+                // `ManifestTests` checks that the library links all three.
+                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "Metrics", package: "swift-metrics"),
             ]
         ),
         // Everything the `acp-client` binary does (cli-plan.md §3): the
@@ -142,6 +159,9 @@ let package = Package(
                 "AcpClientCore",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
+                // The in-memory tracer, log handler and metrics factory of the
+                // family, and the content-safety check that reads them.
+                .product(name: "TelemetryTestSupport", package: "FoundationModelsExtras"),
             ]
         ),
     ]

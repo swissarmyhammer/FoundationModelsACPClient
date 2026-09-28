@@ -27,6 +27,11 @@ import Testing
 ///
 /// The command-line client is two targets, so every rule here says which of
 /// them it reads, and why that one and not the other.
+///
+/// Two more rules come from the OpenTelemetry design of 2026-09-28. Rule 1
+/// gives the library target the `Tracing`, `Logging` and `Metrics` APIs and no
+/// backend, and only the `acp-client` executable can link the swift-otel
+/// backend. A build accepts a backend on each target, so this suite pins both.
 @Suite("Package manifest")
 struct ManifestTests {
     /// The number of dependencies `cli-plan.md` §12 permits the command-line
@@ -56,6 +61,25 @@ struct ManifestTests {
         "Noora",
         "FoundationModelsACP",
         "FoundationModelsExtras",
+    ]
+
+    /// The library target of the manifest: the ACP Client role that a UI
+    /// layer binds to.
+    private static let libraryTargetName = "FoundationModelsACPClient"
+
+    /// The product name of each telemetry API the library target must link.
+    /// Each one is an API only, with no backend.
+    private static let telemetryAPIProductNames: Set<String> = [
+        "Tracing",
+        "Logging",
+        "Metrics",
+    ]
+
+    /// The package name and the product name of the swift-otel backend. Only
+    /// the ``executableTargetName`` target can name one of them.
+    private static let telemetryBackendNames: Set<String> = [
+        "swift-otel",
+        "OTel",
     ]
 
     @Test("the manifest declares acp-client as an executable product")
@@ -104,7 +128,7 @@ struct ManifestTests {
         // sixth one hiding in the executable instead.
         let client = try Self.clientTarget()
         #expect(
-            client.targetNames == ["FoundationModelsACPClient"],
+            client.targetNames == [Self.libraryTargetName],
             """
             The \(Self.clientTargetName) target must take this package's own \
             library target, and no other target. \
@@ -160,6 +184,38 @@ struct ManifestTests {
             \(Self.executableTargetName) target may name any of \
             \(forbiddenModules.sorted()). \
             They name \(named.intersection(forbiddenModules).sorted()).
+            """
+        )
+    }
+
+    @Test("the library target links the Tracing, Logging and Metrics APIs")
+    func theLibraryTargetLinksTheTelemetryAPIs() throws {
+        let library = try Self.target(named: Self.libraryTargetName)
+        #expect(
+            Self.telemetryAPIProductNames.isSubset(of: Set(library.productNames)),
+            """
+            The \(Self.libraryTargetName) target must name each of \
+            \(Self.telemetryAPIProductNames.sorted()) as a product dependency. \
+            It names \(library.productNames.sorted()).
+            """
+        )
+    }
+
+    @Test("no target other than acp-client names the swift-otel backend")
+    func onlyTheExecutableTargetNamesTheTelemetryBackend() throws {
+        // Every target of the manifest, the test target too. A library or a
+        // test target that links the backend puts an exporter into a process
+        // that did not ask for one.
+        let offenders = try Self.packageDump().targets
+            .filter { $0.name != Self.executableTargetName }
+            .filter { !$0.allNames.isDisjoint(with: Self.telemetryBackendNames) }
+            .map(\.name)
+        #expect(
+            offenders.isEmpty,
+            """
+            Only the \(Self.executableTargetName) target may name any of \
+            \(Self.telemetryBackendNames.sorted()). These targets name one: \
+            \(offenders.sorted()).
             """
         )
     }

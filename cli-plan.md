@@ -435,6 +435,14 @@ terminal package. The family leaf is one of the five because §10 builds
 `ManifestTests` reads `Package.swift`, counts those five against the
 library, and asserts that the executable takes the library alone.
 
+The `FoundationModelsACPClient` library target also links the `Tracing`,
+`Logging` and `Metrics` APIs (the OpenTelemetry design of 2026-09-28).
+`AcpClientCore` gets them through that library, so its count stays five.
+They are APIs only. No target but the `acp-client` executable may link the
+swift-otel backend, and no source file of the two libraries may bootstrap
+a backend. `ManifestTests` and `ACPClientTelemetryVocabularyTests` check
+both rules.
+
 ## 13. Client capabilities
 
 `plan.md` decides that `ACPClient.advertisedCapabilities` omits `auth`,
