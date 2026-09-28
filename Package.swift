@@ -170,6 +170,9 @@ let package = Package(
                 // The in-memory tracer, log handler and metrics factory of the
                 // family, and the content-safety check that reads them.
                 .product(name: "TelemetryTestSupport", package: "FoundationModelsExtras"),
+                // The request metric tests read the counts and the durations
+                // of each metric from the test metrics factory of a capture.
+                .product(name: "MetricsTestKit", package: "swift-metrics"),
             ]
         ),
     ]

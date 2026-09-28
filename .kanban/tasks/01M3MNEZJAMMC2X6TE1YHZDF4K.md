@@ -81,10 +81,33 @@ comments:
     - note: during this check, a stray sourcekit-lsp background index build for this repo (PID 67724) locked a nested checkout path and blocked a manual clean of `.build`. The process was stopped and the one corrupted checkout folder was removed. No project source files were touched by this. Both test commands ran again after recovery, still green.
     - next: send the task to review
   timestamp: 2026-09-28T23:13:40.616342+00:00
+- actor: claude-code
+  id: 01m3n4rea1f7y2329d4kcf9g3s
+  text: |-
+    ### commit — changed
+    - evidence: 6975c64 feat(telemetry): open a client span for each ACP request
+    - next: none
+  timestamp: 2026-09-28T23:14:19.073720+00:00
+- actor: claude-code
+  id: 01m3n4ze49hrevdzv885cm0pq2
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (checkpoint 6975c64). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed, 0 skipped. 5 files reviewed. 4 .kanban files not reviewed because of .reviewignore. The task has no prior Review Findings section.
+    - next: The task moved to done.
+  timestamp: 2026-09-28T23:18:08.265990+00:00
+- actor: claude-code
+  id: 01m3n4zp5hz5zq1bfwraj0ge1s
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files (ClientRequestSpan.swift new, AgentSession.swift, TurnRunner.swift, ScriptedStubAgent.swift, ClientRequestSpanTests.swift new)
+    - test: green — swift test --parallel 249 passed; IntegrationTests 97 passed
+    - commit: 6975c64
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-09-28T23:18:16.497658+00:00
 depends_on:
 - 01M3MNEBV9WHBVZ0JJK8BQYJ2H
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b580
 title: 'OTel A: open a client span for each ACP request and put W3C trace context in its _meta'
 ---
 ## What

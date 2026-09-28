@@ -80,6 +80,8 @@ public enum ACPClientTelemetry {
 
     /// The metric names of the library. Each metric has the ACP method as a
     /// dimension, with the ``ACPClientTelemetry/AttributeKey/rpcMethod`` key.
+    /// The error counter also has the error code as a dimension, with the
+    /// ``ACPClientTelemetry/AttributeKey/errorCode`` key.
     public enum MetricName {
         /// The counter that counts each outgoing ACP request.
         public static let requests = prefix + "requests"
@@ -90,6 +92,28 @@ public enum ACPClientTelemetry {
 
         /// The counter that counts each outgoing ACP request that failed.
         public static let requestErrors = prefix + "request.errors"
+    }
+
+    /// The error code values of the error counter
+    /// ``ACPClientTelemetry/MetricName/requestErrors`` that are not a JSON-RPC
+    /// error code.
+    ///
+    /// A request that the agent refuses with a `RequestError` has the
+    /// JSON-RPC error code as its value, for example `-32602`. Each other
+    /// failure has one of these values. The set of values is small and
+    /// fixed, so that a metric backend keeps a small number of series
+    /// (rule 4). A value never holds the message text of an error.
+    public enum ErrorCodeValue {
+        /// The connection to the agent closed, or the request timed out,
+        /// before the agent answered. The error is a `ConnectionError`.
+        public static let connection = "connection"
+
+        /// The task of the request was cancelled. The error is a
+        /// `CancellationError`.
+        public static let cancelled = "cancelled"
+
+        /// Another error that is not one of the errors above.
+        public static let other = "other"
     }
 
     /// The metadata keys of the log records of the library. Each key is the

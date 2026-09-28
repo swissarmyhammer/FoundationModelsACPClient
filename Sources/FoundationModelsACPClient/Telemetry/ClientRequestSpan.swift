@@ -1,6 +1,7 @@
 import FoundationModelsACP
 import FoundationModelsExtras
 import Logging
+import Metrics
 import Tracing
 
 /// Opens one client span for each outgoing ACP request, and puts the W3C trace
@@ -44,10 +45,35 @@ import Tracing
 /// the error object: a tracing backend writes the message text of a recorded
 /// error, and rule 4 keeps that text out of telemetry. The call throws the
 /// same error that `send` threw.
+///
+/// ## Metrics
+///
+/// Each request also records three metrics, through the `Metrics` API:
+///
+/// - One count on the counter ``ACPClientTelemetry/MetricName/requests``.
+/// - One duration on the timer ``ACPClientTelemetry/MetricName/requestDuration``,
+///   from the send to the answer or the error. A swift-metrics `Timer` holds
+///   nanoseconds, and an OpenTelemetry backend exports it as a duration
+///   histogram. That is the shape of the OpenTelemetry `rpc.client.duration`
+///   metric.
+/// - When `send` throws, one count on the counter
+///   ``ACPClientTelemetry/MetricName/requestErrors``.
+///
+/// Rule 4: the dimensions of each metric are the ACP method and, for the
+/// error counter, the error code only. The error code is the JSON-RPC code of
+/// a `RequestError`, or a value of ``ACPClientTelemetry/ErrorCodeValue``. A
+/// dimension never holds the session id, because each session would then
+/// make a new series. It never holds content or the message text of an
+/// error.
+///
+/// The call makes each metric at the time of the call, from the metrics
+/// factory that the caller gives or from `MetricsSystem.factory`. A metric
+/// keeps the factory of the time that it was made, so a metric in a stored
+/// value would not see a factory that a test or a host binds later.
 public enum ClientRequestSpan {
     /// The ACP wire method names that the `acp-client` binary sends. A host
     /// can give each of these, or another ACP method name, as the `method` of
-    /// ``run(method:sessionId:meta:parent:tracer:logger:_:)``.
+    /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
     public enum Method {
         /// The `initialize` request.
         public static let initialize = "initialize"
@@ -70,7 +96,8 @@ public enum ClientRequestSpan {
     /// A request span is a child of the span of this context. The value is
     /// opaque, so that a caller can keep and give a context without the
     /// tracing API. ``current`` gives the context of the running task. In the
-    /// `send` closure of ``run(method:sessionId:meta:parent:tracer:logger:_:)``,
+    /// `send` closure of
+    /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``,
     /// that is the context of the request span.
     ///
     /// A request that belongs to an earlier request, but runs on another task,
@@ -111,6 +138,10 @@ public enum ClientRequestSpan {
     ///     `InstrumentationSystem.tracer` at call time.
     ///   - logger: The logger of the "enter" record, or `nil` for a new logger
     ///     with the label ``ACPClientTelemetry/logLabel``.
+    ///   - metricsFactory: The factory that makes the request metrics. The
+    ///     default is `MetricsSystem.factory` at call time: the task-local
+    ///     factory of `withMetricsFactory` when a caller bound one, or else
+    ///     the factory that the process bootstrapped.
     ///   - send: Sends the request. It gets the `_meta` to put on the request.
     /// - Returns: The value of `send`.
     /// - Throws: The error of `send`.
@@ -121,6 +152,7 @@ public enum ClientRequestSpan {
         parent: ParentContext? = nil,
         tracer: (any Tracer)? = nil,
         logger: Logger? = nil,
+        metricsFactory: any MetricsFactory = MetricsSystem.factory,
         _ send: nonisolated(nonsending) (_ meta: JSONValue?) async throws -> Output
     ) async throws -> Output {
         let activeTracer = tracer ?? InstrumentationSystem.tracer
@@ -137,7 +169,12 @@ public enum ClientRequestSpan {
                 },
                 metadata: enterMetadata(method: method, sessionId: sessionId)
             ) { span in
-                await outcome(of: send, meta: injected(into: meta, from: span, by: activeTracer), in: span)
+                await outcome(
+                    of: send,
+                    meta: injected(into: meta, from: span, by: activeTracer),
+                    in: span,
+                    metrics: RequestMetrics(method: method, factory: metricsFactory)
+                )
             }
         }
         return try result.get()
@@ -178,7 +215,8 @@ public enum ClientRequestSpan {
         return traceContext.inject(into: meta)
     }
 
-    /// Calls `send`, and records a failure on the span.
+    /// Calls `send`, records a failure on the span, and records the request
+    /// metrics.
     ///
     /// The error goes back in the result and not as a throw. A throw out of
     /// the body of `TracedCall.run` makes the span record the error object,
@@ -188,18 +226,24 @@ public enum ClientRequestSpan {
     ///   - send: Sends the request.
     ///   - meta: The `_meta` to give to `send`.
     ///   - span: The span of the request.
+    ///   - metrics: The metrics of the request.
     /// - Returns: The value of `send`, or the error that it threw.
     private nonisolated(nonsending) static func outcome<Output>(
         of send: nonisolated(nonsending) (_ meta: JSONValue?) async throws -> Output,
         meta: JSONValue?,
-        in span: any Span
+        in span: any Span,
+        metrics: RequestMetrics
     ) async -> Result<Output, any Error> {
+        let start = ContinuousClock.now
+        let result: Result<Output, any Error>
         do {
-            return .success(try await send(meta))
+            result = .success(try await send(meta))
         } catch {
             recordFailure(error, on: span)
-            return .failure(error)
+            result = .failure(error)
         }
+        metrics.record(result, duration: ContinuousClock.now - start)
+        return result
     }
 
     /// Records a failed request on its span: the error status, and the
@@ -214,6 +258,71 @@ public enum ClientRequestSpan {
         span.setStatus(SpanStatus(code: .error))
         if let requestError = error as? RequestError {
             span.attributes[ACPClientTelemetry.AttributeKey.errorCode] = requestError.code.wireValue
+        }
+    }
+
+    /// The request metrics of one ACP method, and the factory that makes
+    /// them.
+    ///
+    /// The value makes each metric at the time that it records, so that each
+    /// metric uses the factory of the call and not a factory of an earlier
+    /// time.
+    private struct RequestMetrics {
+        /// The ACP wire method of the request.
+        let method: String
+
+        /// The factory that makes the metrics.
+        let factory: any MetricsFactory
+
+        /// The dimensions of the request counter and of the timer: the ACP
+        /// method only.
+        private var methodDimensions: [(String, String)] {
+            [(ACPClientTelemetry.AttributeKey.rpcMethod, method)]
+        }
+
+        /// Records one request: one count, one duration, and one error count
+        /// when the request failed.
+        ///
+        /// - Parameters:
+        ///   - result: The value of `send`, or the error that it threw.
+        ///   - duration: The time from the send to the answer or the error.
+        func record<Output>(_ result: Result<Output, any Error>, duration: Duration) {
+            Counter(label: ACPClientTelemetry.MetricName.requests, dimensions: methodDimensions, factory: factory)
+                .increment()
+            Metrics.Timer(
+                label: ACPClientTelemetry.MetricName.requestDuration,
+                dimensions: methodDimensions,
+                factory: factory
+            ).record(duration: duration)
+            guard case .failure(let error) = result else {
+                return
+            }
+            Counter(
+                label: ACPClientTelemetry.MetricName.requestErrors,
+                dimensions: methodDimensions + [(ACPClientTelemetry.AttributeKey.errorCode, Self.errorCode(of: error))],
+                factory: factory
+            ).increment()
+        }
+
+        /// Gives the error code value of a failed request.
+        ///
+        /// Rule 4: the value is a code from a small, fixed set. It is never
+        /// the message text of the error.
+        ///
+        /// - Parameter error: The error of the request.
+        /// - Returns: The JSON-RPC code of a `RequestError`, or a value of
+        ///   ``ACPClientTelemetry/ErrorCodeValue`` for each other error.
+        private static func errorCode(of error: any Error) -> String {
+            switch error {
+            case let requestError as RequestError:
+                String(requestError.code.wireValue)
+            case is ConnectionError:
+                ACPClientTelemetry.ErrorCodeValue.connection
+            case is CancellationError:
+                ACPClientTelemetry.ErrorCodeValue.cancelled
+            default:
+                ACPClientTelemetry.ErrorCodeValue.other
+            }
         }
     }
 }
