@@ -53,6 +53,61 @@ comments:
     - evidence: `swift test --parallel` — 241 tests, 23 suites, 0 failed, 0 skipped. `swift build --build-tests` — build complete, 0 code warnings (86 SwiftPM manifest-cache "disk I/O error" lines are machine noise, not code). `swift test --package-path IntegrationTests` — 97 tests, 14 suites, 0 failed, 0 skipped (4 "skip" text hits are test names about the doctor's own row-skip logic, not skipped tests).
     - next: ready for review.
   timestamp: 2026-09-28T21:47:14.965418+00:00
+- actor: claude-code
+  id: 01m3mzv2kmegn2g04sp5qhgwrx
+  text: |-
+    ### commit — changed
+    - evidence: f2c8547 feat(telemetry): bootstrap swift-otel in the acp-client executable
+    - next: none
+  timestamp: 2026-09-28T21:48:22.516183+00:00
+- actor: claude-code
+  id: 01m3n0704q2gn41wn87gebvvv2
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (f2c8547). counts: 1 finding, 1 confirmed, 0 refuted. IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TelemetryBootstrapTests.swift:95 (completeness/case-sensitivity-coverage).
+    - note: the engine did not give a finding on the logging bootstrap design (OTel.makeLoggingBackend with one LoggingSystem.bootstrap, and OTel.bootstrap for traces and metrics only).
+    - next: add a test that sets OTEL_SDK_DISABLED to a value that is not lowercase (for example "TRUE"). Then commit and review again. The task stays in review.
+  timestamp: 2026-09-28T21:54:53.207341+00:00
+- actor: claude-code
+  id: 01m3n07b347c8hqzabrpzt49s1
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 9 files
+    - test: green — swift test --parallel 241 passed; IntegrationTests 97 passed
+    - commit: f2c8547
+    - review: findings — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TelemetryBootstrapTests.swift:95 (completeness/case-sensitivity-coverage: no test for OTEL_SDK_DISABLED="TRUE")
+  timestamp: 2026-09-28T21:55:04.420054+00:00
+- actor: claude-code
+  id: 01m3n0hsmc0ysf6908mq478rsv
+  text: |-
+    Finding completeness/case-sensitivity-coverage is done (not committed).
+
+    - `TelemetryBootstrapTests.withTheSDKDisabledTheRunSucceeds` is now a parameterized test over `sdkDisabledSpellings = ["true", "TRUE", "TrUe"]`. It replaces the old `sdkDisabledValue` constant. It also has a new assertion: stderr is empty.
+    - Why the stderr assertion is necessary: stdout and the exit code are the same on both paths, so they cannot show the path that ran. swift-otel reads `OTEL_SDK_DISABLED` without regard to case. If the binary does not lowercase the value, it takes the exporter path, and `OTel.makeLoggingBackend` throws `invalidConfiguration("makeLoggingBackend called but config has logs disabled")`. The binary then writes `acp-client: a telemetry backend is off: ...` to stderr. So the empty stderr is the check.
+    - RED seen with a temporary mutation: `.lowercased()` removed from `TelemetryBootstrap.exportsTelemetry(in:)`. The "TRUE" and "TrUe" cases failed on the stderr assertion (2 issues), and "true" passed. The mutation was removed, and git shows no diff under `Sources/`.
+    - The rest of the file has no other comparison that ignores case.
+  timestamp: 2026-09-28T22:00:46.988767+00:00
+- actor: claude-code
+  id: 01m3n0hw65nqwthk4c8zv9f0aw
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TelemetryBootstrapTests.swift. `swift test --package-path IntegrationTests --filter 'FoundationModelsACPClientIntegrationTests\.TelemetryBootstrapTests'`: 3 tests (5 test cases: the SDK-disabled test has 3 arguments) in 1 suite passed. `swift test --parallel`: 241 tests in 23 suites passed. 0 Swift code warnings (only the SwiftPM manifest-cache "disk I/O error" lines).
+    - next: review. The finding is checked. The task stays in doing.
+  timestamp: 2026-09-28T22:00:49.605577+00:00
+- actor: claude-code
+  id: 01m3n23grnzzxfy4a02dx0kynb
+  text: |-
+    ### test — green
+    - evidence: `swift build` (root package) — build complete, 0 warnings, 0 errors. `swift test --parallel` (root package) — 241 tests, 23 suites, 0 failures, 0 skips, 0 warnings. `swift build --package-path IntegrationTests --build-tests` — build complete, 0 warnings, 0 errors. `swift test --package-path IntegrationTests` (whole suite) — 97 tests, 14 suites, 0 failures, 0 skips, 0 warnings. The suite "acp-client telemetry bootstrap" (TelemetryBootstrapTests.swift) ran and passed: all 3 tests, including the 3 sub-cases of the SDK-disabled test.
+    - machine noise (not counted): each `swift build`/`swift test`/`swift package resolve` command printed SwiftPM manifest-cache lines of the form `warning: '<package>': failed loading/storing cached manifest for '<package>': disk I/O error`. These are disk I/O cache warnings from SwiftPM's own tooling, not compiler warnings from this package's code.
+    - no code fix was needed this step. No test failed and no warning came from source code.
+    - next: send this task to the review step.
+
+    step: test
+    outcome: green
+    evidence: swift build (root) clean, 0 warnings; swift test --parallel (root) 241 tests/23 suites, 0 failed, 0 skipped, 0 warnings; swift build --package-path IntegrationTests --build-tests clean, 0 warnings; swift test --package-path IntegrationTests 97 tests/14 suites, 0 failed, 0 skipped, 0 warnings (telemetry bootstrap suite included and passing)
+    task: ^p8tmn6v
+  timestamp: 2026-09-28T22:27:56.309617+00:00
 depends_on:
 - 01M3MNEBV9WHBVZ0JJK8BQYJ2H
 position_column: doing
@@ -87,3 +142,15 @@ The flush of the exporters before the process exits is task B2, not this task.
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
 - Do not run `swift format`. #otel
+
+## Review Findings (2026-09-28 16:48)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 8 file(s) reviewed, 7 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+> 1 file(s) not reviewed — no validator matched:
+> - `cli-plan.md` — no validator matches this file
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/TelemetryBootstrapTests.swift:95` `completeness/case-sensitivity-coverage` — The diff adds case-insensitive matching for OTEL_SDK_DISABLED (via `.lowercased()` at TelemetryBootstrap.swift:81), but the test only exercises the lowercase canonical form "true" and does not verify that uppercase variants like "TRUE" are handled correctly. Add one test case (or assertion in the existing test) that sets OTEL_SDK_DISABLED to "TRUE" or "TrUe" to verify the case-insensitive handling works for non-canonical spellings.

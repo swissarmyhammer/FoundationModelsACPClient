@@ -47,8 +47,11 @@ struct TelemetryBootstrapTests {
     /// The variable that turns the whole OpenTelemetry SDK off.
     private static let sdkDisabledVariable = "OTEL_SDK_DISABLED"
 
-    /// The value that sets ``sdkDisabledVariable``.
-    private static let sdkDisabledValue = "true"
+    /// The spellings of the value that sets ``sdkDisabledVariable``. The
+    /// OpenTelemetry specification compares the value without regard to case,
+    /// so each spelling must turn the SDK off. The first is the canonical
+    /// spelling. The other two are not.
+    private static let sdkDisabledSpellings = ["true", "TRUE", "TrUe"]
 
     /// The loopback address that the closed port stands on.
     private static let loopbackAddress = "127.0.0.1"
@@ -87,18 +90,30 @@ struct TelemetryBootstrapTests {
         )
     }
 
-    @Test("with the endpoint set and the SDK disabled, the run exits 0 and stdout holds the answer alone")
-    func withTheSDKDisabledTheRunSucceeds() async throws {
+    /// A spelling that is not lowercase must also turn the SDK off. If it did
+    /// not, the binary would ask swift-otel for the exporters. swift-otel
+    /// reads the spelling as "disabled" and refuses to make a backend, and the
+    /// binary writes that failure to stderr. So the empty stderr is the check
+    /// that the SDK-disabled path was taken.
+    @Test(
+        "with the endpoint set and the SDK disabled, the run exits 0, stdout holds the answer alone and stderr holds nothing",
+        arguments: sdkDisabledSpellings
+    )
+    func withTheSDKDisabledTheRunSucceeds(sdkDisabledValue: String) async throws {
         let endpoint = try Self.closedPortEndpoint()
 
         let result = try await Self.runTurn(
-            adding: [Self.endpointVariable: endpoint, Self.sdkDisabledVariable: Self.sdkDisabledValue]
+            adding: [Self.endpointVariable: endpoint, Self.sdkDisabledVariable: sdkDisabledValue]
         )
 
         #expect(result.exitCode == SectionNineExitCode.success, "stderr was \"\(text(result.standardError))\"")
         #expect(
             result.standardOutput == Data(telemetryAnswer.utf8),
             "stdout was \(result.standardOutput.count) bytes: \"\(text(result.standardOutput))\""
+        )
+        #expect(
+            result.standardError.isEmpty,
+            "stderr was \(result.standardError.count) bytes: \"\(text(result.standardError))\""
         )
     }
 
