@@ -41,15 +41,17 @@ that CLI.
 |---|---|
 | Name | `acp-client` |
 | Kind | An executable target, and an executable product |
-| Links | `AcpClientCore` |
+| Links | `AcpClientCore`, and the `OTel` product of `swift-otel` |
 | Path | `Sources/acp-client/` |
 
 It is a **product**, and not only a target. Another package must be able
 to depend on it, so that package's tests can spawn it beside their own
 binaries.
 
-The executable holds the `@main` type and nothing else. Everything it
-does lives in a library beside it:
+The executable holds the `@main` type and the telemetry bootstrap
+(`TelemetryBootstrap.swift`), and nothing else. The bootstrap is the
+first statement of `main()`. Everything else it does lives in a library
+beside it:
 
 | Item | Value |
 |---|---|
@@ -424,16 +426,17 @@ pid is gone.
 `plan.md` gives the import rule: "Never Router, ACPAgent, MCP, or the
 FoundationModels framework." The two targets of §3 keep it.
 
-The `acp-client` executable target links ONE thing: the `AcpClientCore`
-library. It holds the `@main` type and nothing else, so it needs nothing
-else.
+The `acp-client` executable target links TWO things: the `AcpClientCore`
+library, and the `OTel` product of `swift-otel`. It holds the `@main`
+type and the telemetry bootstrap, so it needs nothing else.
 
 `AcpClientCore` links FIVE things and nothing more: this package, the
 wire, the family leaf `FoundationModelsExtras`, the parser and the
 terminal package. The family leaf is one of the five because §10 builds
 `doctor` on the Extras `Doctorable` module. §3 states the same count.
 `ManifestTests` reads `Package.swift`, counts those five against the
-library, and asserts that the executable takes the library alone.
+library, and asserts that the executable takes the library and `OTel`
+alone.
 
 The `FoundationModelsACPClient` library target also links the `Tracing`,
 `Logging` and `Metrics` APIs (the OpenTelemetry design of 2026-09-28).
@@ -442,6 +445,21 @@ They are APIs only. No target but the `acp-client` executable may link the
 swift-otel backend, and no source file of the two libraries may bootstrap
 a backend. `ManifestTests` and `ACPClientTelemetryVocabularyTests` check
 both rules.
+
+The executable always bootstraps logging, because the default handler of
+swift-log writes to stdout, and §8 keeps stdout for the answer text. It
+never uses a handler that writes to stdout:
+
+- When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, and `OTEL_SDK_DISABLED` is not
+  `true`, logs, traces and metrics go to the OTLP exporters of swift-otel.
+  The standard `OTEL_*` variables configure them. The swift-otel
+  diagnostic messages below `warning` do not reach stderr, so a default
+  run still writes nothing to stderr until it fails.
+- In all other cases, logging goes to `SwiftLogNoOpLogHandler`, and
+  tracing and metrics stay no-op. Stderr belongs to the terminal layer of
+  §5.
+- When swift-otel cannot make one backend, the run writes one line to
+  stderr and continues without it. Telemetry does not change an exit code.
 
 ## 13. Client capabilities
 

@@ -62,8 +62,33 @@ comments:
     - evidence: `swift test --parallel` — 239 tests in 22 suites passed, 0 failed, 0 skipped, 0 compiler warnings. `swift build --package-path IntegrationTests --build-tests` — build complete, exit 0. Only SwiftPM "disk I/O error" manifest-cache warnings appeared (machine noise, not code); no compiler warnings from package code.
     - next: hand off to review.
   timestamp: 2026-09-28T21:05:47.652129+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m3mxe73205f1sj1n2fegycef
+  text: |-
+    ### commit — changed
+    - evidence: 4494c5e feat(telemetry): add the ACPClientTelemetry vocabulary and the telemetry APIs
+    - staged: Package.swift, cli-plan.md, Tests/FoundationModelsACPClientTests/ManifestTests.swift, Sources/FoundationModelsACPClient/Telemetry/ACPClientTelemetry.swift, Tests/FoundationModelsACPClientTests/Telemetry/ACPClientTelemetryVocabularyTests.swift, and the .kanban task/tag files
+    - next: none, the commit is local only
+  timestamp: 2026-09-28T21:06:23.970238+00:00
+- actor: claude-code
+  id: 01m3mxxhwbdg7ktky6mvwbafth
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 4494c5e). 0 findings (confirmed 0, refuted 0; 7 validator runs, 0 failed). The engine reviewed 4 files. It did not review 15 files: 14 files in `.kanban/` (the `.reviewignore` file excludes them) and `cli-plan.md` (no validator matches it). The task had no earlier review findings.
+    - next: The task is in `done`. The dependent tasks OTel A (^yhzdf4k) and OTel B (^p8tmn6v) can start.
+  timestamp: 2026-09-28T21:14:46.539683+00:00
+- actor: claude-code
+  id: 01m3mxy2gc6q3amn8xeqb4vbkh
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files (Package.swift, ACPClientTelemetry.swift, ACPClientTelemetryVocabularyTests.swift, ManifestTests.swift, cli-plan.md)
+    - test: green — swift test --parallel, 239 tests in 22 suites passed; IntegrationTests build passed
+    - commit: 4494c5e
+    - review: clean — 0 findings; task moved to done
+    - open question for a person: plan.md says the library "Depends on the wire only (decided)"; the library now also links Tracing, Logging and Metrics. plan.md was not changed.
+  timestamp: 2026-09-28T21:15:03.564935+00:00
+position_column: done
+position_ordinal: b380
 title: 'OTel D1: add the ACPClientTelemetry vocabulary file and the telemetry API dependencies'
 ---
 ## What

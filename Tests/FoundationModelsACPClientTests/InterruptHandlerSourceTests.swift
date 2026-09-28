@@ -35,48 +35,6 @@ private let oneStatement = 1
 /// How many calls the one statement may hold: the store into the flag.
 private let oneCall = 1
 
-/// The text that opens a line comment.
-private let lineCommentOpening = "//"
-
-/// Returns the text between the braces of the event handler closure, or `nil`
-/// when the source holds no such closure or the closure never closes.
-///
-/// The scan counts braces from the opening one, so a nested closure inside the
-/// body stays inside the body.
-///
-/// - Parameter source: The whole text of the file.
-/// - Returns: The closure body, without its own braces.
-private func eventHandlerBody(in source: String) -> String? {
-    guard let opening = source.range(of: eventHandlerOpening) else { return nil }
-    var depth = 1
-    var index = opening.upperBound
-    while index < source.endIndex {
-        let character = source[index]
-        if character == "{" {
-            depth += 1
-        } else if character == "}" {
-            depth -= 1
-            if depth == 0 {
-                return String(source[opening.upperBound..<index])
-            }
-        }
-        index = source.index(after: index)
-    }
-    return nil
-}
-
-/// Returns the lines of `body` that carry a statement: not blank, and not a
-/// line comment.
-///
-/// - Parameter body: The closure body to read.
-/// - Returns: Each statement line, trimmed.
-private func statementLines(of body: String) -> [String] {
-    body
-        .split(whereSeparator: \.isNewline)
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty && !$0.hasPrefix(lineCommentOpening) }
-}
-
 /// The shape of the event handler `InterruptHandler` gives its signal source.
 @Suite("acp-client interrupt handler source")
 struct InterruptHandlerSourceTests {
@@ -88,10 +46,10 @@ struct InterruptHandlerSourceTests {
         let source = try RepositoryFile.read(relativePath: interruptHandlerPath)
 
         let body = try #require(
-            eventHandlerBody(in: source),
+            SwiftSourceText.body(openedBy: eventHandlerOpening, in: source),
             "no `\(eventHandlerOpening)` closure stands in \(interruptHandlerPath)"
         )
-        let statements = statementLines(of: body)
+        let statements = SwiftSourceText.statementLines(of: body)
 
         #expect(statements.count == oneStatement, "the handler body holds \(statements)")
         let statement = try #require(statements.first, "the handler body is empty")

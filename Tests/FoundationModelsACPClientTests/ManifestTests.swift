@@ -38,16 +38,17 @@ struct ManifestTests {
     /// client: the library target of this package, and four products.
     ///
     /// They stand on `AcpClientCore` and not on the `acp-client` executable,
-    /// because that executable holds the `@main` type alone and reaches every
-    /// one of them through the library.
+    /// because that executable holds the `@main` type and the telemetry
+    /// bootstrap, and reaches every one of them through the library.
     private static let permittedDependencyCount = 5
 
     /// The library target of the manifest that carries the dependencies of the
     /// command-line client.
     private static let clientTargetName = "AcpClientCore"
 
-    /// The executable target of the manifest, which holds the `@main` type
-    /// alone and takes ``clientTargetName`` as its one dependency
+    /// The executable target of the manifest, which holds the `@main` type and
+    /// the telemetry bootstrap. It takes ``clientTargetName`` as its one target
+    /// dependency, and the swift-otel backend as its one product dependency
     /// (`cli-plan.md` §3).
     private static let executableTargetName = "acp-client"
 
@@ -75,11 +76,18 @@ struct ManifestTests {
         "Metrics",
     ]
 
+    /// The package name of the swift-otel backend, as the manifest declares it.
+    private static let telemetryBackendPackageName = "swift-otel"
+
+    /// The product name of the swift-otel backend. The ``executableTargetName``
+    /// target links it, because that target bootstraps the backend.
+    private static let telemetryBackendProductName = "OTel"
+
     /// The package name and the product name of the swift-otel backend. Only
     /// the ``executableTargetName`` target can name one of them.
     private static let telemetryBackendNames: Set<String> = [
-        "swift-otel",
-        "OTel",
+        telemetryBackendPackageName,
+        telemetryBackendProductName,
     ]
 
     @Test("the manifest declares acp-client as an executable product")
@@ -124,8 +132,8 @@ struct ManifestTests {
     @Test("the client target declares exactly the five dependencies section 12 permits")
     func theTargetDeclaresFiveDependencies() throws {
         // The library target alone. The cap counts where the dependencies
-        // stand, and `theExecutableTargetTakesTheLibraryAlone` is what stops a
-        // sixth one hiding in the executable instead.
+        // stand, and `theExecutableTargetTakesTheLibraryAndTheBackendAlone`
+        // is what stops a sixth one hiding in the executable instead.
         let client = try Self.clientTarget()
         #expect(
             client.targetNames == [Self.libraryTargetName],
@@ -146,26 +154,36 @@ struct ManifestTests {
         )
     }
 
-    @Test("the acp-client executable target takes the library and nothing else")
-    func theExecutableTargetTakesTheLibraryAlone() throws {
+    @Test("the acp-client executable target takes the library and the OTel backend, and nothing else")
+    func theExecutableTargetTakesTheLibraryAndTheBackendAlone() throws {
         let executable = try Self.executableTarget()
         #expect(
             executable.targetNames == [Self.clientTargetName],
             """
             The \(Self.executableTargetName) executable target holds the @main \
-            type alone, so cli-plan.md section 3 gives it \
-            \(Self.clientTargetName) as its one dependency and no other target. \
+            type and the telemetry bootstrap, so cli-plan.md section 3 gives it \
+            \(Self.clientTargetName) as its one target dependency. \
             It takes \(executable.targetNames).
             """
         )
         #expect(
-            executable.productNames.isEmpty,
+            executable.productNames == [Self.telemetryBackendProductName],
             """
-            The \(Self.executableTargetName) executable target must name no \
-            package product. Every product the binary needs reaches it through \
+            The \(Self.executableTargetName) executable target must name the \
+            \(Self.telemetryBackendProductName) product and no other product. \
+            Every other product the binary needs reaches it through \
             \(Self.clientTargetName), which is where the five that cli-plan.md \
             section 12 permits are counted. It names \
             \(executable.productNames.sorted()).
+            """
+        )
+        #expect(
+            executable.packageNames == [Self.telemetryBackendPackageName],
+            """
+            The \(Self.telemetryBackendProductName) product of the \
+            \(Self.executableTargetName) target must come from the \
+            \(Self.telemetryBackendPackageName) package. It names the packages \
+            \(executable.packageNames.sorted()).
             """
         )
     }
@@ -253,6 +271,18 @@ struct ManifestTests {
         #expect(
             identities.contains("swift-argument-parser"),
             "Package.resolved must pin swift-argument-parser. It pins \(identities.sorted())."
+        )
+    }
+
+    @Test("Package.resolved pins the swift-otel backend")
+    func theResolvedFilePinsTheTelemetryBackend() throws {
+        let identities = try Self.resolvedPackageIdentities()
+        #expect(
+            identities.contains(Self.telemetryBackendPackageName),
+            """
+            Package.resolved must pin \(Self.telemetryBackendPackageName). \
+            It pins \(identities.sorted()).
+            """
         )
     }
 

@@ -30,6 +30,14 @@ comments:
     - `SpanIdentity` is public. `ExtrasTelemetry` has the field names `traceparent` and `tracestate`; use them, do not write the strings again.
     - Task A now waits only for FoundationModelsACP ^ywrxe73 (the `TraceContextMeta` codec).
   timestamp: 2026-09-28T20:47:50.600301+00:00
+- actor: claude-code
+  id: 01m3mxyphhpzy8abf5ypcjs1vy
+  text: |-
+    ### Blocker cleared: FoundationModelsACP ^ywrxe73 is done and on origin/main (acf7700), 2026-09-28
+    - `Sources/FoundationModelsACP/Core/TraceContextMeta.swift` and `Tests/FoundationModelsACPTests/TraceContextMetaTests.swift` are on origin/main (checked with `git fetch` and `git ls-tree`).
+    - Before you start: run `swift package update FoundationModelsACP FoundationModelsExtras`. Read the real `TraceContextMeta` API in the checkout; do not guess names.
+    - Task A has no open blocker on another board now.
+  timestamp: 2026-09-28T21:15:24.081869+00:00
 depends_on:
 - 01M3MNEBV9WHBVZ0JJK8BQYJ2H
 position_column: todo

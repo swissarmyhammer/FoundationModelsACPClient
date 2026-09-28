@@ -77,14 +77,19 @@ let package = Package(
         // The tracing API, the logging API and the metrics API of the library
         // target (the OpenTelemetry design of 2026-09-28). API only: no
         // library target links a backend or bootstraps one. Only the
-        // `acp-client` executable bootstraps a backend, and no target here
-        // links swift-otel yet. Until a backend is bootstrapped, each span,
-        // each logger and each metric of the library does nothing. The
-        // floors are the floors of `FoundationModelsExtras`, which already
-        // puts these three packages into the graph.
+        // `acp-client` executable bootstraps a backend. Until a backend is
+        // bootstrapped, each span, each logger and each metric of the library
+        // does nothing. The floors are the floors of `FoundationModelsExtras`,
+        // which already puts these three packages into the graph.
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.15.1"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.11.0"),
+        // The OpenTelemetry backend: the OTLP exporters for logs, traces and
+        // metrics. Only the `acp-client` executable target links it, and
+        // `ManifestTests` checks that no other target names it. The standard
+        // `OTEL_*` environment variables configure it at run time. The floor
+        // is the current release when this dependency was added.
+        .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.5.1"),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -129,21 +134,24 @@ let package = Package(
             ]
         ),
         // The `acp-client` executable (cli-plan.md §3). It holds the `@main`
-        // type and nothing else, and `AcpClientCore` is its only dependency:
-        // every other dependency of the binary reaches it through that
-        // library.
+        // type and the telemetry bootstrap. It takes `AcpClientCore` and the
+        // `OTel` backend, and nothing else: every other dependency of the
+        // binary reaches it through that library. The backend stands here and
+        // not in the library, because only an executable may bootstrap one
+        // (cli-plan.md §12).
         .executableTarget(
             name: "acp-client",
             dependencies: [
-                "AcpClientCore"
+                "AcpClientCore",
+                .product(name: "OTel", package: "swift-otel"),
             ]
         ),
         // Tests, on Swift Testing. The suite holds the linkage smoke test, the
         // forbidden-import scanner, and the manifest and version tests of the
         // command-line client. It takes the `AcpClientCore` target so those
         // tests can `@testable import AcpClientCore`. It does not take
-        // `acp-client`: that target holds the `@main` type alone, and no test
-        // names it.
+        // `acp-client`: that target holds the `@main` type and the telemetry
+        // bootstrap, and no unit test can import an executable target.
         //
         // This manifest declares no integration test target, and that is the
         // whole unit/integration split. The agent-process suite is its own
