@@ -28,7 +28,12 @@ import FoundationModelsACP
 /// A stub built with an elicitation asks the client for that elicitation
 /// before it sends the script. The prompt turn then ends only after the
 /// client answered, which is how a test proves that a headless client
-/// refuses at once rather than waiting for a person.
+/// refuses at once rather than waiting for a person. A stub built with a
+/// permission request asks for that permission first, in the same way.
+///
+/// A stub built with a prompt error refuses each prompt with that error, and
+/// sends no update. `ContentSafetyTests` uses it to prove that the message
+/// text of a refusal does not go into telemetry.
 ///
 /// The stub records the working directory of each `session/new` it answered,
 /// because `--cwd` is the session's working directory and the wire request is
@@ -87,6 +92,13 @@ final class ScriptedStubAgent: Agent {
     /// for none.
     private let elicitation: CreateElicitationRequest?
 
+    /// The permission request to send when a prompt arrives, or `nil` to
+    /// send none.
+    private let permissionRequest: RequestPermissionRequest?
+
+    /// The error to refuse each prompt with, or `nil` to answer each prompt.
+    private let promptError: RequestError?
+
     /// The error this stub answers `session/close` with.
     private let closeSessionError: RequestError
 
@@ -115,6 +127,10 @@ final class ScriptedStubAgent: Agent {
     ///     cancellation.
     ///   - elicitation: The elicitation to ask for at the start of the
     ///     prompt turn, or `nil` to ask for none.
+    ///   - permissionRequest: The permission to ask for at the start of the
+    ///     prompt turn, before the elicitation, or `nil` to ask for none.
+    ///   - promptError: The error to refuse each prompt with, or `nil` to
+    ///     answer each prompt.
     ///   - closeSessionError: The error to answer `session/close` with.
     init(
         connection: AgentSideConnection,
@@ -123,6 +139,8 @@ final class ScriptedStubAgent: Agent {
         deferredScript: [GatedUpdates] = [],
         cancelScript: [SessionUpdate] = [],
         elicitation: CreateElicitationRequest? = nil,
+        permissionRequest: RequestPermissionRequest? = nil,
+        promptError: RequestError? = nil,
         closeSessionError: RequestError = .methodNotFound("session/close")
     ) {
         self.connection = connection
@@ -131,6 +149,8 @@ final class ScriptedStubAgent: Agent {
         self.deferredScript = deferredScript
         self.cancelScript = cancelScript
         self.elicitation = elicitation
+        self.permissionRequest = permissionRequest
+        self.promptError = promptError
         self.closeSessionError = closeSessionError
     }
 
@@ -163,6 +183,12 @@ final class ScriptedStubAgent: Agent {
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         record(params.meta, of: ClientRequestSpan.Method.prompt)
+        if let promptError {
+            throw promptError
+        }
+        if let permissionRequest {
+            _ = try await connection.requestPermission(permissionRequest)
+        }
         if let elicitation {
             _ = try await connection.createElicitation(elicitation)
         }

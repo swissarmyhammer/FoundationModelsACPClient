@@ -4,10 +4,10 @@ import FoundationModelsACP
 @testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
-// The session harness of the telemetry tests. `ClientRequestSpanTests` and
-// `ClientRequestMetricsTests` drive the real `AgentSession` and `TurnRunner`
-// with it, over `InMemoryTransport.pair()`, with a `ScriptedStubAgent` on the
-// far end.
+// The session harness of the telemetry tests. `ClientRequestSpanTests`,
+// `ClientRequestMetricsTests` and `ContentSafetyTests` drive the real
+// `AgentSession` and `TurnRunner` with it, over `InMemoryTransport.pair()`,
+// with a `ScriptedStubAgent` on the far end.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
 // both, so the terminal layer of the binary is named
@@ -48,13 +48,24 @@ struct TracedSessionHarness {
     /// Builds the seam and the turn over a new pair and a new stub.
     ///
     /// - Parameters:
+    ///   - prompt: The text of the prompt of the turn.
+    ///   - cwd: The `--cwd` value of the session, or `nil` for the working
+    ///     directory of the test process.
     ///   - script: The updates the stub sends before it answers the prompt.
     ///   - cancelScript: The updates the stub sends when `session/cancel`
     ///     arrives.
+    ///   - permissionRequest: The permission the stub asks for when the
+    ///     prompt arrives, or `nil` to ask for none.
+    ///   - promptError: The error the stub refuses the prompt with, or `nil`
+    ///     to answer the prompt.
     ///   - closeSessionError: The error the stub answers `session/close` with.
     init(
+        prompt: String = tracedPromptText,
+        cwd: String? = nil,
         script: [SessionUpdate] = [idleState(stopReason: .endTurn)],
         cancelScript: [SessionUpdate] = [],
+        permissionRequest: RequestPermissionRequest? = nil,
+        promptError: RequestError? = nil,
         closeSessionError: RequestError = .methodNotFound(ClientRequestSpan.Method.closeSession)
     ) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -66,6 +77,8 @@ struct TracedSessionHarness {
                 session: testSession,
                 script: script,
                 cancelScript: cancelScript,
+                permissionRequest: permissionRequest,
+                promptError: promptError,
                 closeSessionError: closeSessionError
             )
             builtAgents.append(stub)
@@ -78,10 +91,10 @@ struct TracedSessionHarness {
         )
         let (interrupts, interruptFeed) = AsyncStream<TurnInterrupt>.makeStream()
         self.interruptFeed = interruptFeed
-        session = await AgentSession(over: clientEnd, terminal: terminal, cwd: nil)
+        session = await AgentSession(over: clientEnd, terminal: terminal, cwd: cwd)
         runner = TurnRunner(
             session: session,
-            prompt: tracedPromptText,
+            prompt: prompt,
             terminal: terminal,
             answerSink: { _ in },
             interrupts: interrupts

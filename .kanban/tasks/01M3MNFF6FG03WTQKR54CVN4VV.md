@@ -47,10 +47,33 @@ comments:
     - evidence: `swift test --parallel` — 253 tests, 25 suites, 0 failures, 0 skipped, exit code 0. `swift test --package-path IntegrationTests` — 97 tests, 14 suites, 0 failures, 0 skipped, exit code 0. No compiler warnings from this package's code in either run. SwiftPM printed "disk I/O error" manifest-cache warnings for dependency checkouts on both runs; these are machine noise, not code warnings, and did not count against the result.
     - next: send the task to review.
   timestamp: 2026-09-28T23:37:18.476074+00:00
+- actor: claude-code
+  id: 01m3n63f8hmn38as6knqt8936b
+  text: |-
+    ### commit — changed
+    - evidence: f190298 feat(telemetry): count ACP requests, record request time, and count errors by method
+    - next: none
+  timestamp: 2026-09-28T23:37:49.073094+00:00
+- actor: claude-code
+  id: 01m3n6a2spxaaf0ce8ex70bvja
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (f190298). 0 findings, 0 confirmed, 0 refuted. 7 validator runs were attempted and 0 failed. The engine examined 6 files. It did not examine 4 .kanban files, because .reviewignore excludes them. The task has no prior findings.
+    - next: The task moved to done. The dependent task 01M3MNH7DQRD79V5PR1X2MXBW9 (OTel D2) can start.
+  timestamp: 2026-09-28T23:41:25.686237+00:00
+- actor: claude-code
+  id: 01m3n6afrhxhgtqpe8z0t6j1qw
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 6 files (ClientRequestSpan.swift, ACPClientTelemetry.swift, Package.swift, ClientRequestMetricsTests.swift new, TracedSessionHarness.swift new, ClientRequestSpanTests.swift)
+    - test: green — swift test --parallel 253 passed; IntegrationTests 97 passed
+    - commit: f190298
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-09-28T23:41:38.961948+00:00
 depends_on:
 - 01M3MNEZJAMMC2X6TE1YHZDF4K
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b680
 title: 'OTel C: record request count, request duration and request errors by ACP method'
 ---
 ## What
