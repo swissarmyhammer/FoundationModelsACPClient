@@ -108,10 +108,33 @@ comments:
     evidence: swift build (root) clean, 0 warnings; swift test --parallel (root) 241 tests/23 suites, 0 failed, 0 skipped, 0 warnings; swift build --package-path IntegrationTests --build-tests clean, 0 warnings; swift test --package-path IntegrationTests 97 tests/14 suites, 0 failed, 0 skipped, 0 warnings (telemetry bootstrap suite included and passing)
     task: ^p8tmn6v
   timestamp: 2026-09-28T22:27:56.309617+00:00
+- actor: claude-code
+  id: 01m3n24ca0advhf6vz2pfxfqdg
+  text: |-
+    ### commit — changed
+    - evidence: a80cb18 test(telemetry): check more spellings of OTEL_SDK_DISABLED and check empty stderr
+    - next: none
+  timestamp: 2026-09-28T22:28:24.512585+00:00
+- actor: claude-code
+  id: 01m3n29cafsb9k7ahhef5dwrea
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit a80cb18). 0 findings (findings 0, confirmed 0, refuted 0; 7 validator runs, 0 failed). The engine examined 1 file. It did not examine 2 `.kanban/` files because of `.reviewignore`. The prior finding (TelemetryBootstrapTests.swift, `completeness/case-sensitivity-coverage`) is checked.
+    - next: The task moved to `done`. Task B2 (01M3MNGT2T26ESSWQCW0DGFV7K) can start now.
+  timestamp: 2026-09-28T22:31:08.367692+00:00
+- actor: claude-code
+  id: 01m3n29t1cd300c5tyhr659ghm
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (TelemetryBootstrapTests.swift: "true", "TRUE", "TrUe" and an empty-stderr check)
+    - test: green — swift test --parallel 241 passed; IntegrationTests 97 passed
+    - commit: a80cb18
+    - review: clean — 0 findings; prior finding checked; task moved to done
+  timestamp: 2026-09-28T22:31:22.412933+00:00
 depends_on:
 - 01M3MNEBV9WHBVZ0JJK8BQYJ2H
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b480
 title: 'OTel B: bootstrap swift-otel in the acp-client executable, and keep stdout for the answer only'
 ---
 ## What

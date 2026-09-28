@@ -35,6 +35,11 @@ import FoundationModelsACP
 /// the only place that value is observable. `AgentSessionTests` reads
 /// ``lastWorkingDirectory`` to assert the path the binary resolved.
 ///
+/// The stub also records the `_meta` of each request and notification that it
+/// gets, because the `_meta` is where the W3C trace context of the client
+/// crosses the process boundary. `ClientRequestSpanTests` reads
+/// ``receivedMeta`` to find the `traceparent` that the agent got.
+///
 /// The `script` goes out BEFORE the prompt answer, which is the order a test
 /// wants when it asserts on landed state after the prompt call returned. That
 /// order cannot tell a client that ends its turn on the prompt answer from
@@ -60,6 +65,19 @@ final class ScriptedStubAgent: Agent {
     /// `nil` when it answered none.
     var lastWorkingDirectory: AbsolutePath? {
         workingDirectories.elements.last
+    }
+
+    /// The `_meta` of each request and notification this stub got, in
+    /// arrival order.
+    ///
+    /// The connection serves each message on a task of its own, so the record
+    /// must tolerate a write from a thread other than the test body's.
+    private let receivedMetaRecord = ThreadSafeBuffer<ReceivedMeta>()
+
+    /// The `_meta` of each request and notification this stub got, in
+    /// arrival order.
+    var receivedMeta: [ReceivedMeta] {
+        receivedMetaRecord.elements
     }
 
     /// The updates to send, in order, when a prompt arrives.
@@ -117,13 +135,15 @@ final class ScriptedStubAgent: Agent {
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        InitializeResponse(
+        record(params.meta, of: ClientRequestSpan.Method.initialize)
+        return InitializeResponse(
             info: Implementation(name: "stub-agent", version: "1.0.0"),
             protocolVersion: params.protocolVersion
         )
     }
 
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
+        record(params.meta, of: ClientRequestSpan.Method.newSession)
         workingDirectories.append(params.cwd)
         return NewSessionResponse(sessionId: session)
     }
@@ -137,10 +157,12 @@ final class ScriptedStubAgent: Agent {
     }
 
     func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
+        record(params.meta, of: ClientRequestSpan.Method.closeSession)
         throw closeSessionError
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
+        record(params.meta, of: ClientRequestSpan.Method.prompt)
         if let elicitation {
             _ = try await connection.createElicitation(elicitation)
         }
@@ -152,12 +174,22 @@ final class ScriptedStubAgent: Agent {
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {
+        record(params.meta, of: ClientRequestSpan.Method.cancelSession)
         for update in cancelScript {
             // A notification has no answer that could carry a failure, and a
             // client that tore its connection down right after it cancelled is
             // a shape `cli-plan.md` §11 allows. Neither is a reason to trap.
             try? await send(update)
         }
+    }
+
+    /// Records the `_meta` of one request or notification that this stub got.
+    ///
+    /// - Parameters:
+    ///   - meta: The `_meta` of the message, or `nil` when it has none.
+    ///   - method: The ACP method of the message.
+    private func record(_ meta: JSONValue?, of method: String) {
+        receivedMetaRecord.append(ReceivedMeta(method: method, meta: meta))
     }
 
     /// Sends one update for this stub's session.
@@ -195,6 +227,16 @@ final class ScriptedStubAgent: Agent {
             }
         }
     }
+}
+
+/// The `_meta` of one request or notification that a ``ScriptedStubAgent``
+/// got.
+struct ReceivedMeta: Sendable {
+    /// The ACP method of the message, for example `session/prompt`.
+    let method: String
+
+    /// The `_meta` of the message, or `nil` when it has none.
+    let meta: JSONValue?
 }
 
 /// A one-way gate that a test opens to release a stub agent's next updates.

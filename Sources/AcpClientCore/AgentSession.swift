@@ -159,16 +159,22 @@ struct AgentSession {
     ///   agent went away, or `ProtocolVersionMismatchError` when the agent
     ///   answered with a version other than the one sent.
     func initialize() async throws -> InitializeResponse {
-        let response = try await connection.initialize(
-            InitializeRequest(
-                info: Implementation(
-                    name: AcpClient.commandName,
-                    version: AcpClientVersion.current
-                ),
-                protocolVersion: ACPClient.supportedProtocolVersion,
-                capabilities: ACPClient.advertisedCapabilities
+        let response = try await ClientRequestSpan.run(
+            method: ClientRequestSpan.Method.initialize,
+            sessionId: nil
+        ) { meta in
+            try await connection.initialize(
+                InitializeRequest(
+                    info: Implementation(
+                        name: AcpClient.commandName,
+                        version: AcpClientVersion.current
+                    ),
+                    protocolVersion: ACPClient.supportedProtocolVersion,
+                    capabilities: ACPClient.advertisedCapabilities,
+                    meta: meta
+                )
             )
-        )
+        }
         output.event(
             """
             initialize answered by \(response.info.name) \(response.info.version), \
@@ -197,7 +203,14 @@ struct AgentSession {
     ///   error, or `ConnectionError` when the agent went away.
     func openSession() async throws -> (SessionId, AsyncStream<SessionUpdate>) {
         let cwd = AbsolutePath(rawValue: try workingDirectoryToSend())
-        let response = try await connection.newSession(NewSessionRequest(cwd: cwd))
+        // The session id is not known until the agent answers, so the span
+        // of this request names no session.
+        let response = try await ClientRequestSpan.run(
+            method: ClientRequestSpan.Method.newSession,
+            sessionId: nil
+        ) { meta in
+            try await connection.newSession(NewSessionRequest(cwd: cwd, meta: meta))
+        }
         output.event(
             "session/new opened \(response.sessionId.rawValue) in \(cwd.rawValue)"
         )
@@ -241,7 +254,12 @@ struct AgentSession {
     /// - Parameter sessionId: The session to close.
     func closeSession(_ sessionId: SessionId) async {
         do {
-            _ = try await connection.closeSession(CloseSessionRequest(sessionId: sessionId))
+            _ = try await ClientRequestSpan.run(
+                method: ClientRequestSpan.Method.closeSession,
+                sessionId: sessionId
+            ) { meta in
+                try await connection.closeSession(CloseSessionRequest(sessionId: sessionId, meta: meta))
+            }
         } catch let error as RequestError where error.code == .methodNotFound {
             output.event("session/close was not answered: \(error)")
         } catch {
