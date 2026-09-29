@@ -8,12 +8,14 @@ import ServiceLifecycle
 /// Rule 1 of the OpenTelemetry design of 2026-09-28: only an executable links
 /// swift-otel and bootstraps a backend, and the standard `OTEL_*` environment
 /// variables configure it. Rule 6: an executable must always bootstrap
-/// logging, because the default handler of swift-log writes to standard
-/// output, and `cli-plan.md` §8 keeps standard output for the answer text
-/// alone.
+/// logging. The default handler of swift-log writes to standard error, and
+/// `cli-plan.md` §8 gives standard error to the terminal layer of
+/// `AcpClientCore`. Log lines from the default handler would mix with the
+/// output of that layer. Standard output holds the answer text alone.
 ///
 /// So this type keeps one invariant on every path: it bootstraps logging one
-/// time, and never with a handler that writes to standard output.
+/// time, and never with a handler that writes to standard output, or that
+/// writes to standard error outside the terminal layer.
 ///
 /// - When `OTEL_EXPORTER_OTLP_ENDPOINT` is set and the SDK is not disabled,
 ///   logs, traces and metrics go to the OTLP exporters of swift-otel.
@@ -26,7 +28,8 @@ import ServiceLifecycle
 /// `OTel.bootstrap` bootstraps logs first and can then fail on metrics or
 /// traces, and a second `LoggingSystem.bootstrap` after that would stop the
 /// process. And with `OTEL_SDK_DISABLED=true`, `OTel.bootstrap` bootstraps no
-/// system at all, which leaves the swift-log default on standard output.
+/// system at all, which leaves the swift-log default on standard error, where
+/// the terminal layer owns the output.
 ///
 /// swift-otel returns one export service for each backend it makes. This type
 /// keeps them, and gives them back as ``TelemetryServices``, which runs them

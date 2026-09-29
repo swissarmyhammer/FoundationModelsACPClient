@@ -446,9 +446,11 @@ swift-otel backend, and no source file of the two libraries may bootstrap
 a backend. `ManifestTests` and `ACPClientTelemetryVocabularyTests` check
 both rules.
 
-The executable always bootstraps logging, because the default handler of
-swift-log writes to stdout, and §8 keeps stdout for the answer text. It
-never uses a handler that writes to stdout:
+The executable always bootstraps logging. The default handler of swift-log
+writes to stderr, and §8 gives stderr to the terminal layer, so its lines
+would mix with the terminal output. Stdout holds the answer text alone. The
+executable never uses a handler that writes to stdout, or that writes to
+stderr outside the terminal layer:
 
 - When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, and `OTEL_SDK_DISABLED` is not
   `true`, logs, traces and metrics go to the OTLP exporters of swift-otel.

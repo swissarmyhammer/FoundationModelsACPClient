@@ -4,13 +4,16 @@ import Testing
 
 // These tests drive the real `acp-client` binary and check two things.
 //
-// First, the telemetry bootstrap keeps standard output for the answer text
-// alone (`cli-plan.md` §8, and rule 6 of the OpenTelemetry design of
-// 2026-09-28). The default handler of swift-log writes to standard output. So
-// an executable that does not bootstrap logging, or that bootstraps it with a
-// handler that writes to standard output, puts log lines into the answer. Only
-// a run of the built binary, with both descriptors captured from outside it,
-// can see that.
+// First, the telemetry bootstrap keeps log lines off both descriptors
+// (`cli-plan.md` §8, and rule 6 of the OpenTelemetry design of 2026-09-28).
+// Standard output holds the answer text alone. Standard error belongs to the
+// terminal layer, and the default handler of swift-log writes to standard
+// error. So an executable that does not bootstrap logging puts log lines into
+// the output of the terminal layer, and a handler that writes to standard
+// output puts log lines into the answer. The tests check both descriptors:
+// standard output holds the answer alone, and standard error holds no log line
+// that the terminal layer did not write. Only a run of the built binary, with
+// both descriptors captured from outside it, can see that.
 //
 // Second, the binary flushes the OTLP exporters before the process ends, and a
 // collector that is not there or that never answers cannot hold the process

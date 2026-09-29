@@ -6,9 +6,10 @@ import Testing
 ///
 /// Rule 6 of the OpenTelemetry design of 2026-09-28: an executable must always
 /// bootstrap logging. The default handler of swift-log writes to standard
-/// output, and `cli-plan.md` §8 keeps standard output for the answer text
-/// alone. A log record that a library writes before the bootstrap goes to that
-/// default handler, so the bootstrap must be the first statement of `main()`.
+/// error, and `cli-plan.md` §8 gives standard error to the terminal layer. A
+/// log record that a library writes before the bootstrap goes to that default
+/// handler, and its line mixes with the output of the terminal layer. So the
+/// bootstrap must be the first statement of `main()`.
 ///
 /// No unit test can import the executable target, and a run of the binary
 /// cannot see the order when no code logs before the turn. So this suite reads

@@ -42,10 +42,33 @@ comments:
     - Each run showed 88 SwiftPM manifest-cache "disk I/O error" warnings (e.g. "failed loading cached manifest for 'swift-system': disk I/O error"). These are noise from the shared dependency cache, not from this package's code, and do not count against the result.
     - next: send to review.
   timestamp: 2026-09-29T00:24:35.625611+00:00
+- actor: claude-code
+  id: 01m3n8tr4t8fe3jc8tw3faxvvx
+  text: |-
+    ### commit — changed
+    - evidence: 2d1954b feat(telemetry): flush OTel exporters on every acp-client exit path
+    - next: review
+  timestamp: 2026-09-29T00:25:28.986132+00:00
+- actor: claude-code
+  id: 01m3n9225kb1nsfgggnvt0mcf5
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (checkpoint 2d1954b). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. 8 files reviewed. 4 .kanban files not reviewed because of .reviewignore. The task has no prior findings sections.
+    - next: None. The task moved to done.
+  timestamp: 2026-09-29T00:29:28.627535+00:00
+- actor: claude-code
+  id: 01m3n9295f6sesmw41ptk55hn8
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 8 files (AcpClient.swift, AcpClientMain.swift, TelemetryBootstrap.swift, TelemetryServices.swift new, ExitCodeTests.swift, TelemetryBootstrapSourceTests.swift, TelemetryBootstrapTests.swift, OTLPTestReceiver.swift new)
+    - test: green — swift test --parallel 257 passed; IntegrationTests 103 passed, two runs
+    - commit: 2d1954b
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-09-29T00:29:35.791573+00:00
 depends_on:
 - 01M3MNFZ76BJSBEDSTMP8TMN6V
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b880
 title: 'OTel B2: flush the OTel exporters before acp-client exits, on every exit path'
 ---
 ## What
