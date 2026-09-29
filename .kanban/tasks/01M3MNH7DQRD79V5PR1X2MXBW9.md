@@ -53,11 +53,34 @@ comments:
     - evidence: `swift test --parallel` — 255 tests in 26 suites passed, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests` — 97 tests in 14 suites passed, 0 failures, 0 warnings, 0 skipped. No SwiftPM manifest-cache disk I/O warnings appeared in either run.
     - next: ready for review.
   timestamp: 2026-09-28T23:57:38.298940+00:00
+- actor: claude-code
+  id: 01m3n78p6742cjaj8jrxfegwh0
+  text: |-
+    ### commit — changed
+    - evidence: ddd7f85 test(telemetry): add the content-safety test for spans, logs, and metrics
+    - next: proceed to review
+  timestamp: 2026-09-28T23:58:08.583433+00:00
+- actor: claude-code
+  id: 01m3n7dex6gh4a4gwcx4dvjpry
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (ddd7f85). 0 findings (confirmed 0, refuted 0, attempted 7, failed 0). The engine reviewed 3 Swift test files. An ignore rule (.reviewignore) excluded 4 .kanban files. The task had no prior review findings.
+    - next: The task moved to done.
+  timestamp: 2026-09-29T00:00:44.966016+00:00
+- actor: claude-code
+  id: 01m3n7dntatw841vn6trrcn2x7
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (ContentSafetyTests.swift new, ScriptedStubAgent.swift, TracedSessionHarness.swift)
+    - test: green — swift test --parallel 255 passed; IntegrationTests 97 passed
+    - commit: ddd7f85
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-09-29T00:00:52.042841+00:00
 depends_on:
 - 01M3MNEZJAMMC2X6TE1YHZDF4K
 - 01M3MNFF6FG03WTQKR54CVN4VV
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b780
 title: 'OTel D2: add the content-safety test for spans, logs and metrics of a full acp-client turn'
 ---
 ## What

@@ -13,7 +13,8 @@ import Foundation
 /// executable product across a package boundary. The `IntegrationTests`
 /// package drives this code directly, so the code has to sit in a library
 /// product. ``AcpClientMain`` in `Sources/acp-client/` is the `@main` type
-/// that calls ``main()``, and it is all that target holds.
+/// that calls ``run(_:)``. That target holds it and the telemetry bootstrap
+/// alone.
 ///
 /// This is the one seam the executable target reaches across, so it is the one
 /// type of the command tree that is `public`. ``RunCommand``, ``ProbeCommand``
@@ -79,26 +80,58 @@ public struct AcpClient: AsyncParsableCommand {
     /// outcome.
     ///
     /// This stands in for ArgumentParser's own `main()` for one reason: that
-    /// one ends a usage error with `EX_USAGE`, and §9 ends it with 2. The text
-    /// is unchanged — `fullMessage(for:)` is the same message
-    /// `exit(withError:)` would have printed, and it still goes to stderr,
-    /// leaving stdout empty as §8 requires. Every other outcome, `--help` and
-    /// `--version` included, still goes through `exit(withError:)`.
+    /// one ends a usage error with `EX_USAGE`, and §9 ends it with 2.
+    /// ``run(_:)`` does the work and gives the code back. This function only
+    /// ends the process with that code.
     public static func main() async {
+        Darwin.exit(await run())
+    }
+
+    /// Runs the binary, and returns the code `cli-plan.md` §9 gives the
+    /// outcome. It does not end the process.
+    ///
+    /// The caller ends the process with the returned code. So the caller can
+    /// do more work first: the `acp-client` executable flushes the
+    /// OpenTelemetry exporters before it exits.
+    ///
+    /// The text that this function writes is the text that
+    /// `exit(withError:)` of ArgumentParser writes, at the same destination.
+    /// See ``report(_:)``.
+    ///
+    /// - Parameter arguments: The command-line arguments without the name of
+    ///   the binary, or `nil` to read the arguments of this process.
+    /// - Returns: The code to exit the process with.
+    public static func run(_ arguments: [String]? = nil) async -> Int32 {
         do {
-            var command = try parseAsRoot()
+            var command = try parseAsRoot(arguments)
             if var asyncCommand = command as? AsyncParsableCommand {
                 try await asyncCommand.run()
             } else {
                 try command.run()
             }
+            return AcpClientExitCode.success.rawValue
         } catch {
-            guard exitCode(for: error) == .validationFailure else { exit(withError: error) }
-            let message = fullMessage(for: error)
-            if !message.isEmpty {
-                FileHandle.standardError.write(Data("\(message)\n".utf8))
-            }
-            Darwin.exit(processExitCode(for: error))
+            report(error)
+            return processExitCode(for: error)
         }
+    }
+
+    /// Writes the message of the error that ended a run, as
+    /// `exit(withError:)` of ArgumentParser writes it.
+    ///
+    /// ArgumentParser gives the success code only to a clean exit: `--help`,
+    /// `--version` and a `CleanExit`. The message of a clean exit goes to
+    /// standard output, where a user can pipe the help text. Each other
+    /// message goes to standard error, so that standard output stays empty
+    /// (`cli-plan.md` §8). An error with no message, such as an `ExitCode`
+    /// from a subcommand, writes nothing.
+    ///
+    /// - Parameter error: The error the run ended with.
+    private static func report(_ error: any Error) {
+        let message = fullMessage(for: error)
+        guard !message.isEmpty else { return }
+        let destination: FileHandle =
+            exitCode(for: error) == .success ? .standardOutput : .standardError
+        destination.write(Data("\(message)\n".utf8))
     }
 }

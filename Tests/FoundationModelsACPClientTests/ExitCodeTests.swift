@@ -123,6 +123,13 @@ struct ExitCodeTests {
     /// What the validation error of ``aValidationErrorIsAUsageError()`` says.
     private static let validationMessage = "the run needs an agent command after \"--\""
 
+    /// A command line that the parser refuses as a usage error: no subcommand
+    /// has this option, and it names no agent command.
+    private static let unknownOptionArguments = ["--no-such-option"]
+
+    /// The command line that asks for the version.
+    private static let versionArguments = ["--version"]
+
     /// The directories whose files may hold no exit code number of their own.
     ///
     /// Both targets of the command-line client are read, so the table cannot
@@ -234,6 +241,31 @@ struct ExitCodeTests {
             A spawn, protocol or I/O failure is not a usage mistake and not a \
             timeout, so cli-plan.md section 9 exits it 1.
             """
+        )
+    }
+
+    /// `run(_:)` must give the code back and must not end the process. If it
+    /// ended the process, this test process would stop here and the suite
+    /// would not finish.
+    @Test("run returns the usage code for an unknown option")
+    func runReturnsTheUsageCodeForAnUnknownOption() async {
+        let code = await AcpClient.run(Self.unknownOptionArguments)
+
+        #expect(
+            code == Self.sectionNineTable[.usage],
+            "An unknown option is a usage error, which cli-plan.md section 9 exits 2. run returned \(code)."
+        )
+    }
+
+    /// `--version` is a clean exit of the parser. `run(_:)` writes the version
+    /// to standard output and gives back the success code.
+    @Test("run returns the success code for --version")
+    func runReturnsTheSuccessCodeForTheVersionFlag() async {
+        let code = await AcpClient.run(Self.versionArguments)
+
+        #expect(
+            code == Self.sectionNineTable[.success],
+            "--version is a clean exit, which cli-plan.md section 9 exits 0. run returned \(code)."
         )
     }
 

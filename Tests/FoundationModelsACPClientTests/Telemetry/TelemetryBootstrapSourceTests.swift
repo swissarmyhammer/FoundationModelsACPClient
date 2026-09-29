@@ -22,7 +22,11 @@ struct TelemetryBootstrapSourceTests {
     private static let mainOpening = "static func main() async {"
 
     /// The statement that must come first in the body of the entry point.
-    private static let bootstrapStatement = "TelemetryBootstrap.bootstrap()"
+    ///
+    /// The bootstrap gives back the export services. The entry point keeps
+    /// them, runs them while the command runs, and flushes them before the
+    /// process exits.
+    private static let bootstrapStatement = "let telemetry = TelemetryBootstrap.bootstrap()"
 
     @Test("main() bootstraps telemetry before any other statement")
     func mainBootstrapsTelemetryFirst() throws {

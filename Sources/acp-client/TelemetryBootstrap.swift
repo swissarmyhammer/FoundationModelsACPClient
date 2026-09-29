@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import OTel
+import ServiceLifecycle
 
 /// Bootstraps the telemetry backends of the `acp-client` process.
 ///
@@ -27,9 +28,9 @@ import OTel
 /// process. And with `OTEL_SDK_DISABLED=true`, `OTel.bootstrap` bootstraps no
 /// system at all, which leaves the swift-log default on standard output.
 ///
-/// The export services that swift-otel returns do not run yet. Until a later
-/// change runs them and flushes them before the process exits, no record
-/// leaves the process.
+/// swift-otel returns one export service for each backend it makes. This type
+/// keeps them, and gives them back as ``TelemetryServices``, which runs them
+/// for the life of the command and flushes them before the process exits.
 enum TelemetryBootstrap {
     /// The variable that turns the OTLP exporters on.
     private static let endpointVariable = "OTEL_EXPORTER_OTLP_ENDPOINT"
@@ -59,14 +60,19 @@ enum TelemetryBootstrap {
     /// It reads the environment of the process, as swift-otel does for each
     /// `OTEL_*` variable, so the decision here and the configuration there
     /// come from the same variables.
-    static func bootstrap() {
+    ///
+    /// - Returns: The export services of each backend that was made. The set
+    ///   is empty when telemetry is off, or when no backend could be made.
+    static func bootstrap() -> TelemetryServices {
         guard exportsTelemetry(in: ProcessInfo.processInfo.environment) else {
             LoggingSystem.bootstrap(SwiftLogNoOpLogHandler.init)
-            return
+            return TelemetryServices(services: [])
         }
         let configuration = exporterConfiguration()
-        LoggingSystem.bootstrap(loggingFactory(configuration: configuration))
-        bootstrapTracingAndMetrics(configuration: configuration)
+        let logs = loggingBackend(configuration: configuration)
+        LoggingSystem.bootstrap(logs.factory)
+        let tracesAndMetrics = bootstrapTracingAndMetrics(configuration: configuration)
+        return TelemetryServices(services: [logs.service, tracesAndMetrics].compactMap { $0 })
     }
 
     /// Tells if the environment asks for the OTLP exporters.
@@ -92,19 +98,21 @@ enum TelemetryBootstrap {
         return configuration
     }
 
-    /// Makes the log handler factory of the OTLP logs exporter.
+    /// Makes the OTLP logs exporter.
     ///
     /// - Parameter configuration: The swift-otel configuration.
-    /// - Returns: The factory of the exporter, or the factory of
-    ///   `SwiftLogNoOpLogHandler` when the exporter cannot be made.
-    private static func loggingFactory(
+    /// - Returns: The log handler factory of the exporter and its export
+    ///   service. When the exporter cannot be made, the factory of
+    ///   `SwiftLogNoOpLogHandler` and no service.
+    private static func loggingBackend(
         configuration: OTel.Configuration
-    ) -> @Sendable (String) -> any LogHandler {
+    ) -> (factory: @Sendable (String) -> any LogHandler, service: (any Service)?) {
         do {
-            return try OTel.makeLoggingBackend(configuration: configuration).factory
+            let backend = try OTel.makeLoggingBackend(configuration: configuration)
+            return (backend.factory, backend.service)
         } catch {
             reportFailure(error)
-            return SwiftLogNoOpLogHandler.init
+            return (SwiftLogNoOpLogHandler.init, nil)
         }
     }
 
@@ -114,14 +122,16 @@ enum TelemetryBootstrap {
     /// because ``bootstrap()`` already bootstrapped logging.
     ///
     /// - Parameter configuration: The swift-otel configuration.
-    private static func bootstrapTracingAndMetrics(configuration: OTel.Configuration) {
+    /// - Returns: The export service of the two exporters, or `nil` when they
+    ///   cannot be made.
+    private static func bootstrapTracingAndMetrics(configuration: OTel.Configuration) -> (any Service)? {
         var tracesAndMetrics = configuration
         tracesAndMetrics.logs.enabled = false
         do {
-            // The returned service is not run yet. See the type documentation.
-            _ = try OTel.bootstrap(configuration: tracesAndMetrics)
+            return try OTel.bootstrap(configuration: tracesAndMetrics)
         } catch {
             reportFailure(error)
+            return nil
         }
     }
 
