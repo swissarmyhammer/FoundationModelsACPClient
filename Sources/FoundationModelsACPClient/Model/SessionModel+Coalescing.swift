@@ -8,14 +8,11 @@ import FoundationModelsACP
 // consumers at its arrival, with no delay from the buffer.
 
 extension SessionModel {
-    /// The default coalescing cadence, in milliseconds.
-    private static let defaultCoalescingCadenceMilliseconds = 33
-
     /// The default display-rate cadence for chunk coalescing.
     ///
     /// The value gives approximately 30 flushes for each second. That rate is
     /// smooth for a reader and far under the token rate.
-    public static let defaultCoalescingCadence: Duration = .milliseconds(defaultCoalescingCadenceMilliseconds)
+    public static let defaultCoalescingCadence: Duration = ChunkCoalescer.defaultCadence
 
     // MARK: - Coalescing
 
@@ -27,54 +24,7 @@ extension SessionModel {
     /// it must show every chunk that arrived, for example on connection close.
     /// An empty buffer flushes to nothing.
     public func flushPendingChunks() {
-        scheduledFlush?.cancel()
-        scheduledFlush = nil
-        guard !pendingChunks.isEmpty else { return }
-        let chunks = pendingChunks
-        pendingChunks.removeAll(keepingCapacity: true)
-        fold(chunks)
-    }
-
-    /// Tells whether an update goes into the chunk buffer.
-    ///
-    /// Only the two token-rate chunk cases coalesce. Each other case folds at
-    /// once, so it is never delayed and never reordered.
-    ///
-    /// - Parameter update: The received update.
-    /// - Returns: `true` for `agent_message_chunk` and `agent_thought_chunk`.
-    static func isCoalescibleChunk(_ update: SessionUpdate) -> Bool {
-        switch update {
-        case .agentMessageChunk, .agentThoughtChunk:
-            true
-        case .userMessageChunk, .userMessage, .agentMessage, .agentThought, .stateUpdate, .toolCallContentChunk,
-            .toolCallUpdate, .terminalUpdate, .terminalOutputChunk, .planUpdate, .availableCommandsUpdate,
-            .configOptionUpdate, .sessionInfoUpdate, .usageUpdate, .unknown:
-            false
-        }
-    }
-
-    /// Appends one chunk to the buffer and schedules the flush.
-    ///
-    /// - Parameter chunk: The chunk update to buffer.
-    func enqueue(_ chunk: SessionUpdate) {
-        pendingChunks.append(chunk)
-        scheduleFlushIfNeeded()
-    }
-
-    /// Schedules one flush after the cadence, when no flush is scheduled.
-    ///
-    /// The task holds the model weakly, so a released model never keeps a
-    /// timer alive. A synchronous flush cancels the task.
-    private func scheduleFlushIfNeeded() {
-        guard scheduledFlush == nil else { return }
-        let cadence = coalescingCadence
-        let clock = clock
-        scheduledFlush = Task { [weak self] in
-            // A cancelled sleep throws; the check below then stops the flush.
-            try? await clock.sleep(for: cadence, tolerance: nil)
-            guard !Task.isCancelled else { return }
-            self?.flushPendingChunks()
-        }
+        coalescer.flush()
     }
 
     // MARK: - Update tap

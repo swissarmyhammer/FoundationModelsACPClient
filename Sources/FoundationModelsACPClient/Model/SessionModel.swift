@@ -92,18 +92,21 @@ public final class SessionModel {
 
     /// The cadence between coalesced flushes. `.zero` applies each chunk at
     /// once.
-    @ObservationIgnored let coalescingCadence: Duration
+    @ObservationIgnored private let coalescingCadence: Duration
 
     /// The clock that schedules the coalesced flushes.
-    @ObservationIgnored let clock: any Clock<Duration>
+    @ObservationIgnored private let clock: any Clock<Duration>
 
-    /// The buffered chunk updates, in arrival order. The buffer is not
-    /// observable, so an append causes no observation.
-    @ObservationIgnored var pendingChunks: [SessionUpdate] = []
-
-    /// The task that flushes the buffer after one cadence, or `nil` when no
-    /// flush is scheduled.
-    @ObservationIgnored var scheduledFlush: Task<Void, Never>?
+    /// The chunk buffer. A buffered chunk causes no observation; the flush
+    /// folds the whole buffer through ``fold(_:)``, and each other update
+    /// folds at once. Each closure holds the model weakly, so the coalescer
+    /// does not keep the model alive.
+    @ObservationIgnored private(set) lazy var coalescer = ChunkCoalescer(
+        cadence: coalescingCadence,
+        clock: clock,
+        foldChunks: { [weak self] chunks in self?.fold(chunks) },
+        applyUpdate: { [weak self] update in self?.fold([update]) }
+    )
 
     /// The continuation of each open ``updateTap()`` stream, keyed by a local
     /// identity of the tap.
@@ -128,8 +131,8 @@ public final class SessionModel {
     }
 
     deinit {
-        scheduledFlush?.cancel()
-        // A released model must not leave a tap consumer suspended.
+        // A released model must not leave a tap consumer suspended. The
+        // coalescer cancels its own scheduled flush when it is released.
         for tap in updateTaps.values {
             tap.finish()
         }
@@ -137,20 +140,16 @@ public final class SessionModel {
 
     /// Receives one `session/update`.
     ///
-    /// Each ``updateTap()`` stream gets the update at once. A coalescible
-    /// chunk then goes into the buffer, which flushes on the cadence. Any
-    /// other update flushes the buffer first and then folds, so the applied
-    /// order is the arrival order.
+    /// Each ``updateTap()`` stream gets the update at once. The update then
+    /// goes to the shared ``ChunkCoalescer``: a coalescible chunk goes into
+    /// the buffer, which flushes on the cadence, and any other update flushes
+    /// the buffer first and then folds, so the applied order is the arrival
+    /// order.
     ///
     /// - Parameter update: The update to receive.
     func apply(_ update: SessionUpdate) {
         yieldToUpdateTaps(update)
-        guard coalescingCadence > .zero, Self.isCoalescibleChunk(update) else {
-            flushPendingChunks()
-            fold([update])
-            return
-        }
-        enqueue(update)
+        coalescer.receive(update)
     }
 
     /// Folds updates into the model through the engine.
