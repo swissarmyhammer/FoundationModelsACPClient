@@ -92,8 +92,24 @@ comments:
     - evidence: commit "test(process): read the descriptor probe answer with reduce(into:)" (sha in git log of this branch)
     - next: review
   timestamp: 2026-10-03T19:40:06.689585+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m41mkqneg1h3fpsms449n4ge
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (a36e250): 0 findings, 0 confirmed, 0 refuted; 7 validator runs, 0 failed. The prior finding (swift/immutability at AgentProcessPipeInheritanceTests.swift:106) is checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T19:42:15.214296+00:00
+- actor: claude-code
+  id: 01m41mkyt9ts4f8dj0ca8ngp01
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (AgentProcessPipeInheritanceTests.swift: reduce(into:))
+    - test: green — swift test 479/479, IntegrationTests 103/103
+    - commit: a36e250 test(process): read the descriptor probe answer with reduce(into:)
+    - review: clean — prior finding checked; task moved to done
+  timestamp: 2026-10-03T19:42:22.537453+00:00
+position_column: done
+position_ordinal: c980
 title: 'AgentProcess.spawn: close the pipe()/fcntl window with POSIX_SPAWN_CLOEXEC_DEFAULT'
 ---
 ## What

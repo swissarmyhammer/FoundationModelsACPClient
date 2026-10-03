@@ -81,6 +81,10 @@ public enum ClientRequestSpan {
         /// The request that opens a session.
         public static let newSession = "session/new"
 
+        /// The request that resumes a session, with an optional replay of
+        /// its history.
+        public static let resumeSession = "session/resume"
+
         /// The request that sends one prompt.
         public static let prompt = "session/prompt"
 

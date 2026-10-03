@@ -145,9 +145,9 @@ private struct AgentSessionHarness {
     /// Runs `initialize` and opens the session, which is what every caller of
     /// this seam does before it drives a turn.
     ///
-    /// - Returns: The session id and its update stream.
+    /// - Returns: The session id and its event stream.
     /// - Throws: Whatever the seam threw.
-    func openedSession() async throws -> (SessionId, AsyncStream<SessionUpdate>) {
+    func openedSession() async throws -> (SessionId, AsyncStream<SessionStreamEvent>) {
         _ = try await session.initialize()
         return try await session.openSession()
     }
@@ -311,12 +311,12 @@ func theServedClientDeclinesAndTheUpdateStillReachesTheContainer() async throws 
 func aChunkSentAsSoonAsThePromptLandsReachesTheReturnedStream() async throws {
     let harness = await AgentSessionHarness(script: replyThenIdle)
 
-    let (sessionId, updates) = try await harness.openedSession()
+    let (sessionId, events) = try await harness.openedSession()
     try await harness.prompt(sessionId)
 
-    var iterator = updates.makeAsyncIterator()
+    var iterator = events.makeAsyncIterator()
     let first = try #require(await iterator.next())
-    #expect(first == agentChunk(text: stubReplyText, message: stubMessageID.rawValue))
+    #expect(first == .update(agentChunk(text: stubReplyText, message: stubMessageID.rawValue)))
     await harness.teardown()
 }
 

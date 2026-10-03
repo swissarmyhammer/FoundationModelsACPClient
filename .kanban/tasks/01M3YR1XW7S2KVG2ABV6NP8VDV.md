@@ -89,6 +89,74 @@ comments:
     - review: not run — a clean review moves the task to done while resumeSession is open
     - next: when the marker is on upstream main, update the pin, read the new stream element in SessionModel.attach(_:), call endReplay on the marker of the session/resume request, then /finish 6np8vdv.
   timestamp: 2026-10-03T18:48:40.271701+00:00
+- actor: claude-code
+  id: 01m41pndta8yq9rmhw2nqy27kc
+  text: |-
+    ### upstream marker ready (from peer foundationmodelsacp-c7)
+    FoundationModelsACP main f72b8ad has the in-band marker (upstream ^p339xg3). Final names, in Sources/FoundationModelsACP/Connection/SessionStreamEvent.swift:
+    - `enum SessionStreamEvent { case update(SessionUpdate); case requestFinished(id: RequestId, method: String, outcome: OutgoingRequestOutcome) }`
+    - `enum OutgoingRequestOutcome { case succeeded, failed }`
+    - `SessionUpdateSubscription.updates` is now `AsyncStream<SessionStreamEvent>`.
+    - The name is `requestFinished`, not `responseReceived`.
+    Rules:
+    - One marker for each request with a `sessionId` that the connection sends. `method` is the wire method, for example "session/resume".
+    - The read loop records the marker before the caller resumes, so it is at the exact wire position.
+    - `failed` is given for an error response, cancel, timeout, write failure and connection close.
+    - Markers are buffered with updates and count toward `maximumUpdatesPerSession`.
+    - `closeSession` clears the kept events after the call.
+    - The deprecated `updates(for:)` still returns `AsyncStream<SessionUpdate>` and drops markers.
+  timestamp: 2026-10-03T20:18:07.818831+00:00
+- actor: claude-code
+  id: 01m41q0cgw3mxa1b636aha9z7r
+  text: |-
+    Picked up again 2026-10-03 for the resume part. Research:
+    - Pins: `swift package update FoundationModelsACP` and `swift package --package-path IntegrationTests update FoundationModelsACP` both resolve FoundationModelsACP main at f72b8ad. Package.swift files pin `branch: "main"`, so no manifest change.
+    - Readers of `SessionUpdateSubscription.updates` that break: `SessionModel.attach(_:)`, `AgentSession.openSession()` and `TurnRunner.readTurn` (AcpClientCore), `waitForIdle` in the unit and the integration TransportTestSupport, `AgentSessionTests.openedSession()`, and `handMadeSubscription` in SessionModelStreamTests.
+    - The request id of the resume cannot be learned without ambiguity: `subscribeToOutgoingRequests()` gives `started(id:method:)` with no session id, so two resumes of two sessions at the same time give two "session/resume" ids. The session stream holds only markers of requests that name that session, so the model ends the replay on the first "session/resume" marker in its own stream.
+    - Upstream gives no marker when the request never went out: an `EncodingError` before the start, a task cancelled before the start, or a closed connection (the stream of a closed connection finishes, so the end of the stream also ends the replay). A failed resume therefore waits for the marker or the stream end, except after `CancellationError` and `EncodingError`, where it ends the replay at once.
+  timestamp: 2026-10-03T20:24:06.940035+00:00
+- actor: claude-code
+  id: 01m41qppjxrbm20tvkpzcs11m1
+  text: |-
+    Resume part landed (not committed), with TDD (RED seen for each step).
+
+    Done:
+    - Pins: root and IntegrationTests resolve FoundationModelsACP at f72b8ad (`branch: "main"` in both manifests; Package.resolved is git-ignored).
+    - `SessionModel.attach(_:)` reads `SessionStreamEvent`: `.update` goes to the existing fold; `.requestFinished` with method "session/resume" ends the running replay with `endReplay(succeeded: outcome == .succeeded)`. A marker of another request changes nothing.
+    - New in SessionModel: `waitForReplayEnd()` (waits for the marker; returns at once when no replay runs; ends the replay as a failure when no subscription is attached), `endRunningReplayAsFailure()`, and the `replayEndWaiters` list. The end of the subscription and `markClosed()` also end a running replay as a failure, so no wait can hang.
+    - `ConnectionModel.resumeSession(_:)`: capability check; open id -> same model and subscription; new id -> `makeSubscribedSessionModel` BEFORE the send; `beginReplay`; send; wait for the marker; `seed`; a new model goes through the private `register(_:openedOver:)`. On failure: the replay ends, a new model is closed and not registered, the error is rethrown. `newSession` now uses the same `makeSubscribedSessionModel` helper (no copied block).
+    - New public constant `ClientRequestSpan.Method.resumeSession = "session/resume"`.
+    - AcpClientCore: `AgentSession.openSession()` now gives `AsyncStream<SessionStreamEvent>`; `TurnRunner.readTurn` reads only the `.update` events.
+    - Deprecated `updates(for:)` is not used by this package code; ACPSessionState and SwiftUIACPClient still pass their unit and integration tests.
+
+    Decisions and why:
+    - The request id is not used to match the marker: `OutgoingRequestEvent.started(id:method:)` names no session, so two resumes of two sessions at the same time give an ambiguous id. The session stream holds only markers of requests that name the session, so the method "session/resume" is sufficient.
+    - A failed resume waits for the marker (or the stream end), except after `CancellationError` and `EncodingError`: for these two, the request may never have gone out and no marker comes, so the replay ends at once.
+    - Markers count toward `maximumUpdatesPerSession`, but `session/new` names no session, so no marker is kept before the new-session subscription. The existing overflow tests kept their counts.
+
+    Tests: SessionModelStreamTests +5 (marker ends the replay after each update, failed marker, other marker, stream end, close). ConnectionModelSessionTests +11 resume tests (new id with replay, replay visible while `isReplaying`, second resume same instance with no doubled text, 200 replayed messages all in the model at return, `.start` replay after overflow clears `hasMissedUpdates`, seed on resume, refused resume of a new id and of an open id, no capability sends nothing, held-executor close after the answer). ScriptedStubAgent got `resumeSessionScript`, `resumeSessionCommands`, `resumeSessionError`, `resumeSessionGate`. Shared helpers `requestFinished(_:in:)` (was `newSessionFinished(in:)`), `messageTexts(of:)`, `runHeld(on:_:)`.
+  timestamp: 2026-10-03T20:36:18.141475+00:00
+- actor: claude-code
+  id: 01m41qpts9hc0bcvgzm2z71162
+  text: |-
+    ### implement — changed
+    - evidence: 12 files — Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Stream.swift, Sources/FoundationModelsACPClient/Model/SessionModel.swift, Sources/FoundationModelsACPClient/Telemetry/ClientRequestSpan.swift, Sources/AcpClientCore/AgentSession.swift, Sources/AcpClientCore/TurnRunner.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift, Tests/FoundationModelsACPClientTests/AgentSessionTests.swift, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift. `swift test --filter ConnectionModelSessionTests`: 24 passed. `swift build`: complete, only the accepted MLX warning. `swift test`: 494 tests in 40 suites passed. `swift test --package-path IntegrationTests`: 103 tests in 14 suites passed. Warnings: only the accepted MLX bundle warning and the permitted SessionUpdateAggregator deprecation. Pins at f72b8ad (root and IntegrationTests). All card items checked.
+    - next: /review
+  timestamp: 2026-10-03T20:36:22.441832+00:00
+- actor: claude-code
+  id: 01m41r1cpknhjspqmq6kh01nhk
+  text: |-
+    ### test — green
+    - evidence: swift build: complete, only the accepted mlx "missing creator for mutated node" warning. swift test: 494 tests in 40 suites passed, 0 failed, 0 skipped. swift test --package-path IntegrationTests: 103 tests in 14 suites passed, 0 failed, 0 skipped. swift test --filter "ConnectionModelSessionTests|SessionModelStreamTests": 10 of 10 runs passed (56 tests in each run).
+    - next: review. No code was changed by this step. No commit and no push.
+  timestamp: 2026-10-03T20:42:08.467023+00:00
+- actor: claude-code
+  id: 01m41r1s38n0gh8df9mbewcq8r
+  text: |-
+    ### commit — changed
+    - evidence: One local commit "feat(model): add resumeSession with the upstream requestFinished replay barrier" holds all 16 changed files, with the .kanban files. The sha is in the report of the step.
+    - next: Review. Nothing is pushed.
+  timestamp: 2026-10-03T20:42:21.160330+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
@@ -102,20 +170,20 @@ title: 'Model: ConnectionModel session factory — newSession, resumeSession, op
 Add the session factory to `ConnectionModel` in `Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift`. Upstream API: `connection.subscribe(to:) -> SessionUpdateSubscription` (`updates`, `missedUpdates`); the router clears the buffer and the mark itself when `session/close` goes through the connection. Use the final names from gate task 81s5j74. The registry (`openSessions`, `register`, `unregister`) is in task jge1qvf; `requireCapability` is in task k0brvv6.
 
 - [x] `newSession(_ request: NewSessionRequest) async throws -> SessionModel`: send the request unchanged; as soon as the response is decoded, `subscribe(to:)` (the first subscriber takes the buffer and the overflow mark), make the model with the connection's cadence and clock, `attach`, `seed` from the response (`availableCommands`, `configOptions`), give it the request sender, `register` it.
-- [ ] `resumeSession(_ request: ResumeSessionRequest) async throws -> SessionModel`: `requireCapability(canResumeSessions)`. For a new id: make the model and `subscribe(to:)` BEFORE the request is sent. For an id that is already open: reuse that model and its subscription (same instance). Then `beginReplay(replayFrom: request.replayFrom)` (it resets the transcript of a reused model), send, `endReplay(succeeded:)`, `seed`. On failure: end the replay; a new model is not registered; rethrow.
-- [ ] In `resumeSession(_:)`, register a new model through the private `register(_:openedOver:)` (from task ^7sbgy5x), so a connection that closed during the request never gets the model. Add a held-executor test like the `newSession` test of ^7sbgy5x.
+- [x] `resumeSession(_ request: ResumeSessionRequest) async throws -> SessionModel`: `requireCapability(canResumeSessions)`. For a new id: make the model and `subscribe(to:)` BEFORE the request is sent. For an id that is already open: reuse that model and its subscription (same instance). Then `beginReplay(replayFrom: request.replayFrom)` (it resets the transcript of a reused model), send, `endReplay(succeeded:)`, `seed`. On failure: end the replay; a new model is not registered; rethrow.
+- [x] In `resumeSession(_:)`, register a new model through the private `register(_:openedOver:)` (from task ^7sbgy5x), so a connection that closed during the request never gets the model. Add a held-executor test like the `newSession` test of ^7sbgy5x.
 - [x] `close(_ session: SessionModel) async throws`: `requireCapability(canCloseSessions)`; sends `session/close`; `unregister`; `markClosed()`. The model stays readable. If the capability is false, it throws `.unsupported` and the model stays open (callers that want a local close call `session.markClosed()`; acp-client does not need this, see task hvqk65a).
 
 ## Acceptance Criteria
 - [x] Updates that the agent sends between its `session/new` response and the attach are in the model (none lost).
 - [x] An agent that sends more than the buffer bound before its `session/new` response gives `hasMissedUpdates == true`.
 - [x] A response with no command list leaves `availableCommands == nil`; a response with a list seeds it.
-- [ ] A resume replay goes into the model while `isReplaying == true`. A second resume of an open session returns the same instance with the same transcript (no doubled text), and a `.start` replay after an overflow clears `hasMissedUpdates`.
+- [x] A resume replay goes into the model while `isReplaying == true`. A second resume of an open session returns the same instance with the same transcript (no doubled text), and a `.start` replay after an overflow clears `hasMissedUpdates`.
 - [x] After `close`, the model has `isClosed == true` and is not in `openSessions`.
 
 ## Tests
-- [ ] New `Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift` over `InMemoryTransport.pair()` with `ScriptedStubAgent`: updates before the new-session response; overflow before the response (set a small bound if the router lets the connection configure it); seed with and without commands; a chunked replay done two times; resume after overflow; a failed resume; close; resume and close against an agent without the capability throw and the agent sees no request.
-- [ ] `swift test --filter ConnectionModelSessionTests` passes.
+- [x] New `Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift` over `InMemoryTransport.pair()` with `ScriptedStubAgent`: updates before the new-session response; overflow before the response (set a small bound if the router lets the connection configure it); seed with and without commands; a chunked replay done two times; resume after overflow; a failed resume; close; resume and close against an agent without the capability throw and the agent sees no request.
+- [x] `swift test --filter ConnectionModelSessionTests` passes.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.

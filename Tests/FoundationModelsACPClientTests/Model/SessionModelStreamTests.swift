@@ -42,9 +42,25 @@ private let replayedEntryCount = 3
 /// - Returns: The subscription and its continuation.
 private func handMadeSubscription(
     hasMissedUpdates: Bool = false
-) -> (SessionUpdateSubscription, AsyncStream<SessionUpdate>.Continuation) {
-    let (updates, continuation) = AsyncStream<SessionUpdate>.makeStream()
-    return (SessionUpdateSubscription(updates: updates, hasMissedUpdates: hasMissedUpdates), continuation)
+) -> (SessionUpdateSubscription, AsyncStream<SessionStreamEvent>.Continuation) {
+    let (events, continuation) = AsyncStream<SessionStreamEvent>.makeStream()
+    return (SessionUpdateSubscription(updates: events, hasMissedUpdates: hasMissedUpdates), continuation)
+}
+
+/// The JSON-RPC ID of the request whose marker a hand-made stream carries.
+private let markedRequestId: RequestId = .number(1)
+
+/// Makes the marker of a finished request of the test session.
+///
+/// - Parameters:
+///   - outcome: How the request finished.
+///   - method: The wire method of the request.
+/// - Returns: The marker, as the connection yields it.
+private func requestFinished(
+    _ outcome: OutgoingRequestOutcome,
+    method: String = ClientRequestSpan.Method.resumeSession
+) -> SessionStreamEvent {
+    .requestFinished(id: markedRequestId, method: method, outcome: outcome)
 }
 
 /// Runs one successful replay of the fixture updates into a model.
@@ -72,9 +88,9 @@ struct SessionModelStreamTests {
         let (subscription, continuation) = handMadeSubscription()
 
         model.attach(subscription)
-        continuation.yield(agentChunk(text: "first"))
-        continuation.yield(toolCallStatus(id: replayedToolCallId.rawValue, .pending))
-        continuation.yield(idleState(stopReason: .endTurn))
+        continuation.yield(.update(agentChunk(text: "first")))
+        continuation.yield(.update(toolCallStatus(id: replayedToolCallId.rawValue, .pending)))
+        continuation.yield(.update(idleState(stopReason: .endTurn)))
         try await waitUntil { model.agentState != nil }
 
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(MessageId(rawValue: "agent-1"))), .wire(.toolCall(replayedToolCallId))])
@@ -180,6 +196,74 @@ struct SessionModelStreamTests {
         model.endReplay(succeeded: true)
 
         #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "replayed")
+    }
+
+    // MARK: - Replay marker
+
+    @Test func theResumeMarkerEndsTheReplayAfterEachReplayedUpdate() async {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+
+        for update in replayedUpdates {
+            continuation.yield(.update(update))
+        }
+        continuation.yield(requestFinished(.succeeded))
+        await model.waitForReplayEnd()
+
+        #expect(!model.isReplaying)
+        #expect(model.transcript.count == replayedEntryCount)
+        #expect(model.history == .retained(replayFrom: replayFromStart))
+    }
+
+    @Test func aFailedResumeMarkerEndsTheReplayAsAFailure() async {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+
+        continuation.yield(requestFinished(.failed))
+        await model.waitForReplayEnd()
+
+        #expect(!model.isReplaying)
+        #expect(model.history == .live)
+    }
+
+    @Test func theMarkerOfAnotherRequestLeavesTheReplayRunning() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+
+        continuation.yield(requestFinished(.succeeded, method: ClientRequestSpan.Method.prompt))
+        continuation.yield(.update(agentChunk(text: "after the marker")))
+        try await waitUntil { !model.transcript.isEmpty }
+
+        #expect(model.isReplaying)
+    }
+
+    @Test func theEndOfTheSubscriptionEndsTheReplayAsAFailure() async {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+
+        continuation.finish()
+        await model.waitForReplayEnd()
+
+        #expect(!model.isReplaying)
+        #expect(model.history == .live)
+    }
+
+    @Test func closeEndsTheReplayAsAFailure() {
+        let model = SessionModelFixtures.immediateModel()
+        model.beginReplay(replayFrom: replayFromStart)
+
+        model.markClosed()
+
+        #expect(!model.isReplaying)
+        #expect(model.history == .live)
     }
 
     // MARK: - History
@@ -374,7 +458,7 @@ private final class TerminationProbe: Sendable {
     /// Records one termination.
     ///
     /// - Parameter reason: The reason that the stream gave.
-    func record(_ reason: AsyncStream<SessionUpdate>.Continuation.Termination) {
+    func record(_ reason: AsyncStream<SessionStreamEvent>.Continuation.Termination) {
         guard case .cancelled = reason else { return }
         cancelled.withLock { $0 = true }
     }

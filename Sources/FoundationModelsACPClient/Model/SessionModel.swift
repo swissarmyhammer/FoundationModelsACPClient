@@ -102,6 +102,10 @@ public final class SessionModel {
     /// The replay of a `session/resume` request, while it runs.
     var replayPhase: ReplayPhase = .idle
 
+    /// The callers that wait for the end of the running replay. The end of
+    /// the replay resumes each one.
+    @ObservationIgnored var replayEndWaiters: [CheckedContinuation<Void, Never>] = []
+
     /// The task that folds the updates of the attached subscription, or `nil`
     /// when no subscription is attached.
     @ObservationIgnored var streamTask: Task<Void, Never>?

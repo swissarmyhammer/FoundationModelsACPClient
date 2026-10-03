@@ -230,7 +230,7 @@ struct TurnRunner {
     ///   process has no working directory, `RequestError` on a peer error, or
     ///   `ConnectionError` when the agent went away.
     func run() async throws -> TurnOutcome {
-        let (sessionId, updates) = try await session.openSession()
+        let (sessionId, events) = try await session.openSession()
         let (toolNames, toolNameFeed) = AsyncStream<String>.makeStream()
         let promptTrace = PromptTraceContext()
         return try await withThrowingTaskGroup(of: TurnEvent.self) { group in
@@ -249,7 +249,7 @@ struct TurnRunner {
             }
             group.addTask {
                 let outcome = await self.readTurn(
-                    from: updates,
+                    from: events,
                     reportingToolNamesTo: toolNameFeed
                 )
                 guard let outcome else { return .streamEndedWithoutIdle }
@@ -369,19 +369,22 @@ struct TurnRunner {
 
     /// Reads the session's updates until the agent reports `idle`.
     ///
+    /// The marker of a finished request changes nothing here: the prompt
+    /// answer never ends the turn, so the turn reads only the updates.
+    ///
     /// - Parameters:
-    ///   - updates: The session's update stream.
+    ///   - events: The session's event stream.
     ///   - toolNameFeed: Where the running tool name goes, which is the
     ///     spinner's line. It ends at the first answer chunk, because §8
     ///     stops the spinner there, and at the end of the turn, for a turn
     ///     that carried no answer text at all.
     /// - Returns: Why the turn ended, or `nil` when the stream ended first.
     private func readTurn(
-        from updates: AsyncStream<SessionUpdate>,
+        from events: AsyncStream<SessionStreamEvent>,
         reportingToolNamesTo toolNameFeed: AsyncStream<String>.Continuation
     ) async -> TurnOutcome? {
         defer { toolNameFeed.finish() }
-        for await update in updates {
+        for await case .update(let update) in events {
             switch apply(update, reportingToolNamesTo: toolNameFeed) {
             case .turnEnded(let outcome):
                 return outcome

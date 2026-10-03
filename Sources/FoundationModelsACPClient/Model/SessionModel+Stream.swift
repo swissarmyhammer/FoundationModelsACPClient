@@ -24,10 +24,11 @@ extension SessionModel {
 
     // MARK: - Attachment
 
-    /// Folds the updates of a subscription into this model, in order.
+    /// Folds the events of a subscription into this model, in order.
     ///
-    /// One main-actor task receives the updates and gives each one to
-    /// ``apply(_:)``. A subscription with missed updates sets
+    /// One main-actor task receives the events. It gives each update to
+    /// ``apply(_:)``, and it ends the running replay at the marker of its
+    /// `session/resume` request. A subscription with missed updates sets
     /// ``hasMissedUpdates``. When the subscription ends, each ``updateTap()``
     /// stream ends too. A later call replaces the earlier subscription.
     ///
@@ -38,22 +39,56 @@ extension SessionModel {
             hasMissedUpdates = true
         }
         streamTask?.cancel()
-        let updates = subscription.updates
+        let events = subscription.updates
         streamTask = Task { @MainActor [weak self] in
-            for await update in updates {
-                self?.apply(update)
+            for await event in events {
+                self?.receive(event)
             }
             self?.subscriptionDidEnd()
         }
     }
 
-    /// Ends each tap when the connection ended the subscription.
+    /// Receives one event of the attached subscription.
+    ///
+    /// - Parameter event: The event, in wire order.
+    private func receive(_ event: SessionStreamEvent) {
+        switch event {
+        case .update(let update):
+            apply(update)
+        case .requestFinished(_, let method, let outcome):
+            requestDidFinish(method: method, outcome: outcome)
+        }
+    }
+
+    /// Ends the running replay when the marker of a `session/resume` request
+    /// arrives.
+    ///
+    /// The connection yields the marker at the wire position of the
+    /// response, after each replayed update. Thus, at the marker, the model
+    /// applied the whole replay. The stream of a session holds only the
+    /// markers of the requests that name that session, so the first
+    /// `session/resume` marker is the marker of the running replay. The
+    /// marker of another request changes nothing.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method of the finished request.
+    ///   - outcome: How the request finished.
+    private func requestDidFinish(method: String, outcome: OutgoingRequestOutcome) {
+        guard method == ClientRequestSpan.Method.resumeSession, isReplaying else { return }
+        endReplay(succeeded: outcome == .succeeded)
+    }
+
+    /// Ends each tap and the running replay when the connection ended the
+    /// subscription. No marker can arrive after the end, so the replay ends
+    /// as a failure.
     ///
     /// A cancelled task ends the loop as well. The close and a replaced
     /// subscription cancel the task, and neither must end the taps here: the
     /// close ends them itself, and a replaced subscription keeps them open.
     private func subscriptionDidEnd() {
         guard !Task.isCancelled else { return }
+        streamTask = nil
+        endRunningReplayAsFailure()
         finishUpdateTaps()
     }
 
@@ -92,6 +127,7 @@ extension SessionModel {
     func endReplay(succeeded: Bool) {
         let phase = replayPhase
         replayPhase = .idle
+        defer { resumeReplayEndWaiters() }
         flushPendingChunks()
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
         history = .retained(replayFrom: replayFrom)
@@ -100,15 +136,50 @@ extension SessionModel {
         }
     }
 
+    /// Ends the running replay as a failure. When no replay runs, the call
+    /// changes nothing.
+    func endRunningReplayAsFailure() {
+        guard isReplaying else { return }
+        endReplay(succeeded: false)
+    }
+
+    /// Waits until the running replay ends.
+    ///
+    /// The marker of the `session/resume` request ends the replay, after the
+    /// model applied each replayed update. The end of the subscription and
+    /// the close also end it. A model with no attached subscription gets no
+    /// marker, so the call then ends the replay as a failure at once. When
+    /// no replay runs, the call returns at once.
+    func waitForReplayEnd() async {
+        guard isReplaying else { return }
+        guard streamTask != nil else {
+            endRunningReplayAsFailure()
+            return
+        }
+        await withCheckedContinuation { waiter in
+            replayEndWaiters.append(waiter)
+        }
+    }
+
+    /// Resumes each caller that waits for the end of the replay.
+    private func resumeReplayEndWaiters() {
+        let waiters = replayEndWaiters
+        replayEndWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     // MARK: - Close
 
     /// Closes the model.
     ///
-    /// The model folds the buffered chunks, stops the task of the
-    /// subscription, ends each ``updateTap()`` stream, cancels each pending
-    /// permission request and elicitation, and clears ``notices``. After the
-    /// close, ``apply(_:)`` changes nothing.
+    /// The model ends the running replay as a failure, folds the buffered
+    /// chunks, stops the task of the subscription, ends each ``updateTap()``
+    /// stream, cancels each pending permission request and elicitation, and
+    /// clears ``notices``. After the close, ``apply(_:)`` changes nothing.
     func markClosed() {
+        endRunningReplayAsFailure()
         flushPendingChunks()
         streamTask?.cancel()
         streamTask = nil

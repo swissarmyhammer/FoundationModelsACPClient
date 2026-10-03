@@ -198,11 +198,13 @@ struct AgentSession {
     /// the path answers a `RequestError`, which is the protocol-failure row
     /// of §9.
     ///
-    /// - Returns: The session the agent opened, and its update stream.
+    /// - Returns: The session the agent opened, and its event stream: the
+    ///   updates of the session and the marker of each finished request of
+    ///   the session, in wire order.
     /// - Throws: ``ProcessWorkingDirectoryError`` when `--cwd` is absent and
     ///   this process has no working directory, `RequestError` on a peer
     ///   error, or `ConnectionError` when the agent went away.
-    func openSession() async throws -> (SessionId, AsyncStream<SessionUpdate>) {
+    func openSession() async throws -> (SessionId, AsyncStream<SessionStreamEvent>) {
         let cwd = AbsolutePath(rawValue: try workingDirectoryToSend())
         // The session id is not known until the agent answers, so the span
         // of this request names no session.

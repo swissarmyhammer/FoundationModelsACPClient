@@ -14,6 +14,14 @@ import FoundationModelsACP
 /// prompts. The answer carries the `newSessionCommands` the test chose, and
 /// the stub sends the `newSessionScript` before the answer, so a test can
 /// prove that an update which comes before the session id is not lost.
+///
+/// `session/resume` sends the `resumeSessionScript` as the replay, and then
+/// refuses with the error the test chose, or answers with the
+/// `resumeSessionCommands` when the test chose no error. The default is the
+/// `methodNotFound` refusal of an agent that does not implement the method.
+/// A stub built with a resume gate holds the answer, after the replay, until
+/// the test opens that gate.
+///
 /// Every other session method stays unanswered: no test needs one, and a
 /// stub that answers a method it does not model would hide a mistake.
 ///
@@ -138,6 +146,22 @@ final class ScriptedStubAgent: Agent {
     /// member out.
     private let newSessionCommands: [AvailableCommand]?
 
+    /// The updates to send, in order, as the replay of a `session/resume`,
+    /// before its answer.
+    private let resumeSessionScript: [SessionUpdate]
+
+    /// The command list of the `session/resume` answer, or `nil` to leave
+    /// the member out.
+    private let resumeSessionCommands: [AvailableCommand]?
+
+    /// The error this stub answers `session/resume` with, or `nil` to
+    /// accept each resume.
+    private let resumeSessionError: RequestError?
+
+    /// The gate that must open before each `session/resume` answers, or
+    /// `nil` to answer each resume at once.
+    private let resumeSessionGate: UpdateGate?
+
     /// The updates to send after the prompt answer, one step per gate.
     private let deferredScript: [GatedUpdates]
 
@@ -192,6 +216,14 @@ final class ScriptedStubAgent: Agent {
     ///     answer.
     ///   - newSessionCommands: The command list of the `session/new` answer,
     ///     or `nil` to leave the member out.
+    ///   - resumeSessionScript: The updates to send as the replay of a
+    ///     `session/resume`, before its answer.
+    ///   - resumeSessionCommands: The command list of the `session/resume`
+    ///     answer, or `nil` to leave the member out.
+    ///   - resumeSessionError: The error to answer `session/resume` with, or
+    ///     `nil` to accept each resume.
+    ///   - resumeSessionGate: The gate that must open before each
+    ///     `session/resume` answers, or `nil` to answer each resume at once.
     ///   - capabilities: The capabilities to answer `initialize` with.
     ///   - authMethods: The auth methods to answer `initialize` with, or
     ///     `nil` to leave the member out.
@@ -213,6 +245,10 @@ final class ScriptedStubAgent: Agent {
         closeSessionError: RequestError? = .methodNotFound("session/close"),
         newSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
+        resumeSessionScript: [SessionUpdate] = [],
+        resumeSessionCommands: [AvailableCommand]? = nil,
+        resumeSessionError: RequestError? = .methodNotFound(ClientRequestSpan.Method.resumeSession),
+        resumeSessionGate: UpdateGate? = nil,
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
         loginError: RequestError? = nil,
@@ -230,6 +266,10 @@ final class ScriptedStubAgent: Agent {
         self.closeSessionError = closeSessionError
         self.newSessionScript = newSessionScript
         self.newSessionCommands = newSessionCommands
+        self.resumeSessionScript = resumeSessionScript
+        self.resumeSessionCommands = resumeSessionCommands
+        self.resumeSessionError = resumeSessionError
+        self.resumeSessionGate = resumeSessionGate
         self.capabilities = capabilities
         self.authMethods = authMethods
         self.loginError = loginError
@@ -276,7 +316,15 @@ final class ScriptedStubAgent: Agent {
     }
 
     func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        throw RequestError.methodNotFound("session/resume")
+        record(params.meta, of: ClientRequestSpan.Method.resumeSession)
+        for update in resumeSessionScript {
+            try await send(update)
+        }
+        await resumeSessionGate?.wait()
+        if let resumeSessionError {
+            throw resumeSessionError
+        }
+        return ResumeSessionResponse(availableCommands: resumeSessionCommands)
     }
 
     func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {

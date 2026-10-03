@@ -4,17 +4,57 @@ import Testing
 @testable import FoundationModelsACPClient
 
 // The tests of the session factory of `ConnectionModel`: `newSession(_:)`,
-// the request sender that it gives each session model, and `close(_:)`.
+// `resumeSession(_:)`, the request sender that it gives each session model,
+// and `close(_:)`.
 //
 // `ConnectedModel` gives the real ACP wire, with a `ScriptedStubAgent` on the
 // agent end. The stub sends its `newSessionScript` before it answers
 // `session/new`, so the updates are on the wire before the model knows the
-// session id.
+// session id. It sends its `resumeSessionScript` as the replay of a
+// `session/resume`, before the answer.
 
 /// The fixtures of the session factory tests.
 private enum SessionFactoryFixtures {
+    /// The working directory of each request that the tests send.
+    static let workingDirectory = AbsolutePath(rawValue: "/")
+
     /// The new-session request that each test sends.
-    static let newSessionRequest = NewSessionRequest(cwd: AbsolutePath(rawValue: "/"))
+    static let newSessionRequest = NewSessionRequest(cwd: workingDirectory)
+
+    /// The replay cursor that asks for the full retained history.
+    static let replayFromStart: ReplayFrom = .start(ReplayFromStart())
+
+    /// The resume request that each test sends: the test session, with a
+    /// replay from the start.
+    static let resumeRequest = ResumeSessionRequest(
+        cwd: workingDirectory,
+        sessionId: testSession,
+        replayFrom: replayFromStart
+    )
+
+    /// One agent message, replayed in two chunks.
+    static let chunkedReplay = [
+        agentChunk(text: "Hel", message: "agent-1"),
+        agentChunk(text: "lo", message: "agent-1"),
+    ]
+
+    /// The text of the message of ``chunkedReplay``.
+    static let replayedText = "Hello"
+
+    /// The number of agent messages in ``manyReplayedMessages``.
+    static let manyReplayedMessageCount = 200
+
+    /// Many agent messages, each one in one chunk, which give one transcript
+    /// entry each.
+    static let manyReplayedMessages = (0..<manyReplayedMessageCount).map { index in
+        agentChunk(text: "message \(index)", message: "agent-\(index)")
+    }
+
+    /// The error of a resume that the agent does not advertise.
+    static let resumeUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.resumeSession)
+
+    /// The error that the agent refuses a resume with.
+    static let resumeRefusal = RequestError.invalidParams
 
     /// The update limit of a connection that keeps one update for a session
     /// with no subscriber.
@@ -66,6 +106,15 @@ private enum SessionFactoryFixtures {
     ///     `nil` to accept each close.
     ///   - newSessionGate: The gate that must open before the agent answers
     ///     `session/new`, or `nil` to answer at once.
+    ///   - resumeSessionScript: The updates the agent replays before its
+    ///     `session/resume` answer.
+    ///   - resumeSessionCommands: The command list of the `session/resume`
+    ///     answer.
+    ///   - resumeSessionError: The error the agent refuses each resume with,
+    ///     or `nil` to accept each resume.
+    ///   - resumeSessionGate: The gate that must open, after the replay,
+    ///     before the agent answers `session/resume`, or `nil` to answer at
+    ///     once.
     /// - Returns: The connected model, after `initialize`.
     /// - Throws: Whatever `initialize` threw.
     @MainActor
@@ -75,7 +124,11 @@ private enum SessionFactoryFixtures {
         newSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
         closeSessionError: RequestError? = nil,
-        newSessionGate: UpdateGate? = nil
+        newSessionGate: UpdateGate? = nil,
+        resumeSessionScript: [SessionUpdate] = [],
+        resumeSessionCommands: [AvailableCommand]? = nil,
+        resumeSessionError: RequestError? = nil,
+        resumeSessionGate: UpdateGate? = nil
     ) async throws -> ConnectedModel {
         let connected = await ConnectedModel(
             model: ConnectionModel(coalescingCadence: .zero),
@@ -88,6 +141,10 @@ private enum SessionFactoryFixtures {
                 closeSessionError: closeSessionError,
                 newSessionScript: newSessionScript,
                 newSessionCommands: newSessionCommands,
+                resumeSessionScript: resumeSessionScript,
+                resumeSessionCommands: resumeSessionCommands,
+                resumeSessionError: resumeSessionError,
+                resumeSessionGate: resumeSessionGate,
                 capabilities: capabilities,
                 newSessionGate: newSessionGate
             )
@@ -96,29 +153,62 @@ private enum SessionFactoryFixtures {
         return connected
     }
 
-    /// Reads the outgoing-request events until the `session/new` request
-    /// finished.
+    /// Reads the outgoing-request events until the first request with a
+    /// wire method finished.
     ///
     /// The connection sends `finished` when it takes the answer of the agent,
     /// before the caller of the request continues.
     ///
-    /// - Parameter events: The outgoing-request events of the connection,
-    ///   from a subscription made before the request started.
+    /// - Parameters:
+    ///   - method: The wire method of the request.
+    ///   - events: The outgoing-request events of the connection, from a
+    ///     subscription made before the request started.
     /// - Returns: `true` when the request finished, or `false` when the
     ///   stream ended first.
-    static func newSessionFinished(in events: AsyncStream<OutgoingRequestEvent>) async -> Bool {
-        var newSessionId: RequestId?
+    static func requestFinished(_ method: String, in events: AsyncStream<OutgoingRequestEvent>) async -> Bool {
+        var requestId: RequestId?
         for await event in events {
             switch event {
-            case .started(let id, ClientRequestSpan.Method.newSession):
-                newSessionId = id
-            case .finished(let id) where id == newSessionId:
+            case .started(let id, method):
+                requestId = id
+            case .finished(let id) where id == requestId:
                 return true
             case .started, .finished:
                 continue
             }
         }
         return false
+    }
+
+    /// Gives the text of each agent message of a session model, in
+    /// transcript order.
+    ///
+    /// - Parameter session: The session model.
+    /// - Returns: The joined text of each entry, or `nil` for an entry that
+    ///   is not an agent message.
+    @MainActor
+    static func messageTexts(of session: SessionModel) -> [String?] {
+        session.transcript.map { $0.agentMessage?.content.joinedText }
+    }
+
+    /// Runs one operation of the connection model under a task executor that
+    /// the test holds. The test then decides when the part of the call that
+    /// follows the answer of the agent runs.
+    ///
+    /// - Parameters:
+    ///   - executor: The executor that the test holds.
+    ///   - operation: The operation to run.
+    /// - Returns: The task of the operation.
+    @MainActor
+    static func runHeld<Output: Sendable>(
+        on executor: HoldableTaskExecutor,
+        _ operation: @escaping @MainActor () async throws -> Output
+    ) -> Task<Output, any Error> {
+        Task {
+            try await withTaskExecutorPreference(executor) {
+                try await operation()
+            }
+        }
     }
 }
 
@@ -196,10 +286,8 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(newSessionGate: answerGate)
         let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
         let executor = HoldableTaskExecutor()
-        let creating = Task { [model = connected.model] in
-            try await withTaskExecutorPreference(executor) {
-                try await model.newSession(SessionFactoryFixtures.newSessionRequest)
-            }
+        let creating = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
+            try await model.newSession(SessionFactoryFixtures.newSessionRequest)
         }
         try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.newSession) }
 
@@ -208,13 +296,166 @@ struct ConnectionModelSessionTests {
         // the answer.
         try await executor.whileHeld {
             answerGate.open()
-            #expect(await SessionFactoryFixtures.newSessionFinished(in: requestEvents))
+            #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.newSession, in: requestEvents))
             connected.agentEnd.close()
             try await waitUntil { connected.model.state == .disconnected }
         }
 
         await #expect(throws: ConnectionError.closed) {
             try await creating.value
+        }
+        #expect(connected.model.openSessions.isEmpty)
+    }
+
+    // MARK: - resumeSession
+
+    @Test func resumeOfANewSessionRegistersAModelWithTheReplay() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay
+        )
+
+        let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(connected.model.session(for: testSession) === session)
+        #expect(SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText])
+        #expect(!session.isReplaying)
+        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+    }
+
+    @Test func aReplayGoesIntoTheModelWhileTheModelReplays() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
+            resumeSessionGate: answerGate
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let resuming = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+
+        try await waitUntil {
+            SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText]
+        }
+        #expect(session.isReplaying)
+        answerGate.open()
+
+        #expect(try await resuming.value === session)
+        #expect(!session.isReplaying)
+    }
+
+    @Test func aSecondResumeOfAnOpenSessionGivesTheSameModelWithNoDoubledText() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay
+        )
+        let first = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        let second = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(second === first)
+        #expect(SessionFactoryFixtures.messageTexts(of: second) == [SessionFactoryFixtures.replayedText])
+    }
+
+    @Test func eachReplayedUpdateIsInTheModelWhenTheResumeReturns() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.manyReplayedMessages
+        )
+
+        let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(session.transcript.count == SessionFactoryFixtures.manyReplayedMessageCount)
+        #expect(!session.isReplaying)
+    }
+
+    @Test func aReplayFromTheStartAfterAnOverflowClearsTheMissedUpdatesMark() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            bufferLimits: SessionFactoryFixtures.oneUpdateBuffer,
+            newSessionScript: SessionFactoryFixtures.twoMessages,
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        try #require(session.hasMissedUpdates)
+
+        let resumed = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(resumed === session)
+        #expect(!session.hasMissedUpdates)
+        #expect(SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText])
+    }
+
+    @Test func aResumeAnswerWithACommandListSeedsTheCommands() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionCommands: SessionFactoryFixtures.commands
+        )
+
+        let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(session.availableCommands == SessionFactoryFixtures.commands)
+    }
+
+    @Test func aRefusedResumeOfANewSessionThrowsItsErrorAndRegistersNoSession() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionError: SessionFactoryFixtures.resumeRefusal
+        )
+
+        await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+
+        #expect(connected.model.openSessions.isEmpty)
+    }
+
+    @Test func aRefusedResumeOfAnOpenSessionEndsTheReplayAndKeepsTheModelOpen() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionError: SessionFactoryFixtures.resumeRefusal
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+
+        await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+
+        #expect(!session.isReplaying)
+        #expect(session.history == .live)
+        #expect(!session.isClosed)
+        #expect(connected.model.session(for: testSession) === session)
+    }
+
+    @Test func resumeWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
+        let connected = try await SessionFactoryFixtures.connect(capabilities: AgentCapabilities())
+
+        await #expect(throws: SessionFactoryFixtures.resumeUnsupported) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        // A second initialize makes a round trip after the refused resume, so
+        // a resume that went out would be in the record before its answer.
+        try await connected.initialize()
+
+        #expect(!connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession))
+        #expect(connected.model.openSessions.isEmpty)
+    }
+
+    @Test func aConnectionThatClosesAfterTheResumeAnswerRegistersNoSession() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(resumeSessionGate: answerGate)
+        let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
+        let executor = HoldableTaskExecutor()
+        let resuming = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
+
+        // The executor holds the part of the call that follows the answer, so
+        // the close of the connection always comes before `resumeSession`
+        // reads the answer.
+        try await executor.whileHeld {
+            answerGate.open()
+            #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.resumeSession, in: requestEvents))
+            connected.agentEnd.close()
+            try await waitUntil { connected.model.state == .disconnected }
+        }
+
+        await #expect(throws: ConnectionError.closed) {
+            try await resuming.value
         }
         #expect(connected.model.openSessions.isEmpty)
     }

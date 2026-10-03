@@ -89,21 +89,20 @@ func outcome<Answer: Sendable>(
     }
 }
 
-/// Waits for an idle `state_update` on one session-update stream.
+/// Waits for an idle `state_update` on one session event stream. The
+/// request markers of the stream do not end the wait.
 ///
 /// - Parameters:
-///   - updates: The stream to read.
+///   - events: The stream to read.
 ///   - limit: The longest time to wait.
 /// - Returns: `true` when an idle update arrived before the limit ended.
 func waitForIdle(
-    in updates: AsyncStream<SessionUpdate>,
+    in events: AsyncStream<SessionStreamEvent>,
     within limit: Duration = TransportTestDeadline.limit
 ) async -> Bool {
     await outcome(within: limit) {
-        for await update in updates {
-            if case .stateUpdate(.idle(_)) = update {
-                return true
-            }
+        for await case .update(.stateUpdate(.idle(_))) in events {
+            return true
         }
         return false
     } ?? false
@@ -138,11 +137,11 @@ func promptTurnLandsReply(
     messageID: MessageId,
     expectedText: String
 ) async throws -> Bool {
-    let updates = connection.subscribe(to: sessionId).updates
+    let events = connection.subscribe(to: sessionId).updates
     _ = try await connection.prompt(
         PromptRequest(prompt: [.text(TextContent(text: "Hello"))], sessionId: sessionId)
     )
-    guard await waitForIdle(in: updates) else { return false }
+    guard await waitForIdle(in: events) else { return false }
     let state = client.session(for: sessionId)
     return await eventually {
         state.flushPendingChunks()
