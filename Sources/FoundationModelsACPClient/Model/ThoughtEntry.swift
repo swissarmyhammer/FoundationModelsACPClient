@@ -28,15 +28,11 @@ public final class ThoughtEntry: MessageTranscriptEntry {
         update(from: entry)
     }
 
-    /// Copies the merged state of the engine entry, and writes only the
-    /// fields that changed.
+    /// Gives the message of an agent-thought kind.
     ///
-    /// - Parameter entry: The engine entry of this thought.
-    func update(from entry: FoundationModelsACP.SessionEntry) {
-        guard case .agentThought(let message) = entry.kind else {
-            recordKindMismatch()
-            return
-        }
-        apply(message)
+    /// - Parameter kind: The kind of an engine entry.
+    /// - Returns: The merged thought, or `nil` for another kind.
+    static func message(in kind: FoundationModelsACP.SessionEntry.Kind) -> FoundationModelsACP.SessionEntry.Message? {
+        if case .agentThought(let message) = kind { message } else { nil }
     }
 }

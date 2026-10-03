@@ -176,6 +176,19 @@ private let invalidUTF8Byte: UInt8 = 0xFF
     #expect(entry.meta == metaObject("thought"))
 }
 
+@MainActor @Test func eachMessageClassFindsTheMessageOfItsOwnKindOnly() throws {
+    let userKind = try engineEntry(after: userChunk(text: "Hi")).kind
+    let agentKind = try engineEntry(after: agentChunk(text: "Hello")).kind
+    let thoughtKind = try engineEntry(after: thoughtChunk(text: "Hmm")).kind
+
+    #expect(UserMessageEntry.message(in: userKind)?.content == [textBlock("Hi")])
+    #expect(AgentMessageEntry.message(in: agentKind)?.content == [textBlock("Hello")])
+    #expect(ThoughtEntry.message(in: thoughtKind)?.content == [textBlock("Hmm")])
+    #expect(UserMessageEntry.message(in: agentKind) == nil)
+    #expect(AgentMessageEntry.message(in: thoughtKind) == nil)
+    #expect(ThoughtEntry.message(in: userKind) == nil)
+}
+
 @MainActor @Test func toolCallUpdateCopiesEveryField() throws {
     let entry = try #require(TranscriptEntry(wire: try engineEntry(after: toolCallStatus(id: "tool-1", .pending))).toolCall)
     #expect(entry.status == .pending)

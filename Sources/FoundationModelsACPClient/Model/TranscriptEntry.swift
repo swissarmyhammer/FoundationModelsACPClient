@@ -174,14 +174,29 @@ protocol MessageTranscriptEntry: ObservableTranscriptEntry {
 
     /// The `_meta` field of the message.
     var meta: JSONValue? { get set }
+
+    /// Gives the message of an engine entry kind when the kind is the kind of
+    /// this class.
+    ///
+    /// This case matcher is the only part of the message update that differs
+    /// between the three classes.
+    ///
+    /// - Parameter kind: The kind of an engine entry.
+    /// - Returns: The merged message, or `nil` for a kind of another class.
+    static func message(in kind: FoundationModelsACP.SessionEntry.Kind) -> FoundationModelsACP.SessionEntry.Message?
 }
 
 extension MessageTranscriptEntry {
-    /// Copies the merged state of an engine message, and writes only the
-    /// fields that changed.
+    /// Copies the merged state of the engine entry, and writes only the
+    /// fields that changed. The identity, and the send state of a user
+    /// message, do not change.
     ///
-    /// - Parameter message: The merged message of the engine entry.
-    func apply(_ message: FoundationModelsACP.SessionEntry.Message) {
+    /// - Parameter entry: The engine entry of this message.
+    func update(from entry: FoundationModelsACP.SessionEntry) {
+        guard let message = Self.message(in: entry.kind) else {
+            recordKindMismatch()
+            return
+        }
         assign(message.content, to: \.content)
         assign(Optional(message.messageId), to: \.messageId)
         assign(message.meta.currentValue, to: \.meta)

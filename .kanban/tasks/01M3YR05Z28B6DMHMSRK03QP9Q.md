@@ -50,6 +50,54 @@ comments:
     - evidence: feat(model): add observable transcript entry classes, 18 files (commit sha in git log; local only, not pushed)
     - next: review
   timestamp: 2026-10-03T13:32:49.188077+00:00
+- actor: claude-code
+  id: 01m40zrajw2abq64kzh3dqyfp7
+  text: |-
+    ### review — findings
+    - evidence: `review sha HEAD~1..HEAD` (commit 2c0e48e). 2 findings (2 confirmed, 0 refuted): Sources/FoundationModelsACPClient/Model/ThoughtEntry.swift:35, Sources/FoundationModelsACPClient/Model/UserMessageEntry.swift:59 (duplication/duplication). Both are in the "Review Findings (2026-10-03 08:33)" section of the description.
+    - next: /implement to remove the duplicated `update(from:)` pattern of the three message entry classes, then /review again.
+  timestamp: 2026-10-03T13:37:45.564546+00:00
+- actor: claude-code
+  id: 01m40zrnh40fjapb516v78ydxj
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 10 new files (9 Model sources, 1 test file)
+    - test: green — swift test 280/280 (after harness race fix in TracedSessionHarness.swift / ClientRequestMetricsTests.swift), IntegrationTests 103/103; only accepted warnings
+    - commit: 2c0e48e feat(model): add observable transcript entry classes
+    - review: findings — Sources/FoundationModelsACPClient/Model/ThoughtEntry.swift:35, Sources/FoundationModelsACPClient/Model/UserMessageEntry.swift:59
+  timestamp: 2026-10-03T13:37:56.772929+00:00
+- actor: claude-code
+  id: 01m410047x4yp04hw697g32cc1
+  text: |-
+    Implementation notes (2026-10-03), review findings of 08:33:
+    - Cause: each of the three message classes had its own `update(from:)` with the same guard, kind-mismatch record, and copy. Only the enum case was different.
+    - Fix: the protocol `MessageTranscriptEntry` (TranscriptEntry.swift) now has one requirement `static func message(in kind:) -> SessionEntry.Message?` (the case matcher). One `update(from:)` in the protocol extension does the guard, `recordKindMismatch()`, and the change-only copy. The old helper `apply(_:)` had no other caller, so its body moved into the shared `update(from:)`, and `apply(_:)` is gone.
+    - Each class (UserMessageEntry, AgentMessageEntry, ThoughtEntry) now has only its one-line matcher. No class keeps its own `update(from:)`. The callers (`init(wire:)` and the tests) did not change.
+    - The helper is a protocol member, not a free function, because the swift rule "a function belongs to a type" forbids a new top-level `func`.
+    - TDD: new test `eachMessageClassFindsTheMessageOfItsOwnKindOnly`. RED: did not compile ("type 'ThoughtEntry' has no member 'message'"). GREEN: 1 test passes.
+  timestamp: 2026-10-03T13:42:01.213405+00:00
+- actor: claude-code
+  id: 01m41007eh9pdsvtbafe88yp32
+  text: |-
+    ### implement — changed
+    - evidence: 5 files (not committed): Sources/FoundationModelsACPClient/Model/TranscriptEntry.swift, Sources/FoundationModelsACPClient/Model/UserMessageEntry.swift, Sources/FoundationModelsACPClient/Model/AgentMessageEntry.swift, Sources/FoundationModelsACPClient/Model/ThoughtEntry.swift, Tests/FoundationModelsACPClientTests/Model/TranscriptEntryTests.swift. `swift test --filter eachMessageClassFindsTheMessageOfItsOwnKindOnly`: RED (compile error, member missing), then GREEN (1 passed). `swift build`: Build complete. `swift test`: 281 tests in 27 suites passed, 0 failed (was 280). Warnings: only the accepted MLX "missing creator for mutated node" and the permitted `SessionUpdateAggregator` deprecations. The 2 findings of "Review Findings (2026-10-03 08:33)" are `- [x]`.
+    - next: /review
+  timestamp: 2026-10-03T13:42:04.497546+00:00
+- actor: claude-code
+  id: 01m4105v1tnbkneqkk07qn7ebe
+  text: |-
+    ### test — green
+    - evidence: swift build (root) complete; swift test (root) 281 tests in 27 suites passed, 0 failed, 0 skipped; swift build --package-path IntegrationTests complete; swift test --package-path IntegrationTests 103 tests in 14 suites passed, 0 failed, 0 skipped.
+    - warnings: only accepted ones. The mlx-swift bundle warning ("missing creator for mutated node") and the SessionUpdateAggregator deprecations in the integration build. No other warning.
+    - next: review.
+  timestamp: 2026-10-03T13:45:08.410257+00:00
+- actor: claude-code
+  id: 01m4106f7sxgsarjs894bjx1ej
+  text: |-
+    ### commit — changed
+    - evidence: 1cc3610 refactor(model): share the message entry update on MessageTranscriptEntry, 7 files
+    - next: review
+  timestamp: 2026-10-03T13:45:29.081761+00:00
 depends_on:
 - 01M3YQZVC527493KZJC81S5J74
 position_column: doing
@@ -78,3 +126,13 @@ The engine (from FoundationModelsACP) owns the merge rules. These classes keep n
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-10-03 08:33)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 12 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/Model/ThoughtEntry.swift:35` `duplication/duplication` — The update(from:) method (lines 35–41) is near-verbatim identical to AgentMessageEntry.update(), differing only in the enum case name (.agentThought vs .agentMessage). This logic could drift if one is updated and the other is not. Extract into a shared helper function parameterized by case matcher. All three message-type entries (AgentMessageEntry, ThoughtEntry, UserMessageEntry) conform to MessageTranscriptEntry and follow the same update pattern: guard on a distinct enum case, then call apply(message). Create a helper like `func applyMessageUpdate(from entry: SessionEntry, case matcher: (SessionEntry.Kind) -> SessionEntry.Message?)` and call it from each class.
+- [x] `Sources/FoundationModelsACPClient/Model/UserMessageEntry.swift:59` `duplication/duplication` — The update(from:) method (lines 59–65) is near-verbatim identical to AgentMessageEntry.update(), differing only in the enum case name (.userMessage vs .agentMessage). This logic could drift if one is updated and the other is not. Extract into a shared helper function parameterized by case matcher, as noted above for ThoughtEntry. This will consolidate the three identical update patterns into one shared implementation called from each of the three message-type entry classes.

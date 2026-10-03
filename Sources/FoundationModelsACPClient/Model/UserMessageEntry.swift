@@ -52,15 +52,11 @@ public final class UserMessageEntry: MessageTranscriptEntry {
         update(from: entry)
     }
 
-    /// Copies the merged state of the engine entry, and writes only the
-    /// fields that changed. The identity and the send state do not change.
+    /// Gives the message of a user-message kind.
     ///
-    /// - Parameter entry: The engine entry of this message.
-    func update(from entry: FoundationModelsACP.SessionEntry) {
-        guard case .userMessage(let message) = entry.kind else {
-            recordKindMismatch()
-            return
-        }
-        apply(message)
+    /// - Parameter kind: The kind of an engine entry.
+    /// - Returns: The merged message, or `nil` for another kind.
+    static func message(in kind: FoundationModelsACP.SessionEntry.Kind) -> FoundationModelsACP.SessionEntry.Message? {
+        if case .userMessage(let message) = kind { message } else { nil }
     }
 }
