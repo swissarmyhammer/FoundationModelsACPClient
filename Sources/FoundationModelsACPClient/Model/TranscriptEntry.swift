@@ -112,6 +112,28 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .unknown: self = .unknown(UnknownEntry(wire: entry))
         }
     }
+
+    /// Copies the merged state of an engine entry into the object of this
+    /// entry. Only that one object changes.
+    ///
+    /// The engine never changes a local error entry, so an error entry
+    /// records the kind mismatch and stays unchanged.
+    ///
+    /// - Parameter entry: The engine entry, which the engine gave in an
+    ///   `entryChanged` change.
+    @MainActor
+    func update(from entry: FoundationModelsACP.SessionEntry) {
+        switch self {
+        case .userMessage(let object): object.update(from: entry)
+        case .agentMessage(let object): object.update(from: entry)
+        case .thought(let object): object.update(from: entry)
+        case .toolCall(let object): object.update(from: entry)
+        case .terminal(let object): object.update(from: entry)
+        case .plan(let object): object.update(from: entry)
+        case .unknown(let object): object.update(from: entry)
+        case .error(let object): object.recordKindMismatch()
+        }
+    }
 }
 
 /// The members that each observable transcript entry object has.

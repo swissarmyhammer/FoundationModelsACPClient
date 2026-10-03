@@ -98,10 +98,26 @@ comments:
     - evidence: 1cc3610 refactor(model): share the message entry update on MessageTranscriptEntry, 7 files
     - next: review
   timestamp: 2026-10-03T13:45:29.081761+00:00
+- actor: claude-code
+  id: 01m410bg8v6w2gncnrkgkhb6zc
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 8a95f1d). 0 findings (0 confirmed, 0 refuted); 7 files attempted, 0 failed, 5 reviewed, 2 not reviewed (.kanban/ from .reviewignore). The 2 items of "Review Findings (2026-10-03 08:33)" are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T13:48:13.979488+00:00
+- actor: claude-code
+  id: 01m410bs6ydd8fb07e3zwee2pc
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — shared `update(from:)` on `MessageTranscriptEntry`; 5 files
+    - test: green — swift test 281/281, IntegrationTests 103/103; only accepted warnings
+    - commit: 8a95f1d refactor(model): share the message entry update on MessageTranscriptEntry (the commit comment names 1cc3610, the sha before the amend)
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T13:48:23.134576+00:00
 depends_on:
 - 01M3YQZVC527493KZJC81S5J74
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: bb80
 title: 'Model: add the observable transcript entry classes'
 ---
 ## What
