@@ -76,11 +76,27 @@ comments:
     - evidence: feat(model): add compaction entries and transient notices to SessionModel. Tests: swift test 414/414 two times, IntegrationTests 103/103. Needs FoundationModelsACP revision 60854b6.
     - next: review
   timestamp: 2026-10-03T16:43:00.787442+00:00
+- actor: claude-code
+  id: 01m41aj6zsr20731n3sb6jq56w
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 61ae75e). 11 files reviewed, 7 validator runs, 0 failed. Counts: 0 findings, 0 confirmed, 0 refuted. No earlier Review Findings sections. Excluded by .reviewignore: 6 files in .kanban/.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T16:46:39.609795+00:00
+- actor: claude-code
+  id: 01m41ajdy13za55yw59ypa4kzq
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 11 files; pin FoundationModelsACP 60854b6
+    - test: green — swift test 414/414 x2, IntegrationTests 103/103
+    - commit: 61ae75e feat(model): add compaction entries and transient notices to SessionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T16:46:46.721996+00:00
 depends_on:
 - 01M3YR0FJ4Z55VAXKXQ3KAM7GW
 - 01M3YRC0ERS5FADQYB965X5KJR
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c180
 title: 'Model: compaction transcript entry and transient notices in SessionModel'
 ---
 ## What

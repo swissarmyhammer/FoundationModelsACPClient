@@ -5,11 +5,10 @@
 // It is a pass-through wrapper and nothing more. `AgentProcess` vends its
 // transport as `any ACPTransport`, and `SwiftUIACPClient.connect(over:)` takes
 // any transport, so the tee slots between the two and needs no change in the
-// wire package and no change in this package's library. The shape is the shape
-// of `DisconnectObservingTransport` in the library's
-// `SwiftUIACPClient+Connect.swift`: a forwarding task over the inner stream, a
-// `write(_:)` that goes straight to the inner transport, and a task the stream
-// teardown and `deinit` both cancel.
+// wire package and no change in this package's library. The shape is a
+// forwarding task over the inner stream, a `write(_:)` that goes straight to
+// the inner transport, and a task the stream teardown and `deinit` both
+// cancel.
 //
 // The tee never decodes, never re-encodes and never reorders. A person
 // debugging an agent needs the bytes the agent actually sent, malformed JSON

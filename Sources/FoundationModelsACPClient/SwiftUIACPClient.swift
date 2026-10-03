@@ -2,15 +2,6 @@ import Foundation
 import FoundationModelsACP
 import Observation
 
-/// The connection state of the client, for a UI to observe.
-public enum ConnectionState: Hashable, Sendable {
-    /// No transport is attached.
-    case disconnected
-
-    /// A transport is attached and serving.
-    case connected
-}
-
 /// An observable ACP client container.
 ///
 /// `SwiftUIACPClient` conforms to the wire package's `Client` protocol and

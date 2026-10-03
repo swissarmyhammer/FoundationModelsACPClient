@@ -43,22 +43,6 @@ private func sessionFormRequest(toolCallId: ToolCallId? = nil) -> CreateElicitat
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct SessionModelPendingTests {
-    /// Starts one permission request and waits until it is pending.
-    ///
-    /// - Parameters:
-    ///   - model: The model that holds the request.
-    ///   - request: The request to start.
-    /// - Returns: The task of the agent's call.
-    private func startPermission(
-        on model: SessionModel,
-        _ request: RequestPermissionRequest = SessionModelFixtures.permissionRequest()
-    ) async throws -> Task<RequestPermissionResponse, Never> {
-        let count = model.pendingPermissions.count
-        let task = Task { await model.awaitPermissionDecision(for: request) }
-        try await waitUntil { model.pendingPermissions.count == count + 1 }
-        return task
-    }
-
     /// Starts one elicitation and waits until it is pending.
     ///
     /// - Parameters:
@@ -90,7 +74,7 @@ struct SessionModelPendingTests {
     @Test func selectingAnOptionResolvesThePermissionWithThatOption() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let request = SessionModelFixtures.permissionRequest()
-        let task = try await startPermission(on: model, request)
+        let task = try await SessionModelFixtures.startPermission(on: model, request)
 
         // The pending state carries the whole request, so the UI can show the
         // options and the subject context.
@@ -106,7 +90,7 @@ struct SessionModelPendingTests {
 
     @Test func cancellingTheAgentCallAnswersCancelledAndClearsThePermission() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await startPermission(on: model)
+        let task = try await SessionModelFixtures.startPermission(on: model)
 
         // Task cancellation is how the connection delivers the agent's
         // withdrawal. The await returns only when the continuation resumed, so
@@ -120,7 +104,7 @@ struct SessionModelPendingTests {
 
     @Test func cancellingFromTheUIAnswersCancelledAndClearsThePermission() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await startPermission(on: model)
+        let task = try await SessionModelFixtures.startPermission(on: model)
 
         let pending = try #require(model.pendingPermissions.first)
         model.cancelPermission(pending.id)
@@ -132,7 +116,7 @@ struct SessionModelPendingTests {
 
     @Test func aSecondResolutionOfOnePermissionChangesNothing() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await startPermission(on: model)
+        let task = try await SessionModelFixtures.startPermission(on: model)
         let pending = try #require(model.pendingPermissions.first)
 
         model.selectPermission(pending.id, option: allowOptionId)
@@ -147,8 +131,8 @@ struct SessionModelPendingTests {
 
     @Test func twoOverlappingPermissionsResolveIndependently() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let firstTask = try await startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
-        let secondTask = try await startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
+        let firstTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
+        let secondTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
 
         // More than one outstanding request is supported, in arrival order.
         #expect(model.pendingPermissions.map(\.request.title) == ["First?", "Second?"])
@@ -321,7 +305,7 @@ struct SessionModelPendingTests {
 
     @Test func cancelAllPendingAnswersEveryItem() async throws {
         let (model, entry) = try modelWithToolCall()
-        let permissionTask = try await startPermission(on: model)
+        let permissionTask = try await SessionModelFixtures.startPermission(on: model)
         let formTask = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
         let urlTask = try await startElicitation(
             on: model,
