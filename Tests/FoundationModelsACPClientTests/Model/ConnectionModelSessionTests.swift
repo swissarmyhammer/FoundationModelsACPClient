@@ -41,6 +41,11 @@ private enum SessionFactoryFixtures {
     /// The text of the message of ``chunkedReplay``.
     static let replayedText = "Hello"
 
+    /// The number of resumes in the cancelled-resume test: the cancelled
+    /// resume and the resume that runs after it. Each one replays
+    /// ``chunkedReplay``.
+    static let cancelledAndRunningResumeCount = 2
+
     /// The number of agent messages in ``manyReplayedMessages``.
     static let manyReplayedMessageCount = 200
 
@@ -537,7 +542,7 @@ struct ConnectionModelSessionTests {
         // the replay of the running resume. When the tap gave the chunks of
         // both replays, the model read that marker.
         streamGate.open()
-        for _ in 0..<(2 * replayLength) {
+        for _ in 0..<(SessionFactoryFixtures.cancelledAndRunningResumeCount * replayLength) {
             _ = await tap.next()
         }
         #expect(session.isReplaying)

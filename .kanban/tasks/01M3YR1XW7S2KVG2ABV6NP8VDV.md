@@ -219,6 +219,53 @@ comments:
     - evidence: One local commit "fix(model): end a resume replay only at the marker of its own request" holds all 11 changed files, the .kanban files of this task, and the new task ^j391mtx files. The sha is in the report of the step.
     - next: /review. Nothing is pushed. The task is not moved.
   timestamp: 2026-10-03T21:23:32.505812+00:00
+- actor: claude-code
+  id: 01m41trjdvhw15a172x9nnnwn4
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (commit 06f36da); 1 finding (1 confirmed, 3 refuted) — Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:41 `code-hygiene/magic-numbers-swift`. The 4 prior items of 2026-10-03 15:46 are checked.
+    - next: implement the open item in `## Review Findings (2026-10-03 16:23)`. Replace each magic number in the file with a named constant, not only the number on the reported line. Then review again.
+  timestamp: 2026-10-03T21:29:45.147763+00:00
+- actor: claude-code
+  id: 01m41trxggpxdeamb5v392sxt4
+  text: |-
+    ### finish iteration 3 — findings
+    - implement: changed — 9 files (request-id replay match, ReplayRequests, test helper sync, removed GatedUpdates.init)
+    - test: green — swift test 497/497, IntegrationTests 103/103, stream/resume filter 10/10 runs
+    - commit: 06f36da fix(model): end a resume replay only at the marker of its own request
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:41 (code-hygiene/magic-numbers-swift)
+  timestamp: 2026-10-03T21:29:56.496389+00:00
+- actor: claude-code
+  id: 01m41tz2xqc6jdx8pky1mb5rgb
+  text: |-
+    Fix of "Review Findings (2026-10-03 16:23)" landed (not committed).
+    - The rule is swiftlint `no_magic_numbers`. Before the fix, `swiftlint lint --only-rule no_magic_numbers` over SessionModelStreamTests.swift, ConnectionModelSessionTests.swift and SessionModelFixtures.swift gave 1 violation: SessionModelStreamTests.swift:41:51 (`.number(2)`). After the fix it gives 0 violations.
+    - SessionModelStreamTests.swift: new private constants `markedRequestNumber: Double = 1` and `runningRequestNumber: Double = 2`; `markedRequestId` and `runningRequestId` use them. No other file uses these request numbers, so they are private to the test file, not in `SessionModelFixtures`.
+    - ConnectionModelSessionTests.swift: `2 * replayLength` in `aResumeAfterACancelledStartedResumeEndsItsReplayOnlyAtItsOwnMarker` now uses the new `SessionFactoryFixtures.cancelledAndRunningResumeCount = 2` (the private fixture enum of that file).
+    - Not changed: the literals 0 and 1 (range starts, counters, `.timeLimit(.minutes(1))`, `count == 1`). swiftlint `no_magic_numbers` does not count 0 and 1 as magic numbers, and each other number in the two files is already a direct named-constant declaration.
+  timestamp: 2026-10-03T21:33:18.647812+00:00
+- actor: claude-code
+  id: 01m41tz523a31prn66syrxx2rz
+  text: |-
+    ### implement — changed
+    - evidence: 2 files — Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. swiftlint no_magic_numbers: 0 violations in both files (was 1). `swift build`: complete, only the accepted MLX "missing creator for mutated node" warning. `swift test`: 497 tests in 40 suites passed, 0 failed. The item of 2026-10-03 16:23 is checked.
+    - next: /review. No commit and no push.
+  timestamp: 2026-10-03T21:33:20.835619+00:00
+- actor: claude-code
+  id: 01m41v2zgh72t1scqm31t0hqrq
+  text: |-
+    ### test — green
+    - evidence: swift build — complete, 0 errors. swift test — 497 tests in 40 suites passed. swift test --package-path IntegrationTests — 103 tests in 14 suites passed. 0 failures, 0 skipped.
+    - warnings: only the accepted SwiftPM "missing creator for mutated node" (mlx-swift_Cmlx.bundle). No other warning.
+    - next: review
+  timestamp: 2026-10-03T21:35:26.225263+00:00
+- actor: claude-code
+  id: 01m41v3a4thhyx60ydak8k1jf2
+  text: |-
+    ### commit — changed
+    - evidence: One local commit with the review finding fix. The resume replay tests now name the request numbers. Tests were green before the commit.
+    - next: review
+  timestamp: 2026-10-03T21:35:37.114004+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
@@ -258,3 +305,12 @@ Add the session factory to `ConnectionModel` in `Sources/FoundationModelsACPClie
 - [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:100` `completeness/invariant-propagation` — The `waitForIdle` function signature was changed to require a new parameter `in events: AsyncStream<SessionStreamEvent>`. A 0.94 near-copy exists in the integration tests file that was not updated, causing any integration tests that call this function to fail compilation. Update the `waitForIdle` function in `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift` to match the new signature, adding the `in events: AsyncStream<SessionStreamEvent>` parameter and changing the loop to iterate over `AsyncStream<SessionStreamEvent>` instead of the previous implementation.
 - [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:144` `completeness/invariant-propagation` — The `promptTurnLandsReply` function was changed to extract session events (line 140) and pass them to `waitForIdle` (line 144) with the new required parameter. A 1.00 exact duplicate exists in the integration tests file that was not updated, so it will call `waitForIdle` without the required `in events` parameter, causing a compilation error. Update the `promptTurnLandsReply` function in `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift` to extract the events stream (`let events = connection.subscribe(to: sessionId).updates`) and pass it to `waitForIdle(in: events)` to match the updated unit tests version.
 - [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:139` `correctness/recorded-risk` — A `CancellationError` does not prove that the request never went out. Upstream `Connection.request` calls `outgoingRequests.start` before the write. A cancel after that point goes through `cancelOutbound` -> `fail` -> `removePending(outcome: .failed)`, so the router yields a `requestFinished(method: "session/resume", outcome: .failed)` marker into the session stream BEFORE the caller gets `CancellationError`. `endReplay(of:afterFailure:)` ends the replay at once and does not consume that marker. `SessionModel.requestDidFinish` (`Sources/FoundationModelsACPClient/Model/SessionModel+Stream.swift:77`) matches the marker by method only, not by request id. When the stream task is behind the caller (for example, a long replay is in the stream), a fast second `resumeSession` of the same open model reads the old marker. The second replay then ends as a failure while its request is still in flight, `history` is not set, a `.start` replay does not clear `hasMissedUpdates`, and the call can return before the model holds the whole replay. This breaks the documented contract of `resumeSession(_:)`. Match the replay end to the request id of the running `session/resume` request (the marker has `id`), or consume the marker of a started request before the replay ends. Add a test: cancel a resume after the request started, then resume the same open session at once, and check that the second replay ends only at its own marker.
+
+## Review Findings (2026-10-03 16:23)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 9 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:41` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

@@ -33,12 +33,21 @@ private let replayedUpdates: [SessionUpdate] = [
 /// message, the agent message, and the tool call.
 private let replayedEntryCount = 3
 
+/// The number of the JSON-RPC ID of ``markedRequestId``. The connection
+/// gives its requests ascending numbers.
+private let markedRequestNumber: Double = 1
+
+/// The number of the JSON-RPC ID of ``runningRequestId``: the number of the
+/// request that the connection sends after the request of
+/// ``markedRequestNumber``.
+private let runningRequestNumber: Double = 2
+
 /// The JSON-RPC ID of the request whose marker a hand-made stream carries.
-private let markedRequestId: RequestId = .number(1)
+private let markedRequestId: RequestId = .number(markedRequestNumber)
 
 /// The JSON-RPC ID of a `session/resume` request that started after the
 /// request of ``markedRequestId``.
-private let runningRequestId: RequestId = .number(2)
+private let runningRequestId: RequestId = .number(runningRequestNumber)
 
 /// Makes the marker of a finished request of the test session.
 ///
