@@ -95,7 +95,7 @@ struct SessionModelPendingTests {
     ///
     /// - Returns: The model and the entry.
     private func modelWithToolCall() throws -> (SessionModel, ToolCallEntry) {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         model.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: linkedToolCallId, title: .value("Deploy"))))
         let entry = try #require(model.transcript.first?.toolCall)
         return (model, entry)
@@ -104,7 +104,7 @@ struct SessionModelPendingTests {
     // MARK: - Permissions
 
     @Test func selectingAnOptionResolvesThePermissionWithThatOption() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let request = permissionRequest()
         let task = try await startPermission(on: model, request)
 
@@ -121,7 +121,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func cancellingTheAgentCallAnswersCancelledAndClearsThePermission() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startPermission(on: model)
 
         // Task cancellation is how the connection delivers the agent's
@@ -135,7 +135,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func cancellingFromTheUIAnswersCancelledAndClearsThePermission() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startPermission(on: model)
 
         let pending = try #require(model.pendingPermissions.first)
@@ -147,7 +147,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func aSecondResolutionOfOnePermissionChangesNothing() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startPermission(on: model)
         let pending = try #require(model.pendingPermissions.first)
 
@@ -162,7 +162,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func twoOverlappingPermissionsResolveIndependently() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let firstTask = try await startPermission(on: model, permissionRequest(title: "First?"))
         let secondTask = try await startPermission(on: model, permissionRequest(title: "Second?"))
 
@@ -183,7 +183,7 @@ struct SessionModelPendingTests {
     // MARK: - Elicitations
 
     @Test func acceptingAFormElicitationResolvesWithAcceptAndTheValues() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let request = sessionFormRequest()
         let task = try await startElicitation(on: model, request)
 
@@ -199,7 +199,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func decliningAnElicitationResolvesWithDecline() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model)
 
         model.declineElicitation(try #require(model.pendingElicitations.first).id)
@@ -210,7 +210,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func cancellingAnElicitationFromTheUIResolvesWithCancel() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model)
 
         model.cancelElicitation(try #require(model.pendingElicitations.first).id)
@@ -221,7 +221,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func cancellingTheAgentCallResolvesTheElicitationWithCancel() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model)
 
         task.cancel()
@@ -232,7 +232,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func aPendingUrlElicitationShowsTheTargetHostForTheConsentGate() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(
             on: model,
             ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
@@ -250,7 +250,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func completingAUrlElicitationResolvesWithAcceptAndNoContent() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(
             on: model,
             ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
@@ -266,7 +266,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func completingAnUnknownElicitationIdChangesNothing() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(
             on: model,
             ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
@@ -307,7 +307,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func toolCallLinkWhenElicitationArrivesFirst() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
         let pending = try #require(model.pendingElicitations.first)
 
@@ -324,7 +324,7 @@ struct SessionModelPendingTests {
     }
 
     @Test func aWithdrawnElicitationArrivingFirstLeavesNoLinkForALaterToolCall() async throws {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
 
         task.cancel()

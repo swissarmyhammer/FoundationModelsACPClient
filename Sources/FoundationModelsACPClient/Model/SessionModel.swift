@@ -32,6 +32,12 @@ import Observation
 /// flush and not one time for each chunk. Any other update flushes the buffer
 /// first, so the applied order is the arrival order. ``updateTap()`` gives
 /// each raw update at its arrival, with no delay from the buffer.
+///
+/// ``prompt(_:meta:)`` shows the prompt at once as a local user message in
+/// the pending state. The prompt response or the echoed `user_message`,
+/// whichever arrives first, links that entry to the message id that the
+/// agent gave. The entry keeps its object and its identity, and the echo
+/// adds no second entry.
 @MainActor @Observable
 public final class SessionModel {
     /// The identifier of the session.
@@ -112,20 +118,41 @@ public final class SessionModel {
     /// identity of the tap.
     @ObservationIgnored var updateTaps: [UUID: AsyncStream<SessionUpdate>.Continuation] = [:]
 
+    /// The sender of the requests of this session.
+    @ObservationIgnored let requestSender: any SessionRequestSender
+
+    /// Links each local prompt to the user message that the agent inserts
+    /// for it, from the prompt response and from the echoed `user_message`.
+    @ObservationIgnored private var promptCorrelator = PendingPromptCorrelator<TranscriptEntry.ID>()
+
+    /// The local user messages that the agent did not link yet, keyed by
+    /// their local identity.
+    @ObservationIgnored private var unlinkedPrompts: [TranscriptEntry.ID: UserMessageEntry] = [:]
+
+    /// The engine identities of the user-message echoes that arrived while a
+    /// prompt waited for its response. The transcript does not show them
+    /// until a response links one to its local entry, or until no prompt
+    /// waits.
+    @ObservationIgnored private var heldEchoes: Set<FoundationModelsACP.SessionEntry.ID> = []
+
     /// Makes the model of a session with an empty transcript and no state.
     ///
     /// - Parameters:
     ///   - sessionId: The identifier of the session.
+    ///   - requestSender: The sender of the requests of this session. The
+    ///     connection model gives the real sender; tests give a fake.
     ///   - coalescingCadence: The cadence between coalesced flushes of the
     ///     chunk buffer. `.zero` applies each chunk at once.
     ///   - clock: The clock that schedules the coalesced flushes. Tests give
     ///     a manual clock, so they do not read the wall clock.
     init(
         sessionId: SessionId,
+        requestSender: any SessionRequestSender,
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.sessionId = sessionId
+        self.requestSender = requestSender
         self.coalescingCadence = coalescingCadence
         self.clock = clock
     }
@@ -158,9 +185,19 @@ public final class SessionModel {
     /// with the last state of that entry. Thus N chunks of one message write
     /// the entry one time, and the result is the same as N separate folds.
     ///
+    /// Each update also goes to the prompt correlator before the engine
+    /// applies it. A buffered chunk and an update that folds at once both
+    /// come through here, so an echo of a local prompt links its local entry
+    /// on each path.
+    ///
     /// - Parameter updates: The updates to fold, in arrival order.
     func fold(_ updates: [SessionUpdate]) {
-        let changes = updates.map { engine.apply($0) }
+        let changes = updates.map { update in
+            if let link = promptCorrelator.observe(update) {
+                linkPrompt(link)
+            }
+            return engine.apply(update)
+        }
         for change in SessionMergeEngine.Change.collapsed(changes) {
             reflect(change)
         }
@@ -198,13 +235,34 @@ public final class SessionModel {
         }
     }
 
-    /// Appends the object of a new engine entry to the transcript.
+    /// Shows a new engine entry in the transcript.
+    ///
+    /// An entry that a prompt link already gave a local object updates that
+    /// object, so the echo of a prompt adds no second entry. A user-message
+    /// echo that arrives while a prompt waits for its response is held: the
+    /// response tells whether it belongs to that prompt. Each other entry
+    /// gets a new object.
+    ///
+    /// - Parameter entry: The engine entry that the engine added.
+    private func addEntry(_ entry: FoundationModelsACP.SessionEntry) {
+        if let linked = wireEntries[entry.id] {
+            linked.update(from: entry)
+            return
+        }
+        if case .userMessage = entry.kind, isPromptAwaitingResponse {
+            heldEchoes.insert(entry.id)
+            return
+        }
+        appendWireEntry(entry)
+    }
+
+    /// Appends a new object for an engine entry to the transcript.
     ///
     /// A new tool-call entry also takes the links of the pending
     /// elicitations that arrived before it.
     ///
-    /// - Parameter entry: The engine entry that the engine added.
-    private func addEntry(_ entry: FoundationModelsACP.SessionEntry) {
+    /// - Parameter entry: The engine entry.
+    private func appendWireEntry(_ entry: FoundationModelsACP.SessionEntry) {
         let object = TranscriptEntry(wire: entry)
         wireEntries[entry.id] = object
         attachUnresolvedElicitationLinks(to: object)
@@ -213,21 +271,126 @@ public final class SessionModel {
 
     /// Copies the merged state of a changed engine entry into its object.
     ///
-    /// The engine changes only an entry that it added before, so the object
-    /// is always there. A missing object is a defect: the assertion stops a
-    /// debug build, the log records it in a release build, and the model
-    /// stays unchanged.
+    /// A held echo has no object yet; the engine keeps its merged state, and
+    /// the link or the release reads that state. The engine changes only an
+    /// entry that it added before, so each other object is always there. A
+    /// missing object is a defect: the assertion stops a debug build, the log
+    /// records it in a release build, and the model stays unchanged.
     ///
     /// - Parameter entry: The engine entry that the engine changed.
     private func changeEntry(_ entry: FoundationModelsACP.SessionEntry) {
+        guard !heldEchoes.contains(entry.id) else { return }
         guard let object = wireEntries[entry.id] else {
-            assertionFailure("the engine changed an entry that the model does not have: \(entry.id)")
-            Logger(label: ACPClientTelemetry.logLabel).error(
-                "The merge engine changed a transcript entry that the session model does not have; the model stays unchanged.",
-                metadata: [ACPClientTelemetry.LogMetadataKey.sessionID: "\(sessionId.rawValue)"]
+            recordDefect(
+                "the engine changed an entry that the model does not have: \(entry.id)",
+                log: "The merge engine changed a transcript entry that the session model does not have; the model stays unchanged."
             )
             return
         }
         object.update(from: entry)
+    }
+
+    /// Records a defect of the model: the assertion stops a debug build, and
+    /// the log records the defect in a release build.
+    ///
+    /// - Parameters:
+    ///   - detail: The assertion message, for the developer.
+    ///   - message: The log message, for a release build.
+    private func recordDefect(_ detail: String, log message: Logger.Message) {
+        assertionFailure(detail)
+        Logger(label: ACPClientTelemetry.logLabel).error(
+            message,
+            metadata: [ACPClientTelemetry.LogMetadataKey.sessionID: "\(sessionId.rawValue)"]
+        )
+    }
+
+    // MARK: - Prompt links
+
+    /// Tells whether a local prompt waits for its `session/prompt` response.
+    private var isPromptAwaitingResponse: Bool {
+        unlinkedPrompts.values.contains { $0.sendState == .pending }
+    }
+
+    /// Appends the local user message of a prompt that the client is about
+    /// to send, and records it for the link.
+    ///
+    /// - Parameter entry: The local user message, in the pending state.
+    func addPendingPrompt(_ entry: UserMessageEntry) {
+        unlinkedPrompts[entry.id] = entry
+        promptCorrelator.addPendingPrompt(entry.id)
+        transcript.append(.userMessage(entry))
+    }
+
+    /// Records the `session/prompt` response of a local prompt.
+    ///
+    /// The response sets the message id and the sent state at once. When the
+    /// echo arrived first, the response also links the held echo to the local
+    /// entry. When no other prompt waits, each held echo that no response
+    /// claimed is a message from another source, so the transcript shows it.
+    ///
+    /// - Parameters:
+    ///   - entry: The local user message of the prompt.
+    ///   - response: The response, which names the inserted user message.
+    func resolvePrompt(_ entry: UserMessageEntry, with response: PromptResponse) {
+        entry.assign(Optional(response.messageId), to: \.messageId)
+        entry.assign(.sent, to: \.sendState)
+        if let link = promptCorrelator.resolve(entry.id, with: response) {
+            linkPrompt(link)
+        }
+        showUnclaimedEchoesWhenNoPromptWaits()
+    }
+
+    /// Records the failure of a local prompt: the entry gets the failed
+    /// state and no link.
+    ///
+    /// - Parameter entry: The local user message of the prompt.
+    func failPrompt(_ entry: UserMessageEntry) {
+        unlinkedPrompts[entry.id] = nil
+        promptCorrelator.removePendingPrompt(entry.id)
+        entry.assign(.failed, to: \.sendState)
+        showUnclaimedEchoesWhenNoPromptWaits()
+    }
+
+    /// Appends an entry that the client made itself to the transcript.
+    ///
+    /// - Parameter entry: The local entry.
+    func appendLocalEntry(_ entry: TranscriptEntry) {
+        transcript.append(entry)
+    }
+
+    /// Makes the local entry of a prompt the object of its engine entry.
+    ///
+    /// The local entry keeps its object and its identity. It takes the
+    /// message id and the sent state, and, when its echo was held, the merged
+    /// state of that echo. The correlator links only a prompt that the model
+    /// recorded and did not link, so a missing prompt is a defect: the
+    /// assertion stops a debug build, the log records it in a release build,
+    /// and the model stays unchanged.
+    ///
+    /// - Parameter link: The link that the correlator gave.
+    private func linkPrompt(_ link: PendingPromptCorrelator<TranscriptEntry.ID>.Link) {
+        guard let entry = unlinkedPrompts.removeValue(forKey: link.localID) else {
+            recordDefect(
+                "the correlator linked a prompt that the model does not have: \(link.localID)",
+                log: "The prompt correlator linked a prompt that the session model does not have; the model stays unchanged."
+            )
+            return
+        }
+        wireEntries[link.entryID] = .userMessage(entry)
+        entry.assign(Optional(link.messageId), to: \.messageId)
+        entry.assign(.sent, to: \.sendState)
+        guard heldEchoes.remove(link.entryID) != nil, let echo = engine.entry(withID: link.entryID) else { return }
+        entry.update(from: echo)
+    }
+
+    /// Shows each held echo, in engine order, when no prompt waits for its
+    /// response. No later response can claim such an echo.
+    private func showUnclaimedEchoesWhenNoPromptWaits() {
+        guard !isPromptAwaitingResponse, !heldEchoes.isEmpty else { return }
+        let unclaimed = heldEchoes
+        heldEchoes.removeAll()
+        for entry in engine.entries where unclaimed.contains(entry.id) {
+            appendWireEntry(entry)
+        }
     }
 }

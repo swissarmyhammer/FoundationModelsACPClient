@@ -46,7 +46,7 @@ private let toolCallId = ToolCallId(rawValue: "tool-1")
 /// - Returns: The model.
 @MainActor
 private func foldedModel(_ updates: SessionUpdate...) -> SessionModel {
-    let model = SessionModel(sessionId: testSession, coalescingCadence: .zero)
+    let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero)
     for update in updates {
         model.apply(update)
     }
@@ -85,7 +85,7 @@ struct SessionModelFoldTests {
     // MARK: - Identity and the empty state
 
     @Test func newModelHasTheSessionIdAndNoState() {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
         #expect(model.sessionId == testSession)
         #expect(model.transcript.isEmpty)
@@ -296,7 +296,7 @@ struct SessionModelFoldTests {
     }
 
     @Test func emptyAvailableCommandsUpdateGivesAnEmptyListNotNil() {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         #expect(model.availableCommands == nil)
 
         model.apply(.availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])))
@@ -331,7 +331,7 @@ struct SessionModelFoldTests {
     // MARK: - Seed
 
     @Test func seedWithNilCommandsLeavesNil() {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
         model.seed(availableCommands: nil, configOptions: [modeOption])
 
@@ -340,7 +340,7 @@ struct SessionModelFoldTests {
     }
 
     @Test func seedWithCommandsSetsThem() {
-        let model = SessionModel(sessionId: testSession)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
         model.seed(availableCommands: [planCommand], configOptions: nil)
 

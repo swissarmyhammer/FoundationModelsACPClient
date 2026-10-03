@@ -36,7 +36,7 @@ private let mixedChunks = ["Hé", "llo,  ", "\n\t", "👋🏽 ", "cafe\u{301}", 
 /// - Returns: The model.
 @MainActor
 private func coalescingModel(clock: ManualClock) -> SessionModel {
-    SessionModel(sessionId: testSession, coalescingCadence: testCadence, clock: clock)
+    SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: testCadence, clock: clock)
 }
 
 /// Counts each observable change of the values that `read` reads.
@@ -102,7 +102,7 @@ struct SessionModelCoalescingTests {
 
     @Test func zeroCadenceAppliesEachChunkAtOnce() throws {
         let clock = ManualClock()
-        let model = SessionModel(sessionId: testSession, coalescingCadence: .zero, clock: clock)
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero, clock: clock)
 
         model.apply(agentChunk(text: "now"))
 
@@ -146,7 +146,7 @@ struct SessionModelCoalescingTests {
 
     @Test func coalescedTextEqualsOneByOneApplication() throws {
         let coalesced = coalescingModel(clock: ManualClock())
-        let oneByOne = SessionModel(sessionId: testSession, coalescingCadence: .zero, clock: ManualClock())
+        let oneByOne = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero, clock: ManualClock())
 
         for chunk in mixedChunks {
             coalesced.apply(agentChunk(text: chunk))

@@ -146,10 +146,26 @@ comments:
     - evidence: refactor(model): define the coalescing cadence once on SessionModel. 7 files (5 source and test, 2 kanban). swift test 351/351, IntegrationTests 103/103.
     - next: review
   timestamp: 2026-10-03T15:27:48.176020+00:00
+- actor: claude-code
+  id: 01m4166w6dzs6z478twyppwh05
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 0bb60e0). 0 findings (0 confirmed, 0 refuted, 7 attempted, 0 failed). 5 files reviewed; 2 .kanban files excluded by .reviewignore. All 5 prior findings are checked.
+    - next: none. The task is in done.
+  timestamp: 2026-10-03T15:30:33.805988+00:00
+- actor: claude-code
+  id: 01m41672bvk60xkxkeeb18jz8r
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: changed — cadence defined once as SessionModel.defaultCoalescingCadence; 5 files
+    - test: green — swift test 351/351, IntegrationTests 103/103
+    - commit: 0bb60e0 refactor(model): define the coalescing cadence once on SessionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T15:30:40.123900+00:00
 depends_on:
 - 01M3YR0FJ4Z55VAXKXQ3KAM7GW
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: be80
 title: 'Model: SessionModel display-rate chunk coalescing and a raw update tap'
 ---
 ## What

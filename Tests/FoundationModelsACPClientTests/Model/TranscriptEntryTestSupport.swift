@@ -43,6 +43,11 @@ extension TranscriptEntry {
     var unknown: UnknownEntry? {
         if case .unknown(let object) = self { object } else { nil }
     }
+
+    /// The error object, or `nil` for another kind.
+    var error: ErrorEntry? {
+        if case .error(let object) = self { object } else { nil }
+    }
 }
 
 /// Tells if a write fires the observation of a read.
