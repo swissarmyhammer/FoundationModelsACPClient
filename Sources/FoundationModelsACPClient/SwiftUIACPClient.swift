@@ -90,7 +90,7 @@ public final class SwiftUIACPClient: Client {
     ///   - clock: The clock that schedules the coalesced flushes. Tests
     ///     inject a manual clock, so they do not read the wall clock.
     public init(
-        coalescingCadence: Duration = ACPSessionState.defaultCoalescingCadence,
+        coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.coalescingCadence = coalescingCadence

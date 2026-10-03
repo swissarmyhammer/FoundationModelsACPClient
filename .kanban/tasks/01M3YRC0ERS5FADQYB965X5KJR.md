@@ -95,6 +95,57 @@ comments:
     - evidence: refactor(model): share chunk coalescing between SessionModel and ACPSessionState, 8 files (swift test 352/352 two times, IntegrationTests 103/103)
     - next: review. A .zero cadence now applies each chunk at once in ACPSessionState.
   timestamp: 2026-10-03T15:10:44.628603+00:00
+- actor: claude-code
+  id: 01m415hjt0zh8t0kjg935tqmtg
+  text: |-
+    ### review — stuck
+    - evidence: review sha HEAD~1..HEAD (commit 1c35305). 2 findings (2 confirmed, 1 refuted). Sources/FoundationModelsACPClient/ACPSessionState.swift:140, Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:15. Both are duplication/duplication. All 3 prior findings are checked.
+    - blocker (true conflict): the finding at Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:15 tells the implementer to remove `public static let defaultCoalescingCadence` from `SessionModel` and to use `ChunkCoalescer.defaultCadence` as the default value. The "What" section of this task names the contract `SessionModel.init(sessionId:, coalescingCadence: Duration = SessionModel.defaultCoalescingCadence (33 ms), ...)`. The test `SessionModelCoalescingTests.defaultCadenceIsThirtyThreeMilliseconds` reads `SessionModel.defaultCoalescingCadence`. The finding fights this documented contract. Also, `ChunkCoalescer` is internal, and the finding at Sources/FoundationModelsACPClient/ACPSessionState.swift:140 removes a public constant that the public `SwiftUIACPClient.init` uses as its default value. A public default argument cannot refer to an internal symbol, so that fix also changes the access level of `ChunkCoalescer`.
+    - next: a person must decide: (a) change the task contract and remove `SessionModel.defaultCoalescingCadence`, or (b) correct the duplication rule so that it accepts a public alias of an internal constant. The task stays in review. No code changed.
+  timestamp: 2026-10-03T15:18:56.064757+00:00
+- actor: claude-code
+  id: 01m415ja0xd0rewm3b9kssx5tb
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — shared ChunkCoalescer (5 files, 10 new tests)
+    - test: green — swift test 352/352 (two runs), IntegrationTests 103/103
+    - commit: 1c35305 refactor(model): share chunk coalescing between SessionModel and ACPSessionState
+    - review: findings (reviewer wrote "stuck") — Sources/FoundationModelsACPClient/ACPSessionState.swift:140, Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:15
+
+    ORCHESTRATOR NOTE: this is not a true conflict. The "contract" is the text of this task, and a fix exists that obeys the finding and keeps `SessionModel.defaultCoalescingCadence`: define the 33 ms value ONE time as the public `SessionModel.defaultCoalescingCadence` (a stored value, not a forward); `ChunkCoalescer` has no default cadence of its own and takes the cadence as a parameter; `ACPSessionState.init` and `SwiftUIACPClient.init` use `SessionModel.defaultCoalescingCadence` as their default; delete `ACPSessionState.defaultCoalescingCadence` (the old API goes away in 0w14d6x; update its callers and tests). Then no forwarding alias remains.
+  timestamp: 2026-10-03T15:19:19.837662+00:00
+- actor: claude-code
+  id: 01m415tpz3jw109ptk37mfhedv
+  text: |-
+    Alias fix landed (2 review findings of 2026-10-03 10:11), as the ORCHESTRATOR NOTE says.
+    - The 33 ms value has one definition: `public static let defaultCoalescingCadence: Duration = .milliseconds(defaultCoalescingCadenceMilliseconds)` on `SessionModel` (in `SessionModel+Coalescing.swift`), with a named private constant `defaultCoalescingCadenceMilliseconds = 33`. It is a stored value, not a forward.
+    - `ChunkCoalescer.defaultCadence` and `ChunkCoalescer.defaultCadenceMilliseconds` are deleted. The coalescer takes the cadence only as an init parameter. Its tests already gave a cadence; the test `ChunkCoalescerTests.defaultCadenceIsThirtyThreeMilliseconds` and its constant are deleted, because the symbol is gone. `SessionModelCoalescingTests.defaultCadenceIsThirtyThreeMilliseconds` still checks the 33 ms value.
+    - `ACPSessionState.defaultCoalescingCadence` is deleted. `ACPSessionState.init` and `SwiftUIACPClient.init` use `SessionModel.defaultCoalescingCadence` as the default. No other caller existed in Sources, Tests, IntegrationTests or the acp-client targets (search for `defaultCoalescingCadence`, `defaultCadence`, `static let *Cadence`, `= 33`).
+    - Note on the finding text: it says to use `ChunkCoalescer.defaultCadence` directly. That is not possible for the public inits (`ChunkCoalescer` is internal), so the fix follows the ORCHESTRATOR NOTE. The finding cause (two forwarding aliases of one value) is removed.
+    - TDD: RED was the build failure "type 'ChunkCoalescer' has no member 'defaultCadence'" after the deletion. GREEN: `swift test --filter` on the coalescing suites, 29 tests passed.
+  timestamp: 2026-10-03T15:23:55.235070+00:00
+- actor: claude-code
+  id: 01m415tstcqtvfc7c25z471a47
+  text: |-
+    ### implement — changed
+    - evidence: 5 files — Sources/FoundationModelsACPClient/Model/ChunkCoalescer.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift, Sources/FoundationModelsACPClient/ACPSessionState.swift, Sources/FoundationModelsACPClient/SwiftUIACPClient.swift, Tests/FoundationModelsACPClientTests/Model/ChunkCoalescerTests.swift. `swift build`: complete. `swift test`: 351 tests in 31 suites passed, 0 failed (352 before, minus the deleted test of the removed `ChunkCoalescer.defaultCadence`). `swift build --package-path IntegrationTests`: complete. Warnings: only the MLX "missing creator for mutated node" and the `SessionUpdateAggregator` deprecations, both accepted. Both findings of 2026-10-03 10:11 are checked.
+    - next: /review
+  timestamp: 2026-10-03T15:23:58.156966+00:00
+- actor: claude-code
+  id: 01m4161ajxggzj4s7rg28n3brh
+  text: |-
+    ### test — green
+    - evidence: swift build OK; swift test 351 tests in 31 suites passed, 0 failed, 0 skipped; swift build --package-path IntegrationTests OK; swift test --package-path IntegrationTests 103 tests in 14 suites passed, 0 failed, 0 skipped.
+    - warnings: only accepted ones (mlx-swift Cmlx bundle "missing creator" and SessionUpdateAggregator deprecations).
+    - next: review
+  timestamp: 2026-10-03T15:27:31.933368+00:00
+- actor: claude-code
+  id: 01m4161tegk6sr1r303xn8q2yy
+  text: |-
+    ### commit — changed
+    - evidence: refactor(model): define the coalescing cadence once on SessionModel. 7 files (5 source and test, 2 kanban). swift test 351/351, IntegrationTests 103/103.
+    - next: review
+  timestamp: 2026-10-03T15:27:48.176020+00:00
 depends_on:
 - 01M3YR0FJ4Z55VAXKXQ3KAM7GW
 position_column: doing
@@ -130,3 +181,13 @@ Port the chunk coalescing of `ACPSessionState` to `SessionModel`, and add a raw 
 - [x] `Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:29` `duplication/duplication` — This implementation of flushPendingChunks duplicates nearly identical logic (0.96 similarity) already present in ACPSessionState.flushPendingChunks. When identical logic is duplicated across classes, fixes to one copy will need to be applied to the other to prevent drift. Extract the shared chunk flushing logic into a reusable helper or protocol extension that both SessionModel and ACPSessionState can use. The helper should accept a closure for the final operation (fold for SessionModel, whatever ACPSessionState uses) to handle the one differing line.
 - [x] `Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:68` `duplication/duplication` — This implementation of scheduleFlushIfNeeded is nearly identical (0.99 similarity) to ACPSessionState.scheduleFlushIfNeeded. The extremely high similarity indicates verbatim code that will need simultaneous maintenance if updated. Extract the task scheduling logic into a shared utility function. The differences are only in which properties are accessed (cadence, clock) and which method is called at completion (flushPendingChunks). Both can be parameterized to a single helper.
 - [x] `Sources/FoundationModelsACPClient/Model/SessionModel.swift:147` `duplication/duplication` — The rewritten apply() method implementation duplicates nearly identical logic (0.86 similarity) from ACPSessionState.apply(). Both orchestrate the same sequence: yield to taps, check coalescibility, then either enqueue or flush-and-fold. This orchestration will need to be kept synchronized across both classes. Extract the shared apply() orchestration pattern into a common method or protocol extension that both SessionModel and ACPSessionState can use, parameterizing the differences (the enqueue vs. fold decision, the coalescing cadence check).
+
+## Review Findings (2026-10-03 10:11)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/ACPSessionState.swift:140` `duplication/duplication` — Identical static property forwarding to ChunkCoalescer.defaultCadence exists in SessionModel+Coalescing.swift:15. Both classes alias the same value, creating avoidable duplication. Remove this property definition. Update ACPSessionState's init signature to use ChunkCoalescer.defaultCadence directly as the default parameter value for coalescingCadence.
+- [x] `Sources/FoundationModelsACPClient/Model/SessionModel+Coalescing.swift:15` `duplication/duplication` — Identical static property forwarding to ChunkCoalescer.defaultCadence exists in ACPSessionState.swift:140. Both classes alias the same value, creating avoidable duplication. Remove this property definition. Update SessionModel's init signature to use ChunkCoalescer.defaultCadence directly as the default parameter value for coalescingCadence.

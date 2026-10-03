@@ -8,11 +8,16 @@ import FoundationModelsACP
 // consumers at its arrival, with no delay from the buffer.
 
 extension SessionModel {
+    /// The default coalescing cadence, in milliseconds.
+    private static let defaultCoalescingCadenceMilliseconds = 33
+
     /// The default display-rate cadence for chunk coalescing.
     ///
     /// The value gives approximately 30 flushes for each second. That rate is
-    /// smooth for a reader and far under the token rate.
-    public static let defaultCoalescingCadence: Duration = ChunkCoalescer.defaultCadence
+    /// smooth for a reader and far under the token rate. This is the one
+    /// definition of the value: ``ACPSessionState`` and ``SwiftUIACPClient``
+    /// also use it as their default cadence.
+    public static let defaultCoalescingCadence: Duration = .milliseconds(defaultCoalescingCadenceMilliseconds)
 
     // MARK: - Coalescing
 

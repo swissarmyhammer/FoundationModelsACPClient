@@ -8,9 +8,6 @@ import Testing
 // `SessionModel` and `ACPSessionState` share. A manual clock controls the
 // cadence, so no test reads the wall clock.
 
-/// The default cadence that the coalescer must use, in milliseconds.
-private let expectedDefaultCadenceMilliseconds = 33
-
 /// The test cadence, in milliseconds.
 private let testCadenceMilliseconds = 40
 
@@ -54,10 +51,6 @@ private final class RecordingOwner {
 @Suite(.timeLimit(.minutes(1)))
 struct ChunkCoalescerTests {
     // MARK: - Cadence
-
-    @Test func defaultCadenceIsThirtyThreeMilliseconds() {
-        #expect(ChunkCoalescer.defaultCadence == .milliseconds(expectedDefaultCadenceMilliseconds))
-    }
 
     @Test func chunksWaitUntilTheCadenceElapsesThenFoldAsOneBatch() async {
         let clock = ManualClock()

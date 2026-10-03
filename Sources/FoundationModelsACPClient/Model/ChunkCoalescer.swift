@@ -16,15 +16,6 @@ import FoundationModelsACP
 /// must capture the owner weakly.
 @MainActor
 final class ChunkCoalescer {
-    /// The default coalescing cadence, in milliseconds.
-    private static let defaultCadenceMilliseconds = 33
-
-    /// The default display-rate cadence.
-    ///
-    /// The value gives approximately 30 flushes for each second. That rate is
-    /// smooth for a reader and far under the token rate.
-    static let defaultCadence: Duration = .milliseconds(defaultCadenceMilliseconds)
-
     /// The cadence between coalesced flushes. `.zero` applies each chunk at
     /// once.
     private let cadence: Duration
