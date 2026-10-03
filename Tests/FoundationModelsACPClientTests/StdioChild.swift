@@ -1,8 +1,9 @@
 import Darwin
 
 // The children the process tests spawn. They are `/bin/cat`, `/bin/sleep` and
-// a `/bin/sh` script, and not an ACP agent: `cat` reads its stdin until end of
-// file, `sleep` ignores its stdin, and the script runs `cat` and then `sleep`.
+// two `/bin/sh` scripts, and not an ACP agent: `cat` reads its stdin until end
+// of file, `sleep` ignores its stdin, one script runs `cat` and then `sleep`,
+// and the other tells whether the child holds one descriptor.
 // The tests that spawn a real foreign agent over stdio live in the nested
 // `IntegrationTests` package.
 
@@ -28,6 +29,34 @@ enum StdioChild {
     /// late exit is a deterministic model of a child that a loaded machine
     /// schedules late.
     static let slowReadingScript = ["-c", "/bin/cat; /bin/sleep 0.5"]
+
+    /// The command for a child that tells whether it holds one descriptor. It
+    /// runs the script of ``descriptorProbeArguments(for:)``.
+    static let descriptorProbeCommand = "/bin/sh"
+
+    /// The word the descriptor probe writes on its stdout when it holds the
+    /// descriptor.
+    static let descriptorOpenAnswer = "open"
+
+    /// The word the descriptor probe writes on its stdout when it does not
+    /// hold the descriptor.
+    static let descriptorClosedAnswer = "closed"
+
+    /// The arguments that make ``descriptorProbeCommand`` write
+    /// ``descriptorOpenAnswer`` when it holds `descriptor`, or
+    /// ``descriptorClosedAnswer`` when it does not, and then exit.
+    ///
+    /// `/dev/fd/N` exists only while the process that reads it holds the
+    /// descriptor `N`, so the test of the shell answers for the child itself.
+    ///
+    /// - Parameter descriptor: The descriptor number to look for.
+    /// - Returns: The arguments for ``descriptorProbeCommand``.
+    static func descriptorProbeArguments(for descriptor: Int32) -> [String] {
+        let script =
+            "if [ -e \"/dev/fd/$1\" ]; then printf \(descriptorOpenAnswer); "
+            + "else printf \(descriptorClosedAnswer); fi"
+        return ["-c", script, descriptorProbeCommand, String(descriptor)]
+    }
 
     /// Tells whether the process table holds `pid`. A reaped child is gone
     /// from the table; a live child and a zombie are both in it.

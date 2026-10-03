@@ -28,10 +28,26 @@ comments:
     - evidence: One local commit: feat(model): keep the raw content of an unknown plan update on PlanTranscriptEntry. The sha is in the git log, on the commit that has this subject.
     - next: Review the task. Do not push.
   timestamp: 2026-10-03T19:13:37.940758+00:00
+- actor: claude-code
+  id: 01m41k3tfzwewds0k2qy7jyrfk
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 9fc6f32); 0 findings, 0 confirmed, 0 refuted; 7 validator runs attempted, 0 failed; 2 files reviewed, 4 .kanban files ignored by .reviewignore.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T19:16:05.247856+00:00
+- actor: claude-code
+  id: 01m41k4119qxank7h6a77nhk1g
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (PlanTranscriptEntry.swift, TranscriptEntryTests.swift)
+    - test: green — swift test 477/477, IntegrationTests 103/103
+    - commit: 9fc6f32 feat(model): keep the raw content of an unknown plan update on PlanTranscriptEntry
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T19:16:11.945836+00:00
 depends_on:
 - 01M3YR05Z28B6DMHMSRK03QP9Q
-position_column: doing
-position_ordinal: '8180'
+position_column: done
+position_ordinal: c880
 title: 'Model: keep the raw content of a plan update of unknown type on PlanTranscriptEntry'
 ---
 ## What

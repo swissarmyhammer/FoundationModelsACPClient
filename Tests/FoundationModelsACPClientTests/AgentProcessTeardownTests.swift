@@ -46,60 +46,49 @@ private struct GroupMemberChild {
     let stdinWriteDescriptor: Int32
 }
 
+/// The path the children of ``spawnInThisProcessGroup(command:arguments:)``
+/// get as their stdout.
+private let discardedOutputPath = "/dev/null"
+
 /// Spawns `command` in the process group of this test runner, with its stdin
-/// on a pipe.
+/// on a pipe and its stdout on ``discardedOutputPath``.
 ///
-/// No spawn attribute asks for a new process group, so `killpg` of the
-/// child's pid reaches nothing.
+/// The spawn is the production spawn of `AgentProcess` with
+/// ``ChildProcessGroup/inherited``, so `killpg` of the child's pid reaches
+/// nothing. The tests of this target run in parallel, and that spawn gives
+/// the child no descriptor of a parallel test: a copy of another test's
+/// write end would keep that test's child stdin open after its teardown.
+/// The child gets a stdout, because `cat` reports a closed stdout on the
+/// stderr it keeps.
 ///
 /// - Parameters:
 ///   - command: The absolute path of the executable.
 ///   - arguments: The arguments to give it.
 /// - Returns: The child's pid and this process's write end of its stdin.
+/// - Throws: The errors of `AgentProcess.createPipe()` and
+///   `AgentProcess.spawnChild(command:arguments:descriptors:processGroup:)`.
 private func spawnInThisProcessGroup(
     command: String, arguments: [String]
 ) throws -> GroupMemberChild {
-    var descriptors: [Int32] = [0, 0]
-    try #require(pipe(&descriptors) == 0)
-    let (readEnd, writeEnd) = (descriptors[0], descriptors[1])
-    // The tests of this target run in parallel, and a spawned child inherits
-    // every open descriptor of this process. Without `FD_CLOEXEC` the child
-    // of one test holds a copy of the write end of the other test's pipe,
-    // and that copy keeps the other child's stdin open after the teardown
-    // closed its own copy. The `dup2` file action below still puts the read
-    // end on the child's stdin: `dup2` clears the flag on the new descriptor.
-    for descriptor in [readEnd, writeEnd] {
-        try #require(fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0)
-    }
-
-    var fileActions: posix_spawn_file_actions_t?
-    posix_spawn_file_actions_init(&fileActions)
-    defer { posix_spawn_file_actions_destroy(&fileActions) }
-    posix_spawn_file_actions_adddup2(&fileActions, readEnd, STDIN_FILENO)
-    posix_spawn_file_actions_addclose(&fileActions, readEnd)
-    posix_spawn_file_actions_addclose(&fileActions, writeEnd)
-
-    // The flag above cannot close a race: a parallel test can open its pipe
-    // and spawn its child before it sets `FD_CLOEXEC`, and between those two
-    // calls this spawn gets a copy of that pipe. `POSIX_SPAWN_CLOEXEC_DEFAULT`
-    // closes every descriptor the file actions do not name, so the child of
-    // this spawn holds its own stdin and no descriptor of a parallel test.
-    var attributes: posix_spawnattr_t?
-    posix_spawnattr_init(&attributes)
-    defer { posix_spawnattr_destroy(&attributes) }
-    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT))
-
-    let argv: [UnsafeMutablePointer<CChar>?] = ([command] + arguments).map { strdup($0) } + [nil]
-    defer { for case let pointer? in argv { free(pointer) } }
-
-    var pid: pid_t = 0
-    let spawnResult = posix_spawn(&pid, command, &fileActions, &attributes, argv, environ)
-    close(readEnd)
-    if spawnResult != 0 {
+    let discardedOutput = open(discardedOutputPath, O_WRONLY | O_CLOEXEC)
+    try #require(discardedOutput >= 0)
+    defer { close(discardedOutput) }
+    let (readEnd, writeEnd) = try AgentProcess.createPipe()
+    defer { close(readEnd) }
+    do {
+        let pid = try AgentProcess.spawnChild(
+            command: command, arguments: arguments,
+            descriptors: [
+                (source: readEnd, target: STDIN_FILENO),
+                (source: discardedOutput, target: STDOUT_FILENO),
+            ],
+            processGroup: .inherited
+        )
+        return GroupMemberChild(pid: pid, stdinWriteDescriptor: writeEnd)
+    } catch {
         close(writeEnd)
+        throw error
     }
-    try #require(spawnResult == 0)
-    return GroupMemberChild(pid: pid, stdinWriteDescriptor: writeEnd)
 }
 
 /// Kills `pid` and collects its exit status, so a child the teardown under

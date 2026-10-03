@@ -28,7 +28,9 @@
 // for the sibling's own reason: `Process` gives no public way to put a child
 // in its own process group before it execs, and
 // `POSIX_SPAWN_SETPGROUP`/`posix_spawnattr_setpgroup(0)` sets the group
-// atomically as a part of the spawn.
+// atomically as a part of the spawn. `POSIX_SPAWN_CLOEXEC_DEFAULT` in the same
+// spawn gives the agent its stdin, its stdout and the host's stderr, and no
+// other descriptor, whatever another thread of the host opens at that time.
 //
 // Three independent teardown triggers all funnel through the same idempotent
 // `AgentProcessState.terminateCurrent()`, so a call from any of them, in any
@@ -237,12 +239,6 @@ public struct AgentProcess: Sendable {
         let stdoutReadDescriptor: Int32
     }
 
-    /// The child's stdin file descriptor number, the `dup2` target.
-    private static let childStdinDescriptor: Int32 = 0
-
-    /// The child's stdout file descriptor number, the `dup2` target.
-    private static let childStdoutDescriptor: Int32 = 1
-
     /// Spawns `command` in its own process group, with its stdin and stdout
     /// piped to this process.
     ///
@@ -275,8 +271,11 @@ public struct AgentProcess: Sendable {
         do {
             pid = try spawnChild(
                 command: command, arguments: arguments,
-                childStdin: stdinRead, childStdout: stdoutWrite,
-                parentSideFdsToClose: [stdinWrite, stdoutRead]
+                descriptors: [
+                    (source: stdinRead, target: STDIN_FILENO),
+                    (source: stdoutWrite, target: STDOUT_FILENO),
+                ],
+                processGroup: .own
             )
         } catch {
             // The spawn failed before any child inherited these
@@ -288,37 +287,43 @@ public struct AgentProcess: Sendable {
             throw error
         }
 
-        // `posix_spawn_file_actions` closes descriptors inside the child
-        // only, never in this process, so the child's ends must be closed
-        // here or each spawn leaks two descriptors.
+        // The child holds its own copies of these two ends now. The spawn
+        // never closes a descriptor in this process, so the ends must be
+        // closed here or each spawn leaks two descriptors.
         close(stdinRead)
         close(stdoutWrite)
 
         return Spawned(pid: pid, stdinWriteDescriptor: stdinWrite, stdoutReadDescriptor: stdoutRead)
     }
 
-    /// Creates a pipe that no spawned child inherits, and returns its read
+    /// Creates a pipe with `FD_CLOEXEC` on both ends, and returns its read
     /// and write ends.
     ///
-    /// A child that `posix_spawn` starts inherits every open descriptor of
-    /// this process, unless the descriptor carries `FD_CLOEXEC`. The file
-    /// actions of a spawn close the four ends of THAT spawn, inside THAT
-    /// child, and nothing else. A different child, which another
-    /// ``AgentProcess`` spawns while this agent is live, would get copies of
-    /// this process's two ends. Its copy of the write end keeps this agent's
-    /// stdin open after ``closeStandardInput()`` closed this process's own
-    /// copy, so the agent never reads its end of file. The flag goes on both
-    /// ends here, directly after `pipe(2)` and before any spawn on any
-    /// thread, so no child can inherit either end. The `dup2` file action
-    /// still puts the child's end on descriptor 0 or 1, because `dup2`
-    /// clears the flag on the new descriptor.
+    /// A child that `posix_spawn` starts without `POSIX_SPAWN_CLOEXEC_DEFAULT`
+    /// inherits every open descriptor of this process that does not carry
+    /// `FD_CLOEXEC`. Such a child, which another part of this process spawns
+    /// while this agent is live, gets the two ends only when they lack the
+    /// flag. Its copy of the write end would keep this agent's stdin open
+    /// after ``closeStandardInput()`` closed this process's own copy, so the
+    /// agent would never read its end of file.
+    ///
+    /// The flag alone does not close that hole. `pipe(2)` and `fcntl(2)` are
+    /// two calls, and another thread can spawn a child between them; that
+    /// child gets both ends before the flag is on. Only a spawn that names
+    /// the descriptors its child keeps is free of the race, and
+    /// ``spawnChild(command:arguments:descriptors:processGroup:)`` is that
+    /// spawn for each child of this package. The flag here is the guard for
+    /// the spawns of other code in this process, after the second call.
+    ///
+    /// The `dup2` file action still puts the child's end on descriptor 0 or
+    /// 1, because `dup2` clears the flag on the new descriptor.
     ///
     /// - Returns: The `(readEnd, writeEnd)` pair from `pipe(2)`, each with
     ///   `FD_CLOEXEC` set.
     /// - Throws: ``AgentProcessError/pipeCreationFailed(errno:)`` when
     ///   `pipe(2)` fails, or when the flag cannot be set on an end. No
     ///   descriptor stays open after a throw.
-    private static func createPipe() throws -> (readEnd: Int32, writeEnd: Int32) {
+    static func createPipe() throws -> (readEnd: Int32, writeEnd: Int32) {
         var descriptors: [Int32] = [0, 0]
         guard pipe(&descriptors) == 0 else {
             throw AgentProcessError.pipeCreationFailed(errno: errno)
@@ -335,41 +340,46 @@ public struct AgentProcess: Sendable {
         return (descriptors[0], descriptors[1])
     }
 
-    /// Performs the `posix_spawn` call: wires `childStdin` and `childStdout`
-    /// onto the child's descriptors 0 and 1, and puts the child in its own
-    /// process group.
+    /// Performs the `posix_spawn` call: puts each source descriptor of
+    /// `descriptors` on its target descriptor in the child, keeps the stderr
+    /// of this process, and closes every other descriptor in the child.
+    ///
+    /// `POSIX_SPAWN_CLOEXEC_DEFAULT` closes, at the exec, each descriptor
+    /// that the file actions do not name. The `dup2` targets and stderr are
+    /// the only names, so the child holds those descriptors and nothing else.
+    /// That holds whatever another thread of this process opens at the same
+    /// time, with or without `FD_CLOEXEC`.
     ///
     /// - Parameters:
     ///   - command: The absolute path of the executable.
     ///   - arguments: The arguments to give it.
-    ///   - childStdin: The read end of the stdin pipe, the child's 0.
-    ///   - childStdout: The write end of the stdout pipe, the child's 1.
-    ///   - parentSideFdsToClose: This process's own pipe ends, closed on
-    ///     the child side only; the caller still closes its own copies.
+    ///   - descriptors: Each descriptor of this process that the child gets,
+    ///     and the descriptor number it gets in the child. This process keeps
+    ///     its own copies, and the caller closes them.
+    ///   - processGroup: The process group the child joins.
     /// - Returns: The spawned pid.
     /// - Throws: ``AgentProcessError/spawnFailed(command:errno:)``.
-    private static func spawnChild(
+    static func spawnChild(
         command: String, arguments: [String],
-        childStdin: Int32, childStdout: Int32, parentSideFdsToClose: [Int32]
+        descriptors: [(source: Int32, target: Int32)],
+        processGroup: ChildProcessGroup
     ) throws -> pid_t {
         var fileActions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&fileActions)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
-        posix_spawn_file_actions_adddup2(&fileActions, childStdin, childStdinDescriptor)
-        posix_spawn_file_actions_adddup2(&fileActions, childStdout, childStdoutDescriptor)
-        // The child gets copies of all four pipe descriptors across the
-        // fork; only the dup2 targets above must stay live in it. Each of
-        // the four carries `FD_CLOEXEC` from `createPipe()`, so the exec
-        // drops them as well. These actions close them before the exec, so
-        // the child holds only 0 and 1 from the file actions on.
-        for descriptor in [childStdin, childStdout] + parentSideFdsToClose {
-            posix_spawn_file_actions_addclose(&fileActions, descriptor)
+        for descriptor in descriptors {
+            posix_spawn_file_actions_adddup2(&fileActions, descriptor.source, descriptor.target)
         }
+        // The child writes its diagnostics to the stderr of this process, so
+        // that they never reach the wire on its stdout.
+        posix_spawn_file_actions_addinherit_np(&fileActions, STDERR_FILENO)
 
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
+        posix_spawnattr_setflags(&attributes, Int16(processGroup.spawnFlags | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // The spawn reads the group only with `POSIX_SPAWN_SETPGROUP`, and
+        // `0` makes the child the leader of a new group.
         posix_spawnattr_setpgroup(&attributes, 0)
 
         let argv: [UnsafeMutablePointer<CChar>?] = ([command] + arguments).map { strdup($0) } + [nil]
@@ -455,6 +465,29 @@ public struct AgentProcess: Sendable {
                 continuation.finish(throwing: AgentProcessError.readFailed(errno: failure))
                 return
             }
+        }
+    }
+}
+
+/// The process group that a child of
+/// ``AgentProcess/spawnChild(command:arguments:descriptors:processGroup:)``
+/// joins.
+enum ChildProcessGroup {
+    /// A new process group, with the child as its leader. `killpg` of the
+    /// child's pid then reaches the child and every process it starts.
+    case own
+
+    /// The process group of this process. The child is not a group leader,
+    /// so `killpg` of its pid reaches nothing.
+    case inherited
+
+    /// The `posix_spawnattr_setflags` bits that put the child in this group.
+    var spawnFlags: Int32 {
+        switch self {
+        case .own:
+            return POSIX_SPAWN_SETPGROUP
+        case .inherited:
+            return 0
         }
     }
 }
