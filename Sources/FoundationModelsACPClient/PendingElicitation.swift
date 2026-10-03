@@ -57,45 +57,14 @@ public struct PendingElicitation: Identifiable, Hashable, Sendable {
     /// Only a request-scoped elicitation has a request id; a session-scoped
     /// elicitation gives `nil`.
     public var requestId: RequestId? {
-        guard case .request(let scope) = wireScope else { return nil }
+        guard case .request(let scope) = request.elicitationScope else { return nil }
         return scope.requestId
     }
 
     /// The session scope of the request, or `nil` for another scope.
     private var sessionScope: ElicitationSessionScope? {
-        guard case .session(let scope) = wireScope else { return nil }
+        guard case .session(let scope) = request.elicitationScope else { return nil }
         return scope
-    }
-
-    /// The scope of the request, or `nil` for a mode this schema revision
-    /// does not know.
-    ///
-    /// The form mode and the url mode each declare their own scope type with
-    /// the same two cases, so this property reads both into one value.
-    private var wireScope: WireScope? {
-        switch request.mode {
-        case .form(let form):
-            switch form.scope {
-            case .session(let scope): .session(scope)
-            case .request(let scope): .request(scope)
-            }
-        case .url(let urlMode):
-            switch urlMode.scope {
-            case .session(let scope): .session(scope)
-            case .request(let scope): .request(scope)
-            }
-        case .unknown:
-            nil
-        }
-    }
-
-    /// The scope of an elicitation, read from either mode.
-    private enum WireScope {
-        /// The elicitation is tied to a session, and possibly to a tool call.
-        case session(ElicitationSessionScope)
-
-        /// The elicitation is tied to one JSON-RPC request.
-        case request(ElicitationRequestScope)
     }
 
     /// The elicitation id, or `nil`.
@@ -166,5 +135,42 @@ enum ElicitationResponseWire {
             members[contentKey] = content
         }
         return .object(members)
+    }
+}
+
+/// The scope of an elicitation, read from either mode.
+///
+/// The form mode and the url mode each declare their own scope type with the
+/// same two cases, so one value holds both. A mode that this schema revision
+/// does not know carries no scope that the client can read.
+enum ElicitationScope: Sendable {
+    /// The elicitation is tied to a session, and possibly to a tool call.
+    case session(ElicitationSessionScope)
+
+    /// The elicitation is tied to one JSON-RPC request.
+    case request(ElicitationRequestScope)
+
+    /// The elicitation has a mode that the client does not know, with this
+    /// wire name.
+    case unknownMode(String)
+}
+
+extension CreateElicitationRequest {
+    /// The scope of the request, read from its mode.
+    var elicitationScope: ElicitationScope {
+        switch mode {
+        case .form(let form):
+            switch form.scope {
+            case .session(let scope): .session(scope)
+            case .request(let scope): .request(scope)
+            }
+        case .url(let urlMode):
+            switch urlMode.scope {
+            case .session(let scope): .session(scope)
+            case .request(let scope): .request(scope)
+            }
+        case .unknown(let name, _):
+            .unknownMode(name)
+        }
     }
 }

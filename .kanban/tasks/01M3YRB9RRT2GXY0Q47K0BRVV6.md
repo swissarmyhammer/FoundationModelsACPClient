@@ -42,10 +42,30 @@ comments:
     - evidence: one local commit "feat(model): add initialize, capability flags and auth to ConnectionModel". Tests: swift test 443/443, IntegrationTests 103/103. Not pushed.
     - next: review
   timestamp: 2026-10-03T17:29:36.425386+00:00
+- actor: claude-code
+  id: 01m41d1v0g6y7w3tpwrssrk15q
+  text: 'UPSTREAM CONFIRMATION (foundationmodelsacp-c7, 2026-10-03): the capability rules are correct for alpha.7. The stable and the unstable schema have no fields for list, resume, close or logout (unstable adds only `session.fork`). The `SessionCapabilities` type text says `{}` means the baseline session methods: session/new, session/list, session/resume, session/close, session/prompt, session/cancel, session/update. Thus `capabilities.session != nil` gives canList/canResume/canClose = true. Known upstream text conflict: the `AgentCapabilities.session` field text lists a smaller baseline (new, prompt, cancel, update); keep the current rule, the peer will tell us if upstream changes. Delete: `session.delete != nil`. Logout: a non-empty `authMethods` list advertises auth/login and auth/logout; a `terminal` method never opens an auth session, so "an authMethods entry that is not terminal" is right.'
+  timestamp: 2026-10-03T17:30:08.784190+00:00
+- actor: claude-code
+  id: 01m41d6h2vn3stm9qxx9591wt1
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit ecb9b87). 6 files reviewed, 7 validator runs attempted, 0 failed. Counts: 0 findings, 0 confirmed, 0 refuted. The 4 `.kanban/` files are excluded by `.reviewignore`. The task has no earlier `## Review Findings` sections.
+    - next: none. The task is in done.
+  timestamp: 2026-10-03T17:32:42.459616+00:00
+- actor: claude-code
+  id: 01m41d6vjfkynxvdgkqb4646h1
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 6 files (ConnectionModel+Initialize.swift, AuthState.swift, ConnectionModelError.swift, 15 new tests)
+    - test: green — swift test 443/443, IntegrationTests 103/103
+    - commit: ecb9b87 feat(model): add initialize, capability flags and auth to ConnectionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T17:32:53.199627+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c380
 title: 'Model: ConnectionModel initialize, capability flags, auth state, login and logout'
 ---
 ## What

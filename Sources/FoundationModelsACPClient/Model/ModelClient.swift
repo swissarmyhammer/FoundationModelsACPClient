@@ -2,36 +2,122 @@ import FoundationModelsACP
 
 /// The `Client` that a ``ConnectionModel`` serves.
 ///
-/// This router is a stub. It answers each permission request with the
-/// `cancelled` outcome and each elicitation with the `cancel` action, which
-/// are the answers of the spec for a request that nobody decided, so the
-/// agent never waits for ever. It ignores each notification: each
-/// ``SessionModel`` reads its updates from its own subscription. The routing
-/// of the requests to the open session models replaces this stub.
+/// The router gives each request of the agent to the model that owns it:
+///
+/// - A permission request goes to the open ``SessionModel`` of its session.
+/// - A session-scoped elicitation goes to the open ``SessionModel`` of its
+///   session. A request-scoped elicitation goes to the request-scope hook of
+///   the ``ConnectionModel``.
+/// - An `elicitation/complete` goes to the session model that holds that
+///   elicitation, or else to the request-scope hook.
+///
+/// The router answers at once when no model can take a request: a permission
+/// request gets the `cancelled` outcome, and an elicitation gets the `cancel`
+/// action. These are the answers of the spec for a request that nobody
+/// decided, so the agent never waits for ever. A request for a session that is
+/// not open, and an elicitation of a mode that the client does not know, also
+/// log one warning.
+///
+/// The router ignores each `session/update`: each ``SessionModel`` reads its
+/// updates from its own subscription.
 struct ModelClient: Client {
+    /// The text that starts each warning of the router.
+    private static let logPrefix = "ModelClient: "
+
+    /// The model that this router serves. The model holds the connection, and
+    /// the connection holds this router, so the reference is weak. When the
+    /// model is gone, no session is open.
+    private weak let model: ConnectionModel?
+
+    /// The diagnostic sink of the connection; never stdout.
+    private let logger: ACPLogger
+
+    /// Makes the router of a model.
+    ///
+    /// - Parameters:
+    ///   - model: The model that this router serves.
+    ///   - logger: The diagnostic sink of the connection; never stdout.
+    init(model: ConnectionModel, logger: ACPLogger) {
+        self.model = model
+        self.logger = logger
+    }
+
     /// Ignores the update. The session model reads it from its subscription.
     ///
     /// - Parameter notification: The session-update notification.
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
-    /// Answers the permission request with the `cancelled` outcome.
+    /// Gives the permission request to the open model of its session, and
+    /// waits for the user's decision.
     ///
     /// - Parameter params: The permission request.
-    /// - Returns: The `cancelled` outcome.
+    /// - Returns: The user's decision, or the `cancelled` outcome when the
+    ///   session is not open.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        PendingPermissionRequest.cancelledResponse
+        guard let session = await model?.session(for: params.sessionId) else {
+            let warning = Self.closedSessionWarning(
+                answer: "cancelled",
+                request: "a permission request",
+                sessionId: params.sessionId
+            )
+            logger.log(warning)
+            return PendingPermissionRequest.cancelledResponse
+        }
+        return await session.awaitPermissionDecision(for: params)
     }
 
-    /// Answers the elicitation with the `cancel` action.
+    /// Gives the elicitation to the model of its scope, and waits for the
+    /// user's response.
     ///
     /// - Parameter params: The elicitation request.
-    /// - Returns: The `cancel` action.
+    /// - Returns: The user's response, or the `cancel` action when no model
+    ///   can take the elicitation.
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
-        ElicitationResponseWire.cancelResponse
+        switch params.elicitationScope {
+        case .session(let scope):
+            return await awaitSessionElicitation(params, sessionId: scope.sessionId)
+        case .request:
+            return await model?.awaitRequestScopedElicitation(params) ?? ElicitationResponseWire.cancelResponse
+        case .unknownMode(let name):
+            logger.log(Self.logPrefix + "answered cancel to an elicitation of the unknown mode \"\(name)\"")
+            return ElicitationResponseWire.cancelResponse
+        }
     }
 
-    /// Ignores the notice. No elicitation of this router waits for it.
+    /// Gives the notice to the model that holds the elicitation it names.
     ///
     /// - Parameter notification: The completion notification.
-    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {
+        await model?.completeElicitation(elicitationId: notification.elicitationId)
+    }
+
+    /// Gives a session-scoped elicitation to the open model of its session,
+    /// and waits for the user's response.
+    ///
+    /// - Parameters:
+    ///   - request: The session-scoped elicitation.
+    ///   - sessionId: The session of the elicitation.
+    /// - Returns: The user's response, or the `cancel` action when the session
+    ///   is not open.
+    private func awaitSessionElicitation(
+        _ request: CreateElicitationRequest,
+        sessionId: SessionId
+    ) async -> CreateElicitationResponse {
+        guard let session = await model?.session(for: sessionId) else {
+            logger.log(Self.closedSessionWarning(answer: "cancel", request: "an elicitation", sessionId: sessionId))
+            return ElicitationResponseWire.cancelResponse
+        }
+        return await session.awaitElicitation(request)
+    }
+
+    /// Makes the warning for a request whose session is not open.
+    ///
+    /// - Parameters:
+    ///   - answer: The answer that the router gave, as words.
+    ///   - request: The kind of the request, as words.
+    ///   - sessionId: The session that the request names.
+    /// - Returns: The warning.
+    private static func closedSessionWarning(answer: String, request: String, sessionId: SessionId) -> String {
+        logPrefix + "answered \(answer) to \(request), because the session \"\(sessionId.rawValue)\" is not open"
+    }
 }

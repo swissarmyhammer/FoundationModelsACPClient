@@ -113,10 +113,11 @@ public final class ConnectionModel {
         state = .connecting
         initializeResponse = nil
         authState = .unknown
+        let connectionLogger = logger ?? self.logger
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
-        let served = wrap(ModelClient())
-        let opened = await ClientSideConnection(stream: transport, logger: logger ?? self.logger) { _ in served }
+        let served = wrap(ModelClient(model: self, logger: connectionLogger))
+        let opened = await ClientSideConnection(stream: transport, logger: connectionLogger) { _ in served }
         connection = opened
         state = .connected
         // The wait for the close runs in a task of its own, never in an
