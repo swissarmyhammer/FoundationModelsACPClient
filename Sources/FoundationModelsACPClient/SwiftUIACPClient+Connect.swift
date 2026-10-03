@@ -81,9 +81,13 @@ extension SwiftUIACPClient {
         // ready-made. That is also what holds `client` to one call.
         let served = client(self)
         let connection = await ClientSideConnection(stream: transport, logger: logger) { _ in served }
-        // This container knows one closed state: each close reason,
-        // a failure too, is a disconnect here.
-        connection.onClose { [weak self] _ in
+        // The wait for the close runs in a task of its own, never in an
+        // inbound handler: the close reason comes only after each inbound
+        // handler ended, so a wait inside one never ends. This container
+        // knows one closed state: each close reason, a failure too, is a
+        // disconnect here.
+        Task { [weak self] in
+            _ = await connection.closed
             self?.connectionState = .disconnected
         }
         return connection

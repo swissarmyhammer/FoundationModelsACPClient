@@ -73,6 +73,53 @@ comments:
     - note: DisconnectObservingTransport is replaced by ClientSideConnection.closed.
     - next: review
   timestamp: 2026-10-03T17:03:27.517091+00:00
+- actor: claude-code
+  id: 01m41btcpyqpdsnvk8fz7hwvdm
+  text: |-
+    ### review — findings
+    - evidence: `review sha HEAD~1..HEAD` (commit edfea8b). 1 finding (1 confirmed, 0 refuted): Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift:17 `swift/concurrency` — the new public `onClose(_:)` uses an @escaping completion handler in place of async/await.
+    - next: implement the finding (apply the cause to the whole file), then /review again.
+  timestamp: 2026-10-03T17:08:36.190748+00:00
+- actor: claude-code
+  id: 01m41btp9j3241m99vzq513f2h
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 10 files (ConnectionModel, ConnectionState, ModelClient stub, ClientSideConnection+Close.swift; DisconnectObservingTransport deleted)
+    - test: green — swift test 428/428 x2, IntegrationTests 103/103 x2
+    - commit: edfea8b feat(model): add ConnectionModel with connect, state and close on disconnect
+    - review: findings — Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift:17
+  timestamp: 2026-10-03T17:08:46.002132+00:00
+- actor: claude-code
+  id: 01m41c2dd386jq8b8cfhbc3g8m
+  text: |-
+    Finding fix (implement step):
+    - Cause: the callback helper `onClose(_:)` on `ClientSideConnection`. The upstream API already gives `ClientSideConnection.closed: ConnectionCloseReason { get async }`, so the helper only wrapped an async value in a callback.
+    - `Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift` is deleted. Nothing else was in it.
+    - `ConnectionModel.connect` and `SwiftUIACPClient.connect(over:logger:client:)` now each start their own task that does `await connection.closed` directly (with `[weak self]`), and then set the state. The comment at each site says why the wait must not run in an inbound handler.
+    - The mapping from `ConnectionCloseReason` to `ConnectionState` stays the synchronous internal `ConnectionState.init(closedBecause:)`. No new callback API.
+    - No test used `onClose`. TDD note: this is a refactor with no change in behavior, so no new test can fail first; the 14 `ConnectionModelTests` and the `SwiftUIACPClient` connect tests cover the four states and stay green.
+  timestamp: 2026-10-03T17:12:59.043889+00:00
+- actor: claude-code
+  id: 01m41c2fr7smjwpe7bvpkc3bwn
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift (deleted), Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/SwiftUIACPClient+Connect.swift. `swift build`: exit 0, only the accepted MLX "missing creator" warning and the permitted `SessionUpdateAggregator` deprecations. `swift test`: 428 tests in 36 suites pass. `swift build --package-path IntegrationTests`: exit 0. `swift test --package-path IntegrationTests`: 103 tests in 14 suites pass. The finding `ClientSideConnection+Close.swift:17` is `- [x]`.
+    - next: /review
+  timestamp: 2026-10-03T17:13:01.447389+00:00
+- actor: claude-code
+  id: 01m41c7347tv7m05v7mn082pjg
+  text: |-
+    ### test - green (iteration 2, callback helper removed)
+    - evidence: swift build (root) ok; swift test (root) 428 tests in 36 suites passed; swift build --package-path IntegrationTests ok; swift test --package-path IntegrationTests 103 tests in 14 suites passed. 0 failures, 0 skipped. Only warning: the accepted mlx-swift "missing creator for mutated node" warning.
+    - next: review
+  timestamp: 2026-10-03T17:15:32.359772+00:00
+- actor: claude-code
+  id: 01m41c7d5fw1q6kyf8c9pv7f6v
+  text: |-
+    ### commit — changed
+    - evidence: refactor(model): await ClientSideConnection.closed directly; 5 files (removed ClientSideConnection+Close.swift onClose helper; callers await connection.closed). Tests: swift test 428/428, IntegrationTests 103/103.
+    - next: review
+  timestamp: 2026-10-03T17:15:42.639494+00:00
 depends_on:
 - 01M3YR0RQGPVCP3RV2MCCDM82C
 position_column: doing
@@ -99,3 +146,12 @@ New `@MainActor @Observable public final class ConnectionModel` in `Sources/Foun
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-10-03 12:03)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 10 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift:17` `swift/concurrency` — New public method uses @escaping completion handler instead of async/await, limiting integration with structured concurrency and requiring callers to spawn manual tasks. Provide an async alternative: `func closed() async -> ConnectionCloseReason` or similar, exposing the internal `await closed` as a public async method so callers can use structured concurrency directly rather than callbacks.

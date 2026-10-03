@@ -105,7 +105,11 @@ public final class ConnectionModel {
         let opened = await ClientSideConnection(stream: transport, logger: logger ?? self.logger) { _ in served }
         connection = opened
         state = .connected
-        opened.onClose { [weak self] reason in
+        // The wait for the close runs in a task of its own, never in an
+        // inbound handler: the close reason comes only after each inbound
+        // handler ended, so a wait inside one never ends.
+        Task { [weak self] in
+            let reason = await opened.closed
             self?.connectionDidClose(opened, because: reason)
         }
         return opened
