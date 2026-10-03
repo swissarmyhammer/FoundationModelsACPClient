@@ -25,6 +25,13 @@ import Observation
 /// The model also holds the pending permission requests and the pending
 /// session-scoped elicitations of the session, as ``pendingPermissions`` and
 /// ``pendingElicitations``.
+///
+/// `agent_message_chunk` and `agent_thought_chunk` arrive at token rate. The
+/// model collects them in a buffer and folds the buffer on a display-rate
+/// cadence, so the entry of a streamed message changes one time for each
+/// flush and not one time for each chunk. Any other update flushes the buffer
+/// first, so the applied order is the arrival order. ``updateTap()`` gives
+/// each raw update at its arrival, with no delay from the buffer.
 @MainActor @Observable
 public final class SessionModel {
     /// The identifier of the session.
@@ -83,18 +90,81 @@ public final class SessionModel {
     /// when the agent adds the tool call.
     @ObservationIgnored var unresolvedElicitationLinks: [ToolCallId: [PendingElicitation.ID]] = [:]
 
+    /// The cadence between coalesced flushes. `.zero` applies each chunk at
+    /// once.
+    @ObservationIgnored let coalescingCadence: Duration
+
+    /// The clock that schedules the coalesced flushes.
+    @ObservationIgnored let clock: any Clock<Duration>
+
+    /// The buffered chunk updates, in arrival order. The buffer is not
+    /// observable, so an append causes no observation.
+    @ObservationIgnored var pendingChunks: [SessionUpdate] = []
+
+    /// The task that flushes the buffer after one cadence, or `nil` when no
+    /// flush is scheduled.
+    @ObservationIgnored var scheduledFlush: Task<Void, Never>?
+
+    /// The continuation of each open ``updateTap()`` stream, keyed by a local
+    /// identity of the tap.
+    @ObservationIgnored var updateTaps: [UUID: AsyncStream<SessionUpdate>.Continuation] = [:]
+
     /// Makes the model of a session with an empty transcript and no state.
     ///
-    /// - Parameter sessionId: The identifier of the session.
-    init(sessionId: SessionId) {
+    /// - Parameters:
+    ///   - sessionId: The identifier of the session.
+    ///   - coalescingCadence: The cadence between coalesced flushes of the
+    ///     chunk buffer. `.zero` applies each chunk at once.
+    ///   - clock: The clock that schedules the coalesced flushes. Tests give
+    ///     a manual clock, so they do not read the wall clock.
+    init(
+        sessionId: SessionId,
+        coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
+        clock: any Clock<Duration> = ContinuousClock()
+    ) {
         self.sessionId = sessionId
+        self.coalescingCadence = coalescingCadence
+        self.clock = clock
     }
 
-    /// Folds one `session/update` into the model.
+    deinit {
+        scheduledFlush?.cancel()
+        // A released model must not leave a tap consumer suspended.
+        for tap in updateTaps.values {
+            tap.finish()
+        }
+    }
+
+    /// Receives one `session/update`.
     ///
-    /// - Parameter update: The update to fold.
+    /// Each ``updateTap()`` stream gets the update at once. A coalescible
+    /// chunk then goes into the buffer, which flushes on the cadence. Any
+    /// other update flushes the buffer first and then folds, so the applied
+    /// order is the arrival order.
+    ///
+    /// - Parameter update: The update to receive.
     func apply(_ update: SessionUpdate) {
-        reflect(engine.apply(update))
+        yieldToUpdateTaps(update)
+        guard coalescingCadence > .zero, Self.isCoalescibleChunk(update) else {
+            flushPendingChunks()
+            fold([update])
+            return
+        }
+        enqueue(update)
+    }
+
+    /// Folds updates into the model through the engine.
+    ///
+    /// The model reflects one change for each entry that the updates change,
+    /// with the last state of that entry. Thus N chunks of one message write
+    /// the entry one time, and the result is the same as N separate folds.
+    ///
+    /// - Parameter updates: The updates to fold, in arrival order.
+    func fold(_ updates: [SessionUpdate]) {
+        let changes = updates.map { engine.apply($0) }
+        for change in SessionMergeEngine.Change.collapsed(changes) {
+            reflect(change)
+        }
     }
 
     /// Sets the commands and the configuration options that a `session/new`

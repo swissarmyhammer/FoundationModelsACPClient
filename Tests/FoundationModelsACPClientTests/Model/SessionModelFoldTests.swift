@@ -39,11 +39,14 @@ private let toolCallId = ToolCallId(rawValue: "tool-1")
 
 /// Makes a model for the test session, and folds each update into it.
 ///
+/// The model has no coalescing cadence, so each chunk that a test applies to
+/// it later also folds at once.
+///
 /// - Parameter updates: The updates to fold, in order.
 /// - Returns: The model.
 @MainActor
 private func foldedModel(_ updates: SessionUpdate...) -> SessionModel {
-    let model = SessionModel(sessionId: testSession)
+    let model = SessionModel(sessionId: testSession, coalescingCadence: .zero)
     for update in updates {
         model.apply(update)
     }

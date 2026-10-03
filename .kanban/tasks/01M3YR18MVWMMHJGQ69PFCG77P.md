@@ -51,10 +51,26 @@ comments:
     - evidence: feat(model): add pending permissions and elicitations to SessionModel; 12 files; swift test 328/328, IntegrationTests 103/103
     - next: review. Shared PendingRequestQueue now serves ACPSessionState, SwiftUIACPClient and SessionModel.
   timestamp: 2026-10-03T14:17:15.419986+00:00
+- actor: claude-code
+  id: 01m4128b0xcraydxq2zw0vt1xf
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 95788e8); 8 files reviewed, 4 .kanban files excluded by .reviewignore; counts: 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. The task had no earlier Review Findings sections.
+    - next: none. The task is in done.
+  timestamp: 2026-10-03T14:21:27.453989+00:00
+- actor: claude-code
+  id: 01m4128jjf6py4735w9tcgnm1z
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 8 files (shared PendingRequestQueue, SessionModel+Pending.swift, 17 new tests)
+    - test: green — swift test 328/328, IntegrationTests 103/103; only accepted warnings
+    - commit: 95788e8 feat(model): add pending permissions and elicitations to SessionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T14:21:35.183343+00:00
 depends_on:
 - 01M3YR0FJ4Z55VAXKXQ3KAM7GW
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: bd80
 title: 'Model: SessionModel pending permissions and session-scoped elicitations'
 ---
 ## What

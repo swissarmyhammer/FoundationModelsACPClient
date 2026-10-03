@@ -6,6 +6,10 @@ comments:
   id: 01m3ywyds9x48cmg1g99h3p3gb
   text: 'Name correction (seen on upstream main 0d3e88a, 2026-10-02): the subscription field is `SessionUpdateSubscription.hasMissedUpdates`, not `missedUpdates`. Use the upstream name where this task says `missedUpdates`. The same applies to task 6np8vdv.'
   timestamp: 2026-10-02T18:10:10.857953+00:00
+- actor: claude-code
+  id: 01m412t160qvg4hrtbgqv0xxpw
+  text: 'From ^65x5kjr: `SessionModel` now has internal `finishUpdateTaps()` (in `SessionModel+Coalescing.swift`), which finishes each `updateTap()` stream. `markClosed()` must call `flushPendingChunks()` and then `finishUpdateTaps()`. When the attached subscription ends, call `finishUpdateTaps()` too. `apply(_:)` now buffers chunks with the 33 ms default cadence; a test that needs each chunk at once makes the model with `coalescingCadence: .zero`.'
+  timestamp: 2026-10-03T14:31:07.200373+00:00
 depends_on:
 - 01M3YRC0ERS5FADQYB965X5KJR
 - 01M3YR18MVWMMHJGQ69PFCG77P
