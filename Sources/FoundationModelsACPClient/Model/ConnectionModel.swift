@@ -25,9 +25,19 @@ public final class ConnectionModel {
     /// The model of each open session, keyed by its session id.
     public private(set) var openSessions: [SessionId: SessionModel] = [:]
 
+    /// The answer of the agent to the last `initialize` of the open
+    /// connection, or `nil` before ``initialize(_:)`` succeeds. Each new
+    /// connection sets it back to `nil`.
+    public internal(set) var initializeResponse: InitializeResponse?
+
+    /// The auth state of the connection. It is ``AuthState/unknown`` before
+    /// ``initialize(_:)`` succeeds, and each new connection sets it back to
+    /// ``AuthState/unknown``.
+    public internal(set) var authState: AuthState = .unknown
+
     /// The open connection, or `nil` when no connection is open. A close
     /// that comes from an earlier connection changes nothing.
-    @ObservationIgnored private var connection: ClientSideConnection?
+    @ObservationIgnored private(set) var connection: ClientSideConnection?
 
     /// The cadence between coalesced flushes of each session model that this
     /// connection makes.
@@ -84,7 +94,9 @@ public final class ConnectionModel {
     /// one leaves the models stale.
     ///
     /// The model never reconnects on its own. After a close, the host can
-    /// call this method again with a new transport.
+    /// call this method again with a new transport. Each call forgets the
+    /// `initialize` answer and the auth state of the last connection, so
+    /// each capability flag is `false` until ``initialize(_:)`` runs again.
     ///
     /// - Parameters:
     ///   - transport: The bidirectional transport to run over.
@@ -99,6 +111,8 @@ public final class ConnectionModel {
         client wrap: @escaping @Sendable @MainActor (any Client) -> any Client = { $0 }
     ) async -> ClientSideConnection {
         state = .connecting
+        initializeResponse = nil
+        authState = .unknown
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
         let served = wrap(ModelClient())

@@ -45,6 +45,13 @@ import FoundationModelsACP
 /// crosses the process boundary. `ClientRequestSpanTests` reads
 /// ``receivedMeta`` to find the `traceparent` that the agent got.
 ///
+/// The stub answers `initialize` with the capabilities and the auth methods
+/// that the test chose. The default is no capability and no auth method.
+/// `auth/login` succeeds, or refuses with the error that the test chose.
+/// `auth/logout` always succeeds. `ConnectionModelInitializeTests` uses these
+/// three to drive the capability flags and the auth state of
+/// ``ConnectionModel``.
+///
 /// The `script` goes out BEFORE the prompt answer, which is the order a test
 /// wants when it asserts on landed state after the prompt call returned. That
 /// order cannot tell a client that ends its turn on the prompt answer from
@@ -113,6 +120,17 @@ final class ScriptedStubAgent: Agent {
     /// `state_update` that this agent is free never to send.
     private let cancelScript: [SessionUpdate]
 
+    /// The capabilities this stub answers `initialize` with.
+    private let capabilities: AgentCapabilities
+
+    /// The auth methods this stub answers `initialize` with, or `nil` to
+    /// leave the member out.
+    private let authMethods: [AuthMethod]?
+
+    /// The error to refuse each `auth/login` with, or `nil` to accept each
+    /// login.
+    private let loginError: RequestError?
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -132,6 +150,11 @@ final class ScriptedStubAgent: Agent {
     ///   - promptError: The error to refuse each prompt with, or `nil` to
     ///     answer each prompt.
     ///   - closeSessionError: The error to answer `session/close` with.
+    ///   - capabilities: The capabilities to answer `initialize` with.
+    ///   - authMethods: The auth methods to answer `initialize` with, or
+    ///     `nil` to leave the member out.
+    ///   - loginError: The error to refuse each `auth/login` with, or `nil`
+    ///     to accept each login.
     init(
         connection: AgentSideConnection,
         session: SessionId,
@@ -141,7 +164,10 @@ final class ScriptedStubAgent: Agent {
         elicitation: CreateElicitationRequest? = nil,
         permissionRequest: RequestPermissionRequest? = nil,
         promptError: RequestError? = nil,
-        closeSessionError: RequestError = .methodNotFound("session/close")
+        closeSessionError: RequestError = .methodNotFound("session/close"),
+        capabilities: AgentCapabilities = AgentCapabilities(),
+        authMethods: [AuthMethod]? = nil,
+        loginError: RequestError? = nil
     ) {
         self.connection = connection
         self.session = session
@@ -152,14 +178,32 @@ final class ScriptedStubAgent: Agent {
         self.permissionRequest = permissionRequest
         self.promptError = promptError
         self.closeSessionError = closeSessionError
+        self.capabilities = capabilities
+        self.authMethods = authMethods
+        self.loginError = loginError
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         record(params.meta, of: ClientRequestSpan.Method.initialize)
         return InitializeResponse(
             info: Implementation(name: "stub-agent", version: "1.0.0"),
-            protocolVersion: params.protocolVersion
+            protocolVersion: params.protocolVersion,
+            authMethods: authMethods,
+            capabilities: capabilities
         )
+    }
+
+    func loginAuth(_ params: LoginAuthRequest) async throws -> LoginAuthResponse {
+        record(params.meta, of: ConnectionModel.WireMethod.login)
+        if let loginError {
+            throw loginError
+        }
+        return LoginAuthResponse()
+    }
+
+    func logoutAuth(_ params: LogoutAuthRequest) async throws -> LogoutAuthResponse {
+        record(params.meta, of: ConnectionModel.WireMethod.logout)
+        return LogoutAuthResponse()
     }
 
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {

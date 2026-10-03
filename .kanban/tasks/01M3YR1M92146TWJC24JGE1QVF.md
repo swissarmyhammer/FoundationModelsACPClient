@@ -120,10 +120,26 @@ comments:
     - evidence: refactor(model): await ClientSideConnection.closed directly; 5 files (removed ClientSideConnection+Close.swift onClose helper; callers await connection.closed). Tests: swift test 428/428, IntegrationTests 103/103.
     - next: review
   timestamp: 2026-10-03T17:15:42.639494+00:00
+- actor: claude-code
+  id: 01m41cdxxvj54xbsmf13kvfz1k
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 579c570). 0 findings (0 confirmed, 0 refuted, 7 attempted, 0 failed). 3 files reviewed. 5 code-hygiene tool rules did not read `Sources/FoundationModelsACPClient/ClientSideConnection+Close.swift`, because the commit deletes that file. The prior finding `ClientSideConnection+Close.swift:17` is `- [x]`.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T17:19:16.411370+00:00
+- actor: claude-code
+  id: 01m41ce5a9qacwzm7gpn5q921w
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — callback helper removed; 3 files
+    - test: green — swift test 428/428, IntegrationTests 103/103
+    - commit: 579c570 refactor(model): await ClientSideConnection.closed directly
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T17:19:23.977452+00:00
 depends_on:
 - 01M3YR0RQGPVCP3RV2MCCDM82C
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c280
 title: 'Model: ConnectionModel connect, state transitions, open-session registry, and close on disconnect'
 ---
 ## What
