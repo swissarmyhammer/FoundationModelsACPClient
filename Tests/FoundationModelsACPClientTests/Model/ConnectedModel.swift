@@ -17,6 +17,9 @@ struct ConnectedModel {
     /// pair outlives the test body.
     let agentConnection: AgentSideConnection
 
+    /// The agent end of the pair. A close of it ends the input of the client.
+    let agentEnd: InMemoryTransport
+
     /// The stubs that the agent-side factory built. The factory runs one
     /// time, so the list holds one element.
     private let builtAgents: ThreadSafeBuffer<ScriptedStubAgent>
@@ -41,6 +44,7 @@ struct ConnectedModel {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let builtAgents = ThreadSafeBuffer<ScriptedStubAgent>()
         self.builtAgents = builtAgents
+        self.agentEnd = agentEnd
         agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
             let stub = makeAgent(connection)
             builtAgents.append(stub)

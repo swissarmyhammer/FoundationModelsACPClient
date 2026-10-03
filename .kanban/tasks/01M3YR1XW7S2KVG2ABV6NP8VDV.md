@@ -79,6 +79,16 @@ comments:
     - evidence: local commit "feat(model): add newSession, close and the connection request sender to ConnectionModel". The sha is in the git log. No push.
     - next: resumeSession waits for the upstream response marker. The task stays in doing. Tests for resume are not done.
   timestamp: 2026-10-03T18:48:29.383942+00:00
+- actor: claude-code
+  id: 01m41hhm2fanzq7ztbzz46h7x5
+  text: |-
+    ### finish iteration 1 — stuck
+    - implement: stuck — upstream `.responseReceived` marker is not in FoundationModelsACP 60854b6 (pin = upstream main). newSession, close, ConnectionSessionRequestSender are done; resumeSession, its criterion and its tests stay open.
+    - test: green — swift test 474/474, IntegrationTests 103/103
+    - commit: bac358d feat(model): add newSession, close and the connection request sender to ConnectionModel (partial checkpoint)
+    - review: not run — a clean review moves the task to done while resumeSession is open
+    - next: when the marker is on upstream main, update the pin, read the new stream element in SessionModel.attach(_:), call endReplay on the marker of the session/resume request, then /finish 6np8vdv.
+  timestamp: 2026-10-03T18:48:40.271701+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
@@ -93,6 +103,7 @@ Add the session factory to `ConnectionModel` in `Sources/FoundationModelsACPClie
 
 - [x] `newSession(_ request: NewSessionRequest) async throws -> SessionModel`: send the request unchanged; as soon as the response is decoded, `subscribe(to:)` (the first subscriber takes the buffer and the overflow mark), make the model with the connection's cadence and clock, `attach`, `seed` from the response (`availableCommands`, `configOptions`), give it the request sender, `register` it.
 - [ ] `resumeSession(_ request: ResumeSessionRequest) async throws -> SessionModel`: `requireCapability(canResumeSessions)`. For a new id: make the model and `subscribe(to:)` BEFORE the request is sent. For an id that is already open: reuse that model and its subscription (same instance). Then `beginReplay(replayFrom: request.replayFrom)` (it resets the transcript of a reused model), send, `endReplay(succeeded:)`, `seed`. On failure: end the replay; a new model is not registered; rethrow.
+- [ ] In `resumeSession(_:)`, register a new model through the private `register(_:openedOver:)` (from task ^7sbgy5x), so a connection that closed during the request never gets the model. Add a held-executor test like the `newSession` test of ^7sbgy5x.
 - [x] `close(_ session: SessionModel) async throws`: `requireCapability(canCloseSessions)`; sends `session/close`; `unregister`; `markClosed()`. The model stays readable. If the capability is false, it throws `.unsupported` and the model stays open (callers that want a local close call `session.markClosed()`; acp-client does not need this, see task hvqk65a).
 
 ## Acceptance Criteria

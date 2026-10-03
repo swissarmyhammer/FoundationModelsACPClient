@@ -20,10 +20,15 @@ extension ConnectionModel {
     /// The commands and the configuration options of the response seed the
     /// model, and the model goes into ``openSessions``.
     ///
+    /// When the connection closes, or a new connection takes its place,
+    /// after the response arrives but before this call reads it, the model
+    /// of the session is closed and does not go into ``openSessions``.
+    ///
     /// - Parameter request: The new-session request.
     /// - Returns: The open model of the new session.
-    /// - Throws: `ConnectionError.closed` when no connection is open, the
-    ///   `RequestError` of the agent, or the error of the connection. On an
+    /// - Throws: `ConnectionError.closed` when no connection is open, or when
+    ///   the connection of the request is no longer the open connection; the
+    ///   `RequestError` of the agent; or the error of the connection. On an
     ///   error, the model registers no session.
     public func newSession(_ request: NewSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
@@ -35,8 +40,33 @@ extension ConnectionModel {
         )
         session.attach(subscription)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
-        register(session)
+        try register(session, openedOver: connection)
         return session
+    }
+
+    // MARK: - Registration
+
+    /// Adds the model of a session that a request opened to
+    /// ``openSessions``, when the connection of that request is still the
+    /// open connection.
+    ///
+    /// The request suspends the model while it waits for the agent. In that
+    /// time the connection can close, which closes each open session model,
+    /// or a new connection can take its place. A model registered after that
+    /// would stay open for a connection that no longer exists, so this method
+    /// closes it instead.
+    ///
+    /// - Parameters:
+    ///   - session: The model of the session that the request opened.
+    ///   - connection: The connection that sent the request.
+    /// - Throws: `ConnectionError.closed` when `connection` is no longer the
+    ///   open connection. The model is then closed and not registered.
+    private func register(_ session: SessionModel, openedOver connection: ClientSideConnection) throws {
+        guard connection === self.connection else {
+            session.markClosed()
+            throw ConnectionError.closed
+        }
+        register(session)
     }
 
     // MARK: - Close

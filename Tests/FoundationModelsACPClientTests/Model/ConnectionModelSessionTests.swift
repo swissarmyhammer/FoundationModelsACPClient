@@ -64,6 +64,8 @@ private enum SessionFactoryFixtures {
     ///   - newSessionCommands: The command list of the `session/new` answer.
     ///   - closeSessionError: The error the agent refuses each close with, or
     ///     `nil` to accept each close.
+    ///   - newSessionGate: The gate that must open before the agent answers
+    ///     `session/new`, or `nil` to answer at once.
     /// - Returns: The connected model, after `initialize`.
     /// - Throws: Whatever `initialize` threw.
     @MainActor
@@ -72,7 +74,8 @@ private enum SessionFactoryFixtures {
         bufferLimits: SessionUpdateBufferLimits = .default,
         newSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
-        closeSessionError: RequestError? = nil
+        closeSessionError: RequestError? = nil,
+        newSessionGate: UpdateGate? = nil
     ) async throws -> ConnectedModel {
         let connected = await ConnectedModel(
             model: ConnectionModel(coalescingCadence: .zero),
@@ -85,11 +88,37 @@ private enum SessionFactoryFixtures {
                 closeSessionError: closeSessionError,
                 newSessionScript: newSessionScript,
                 newSessionCommands: newSessionCommands,
-                capabilities: capabilities
+                capabilities: capabilities,
+                newSessionGate: newSessionGate
             )
         }
         try await connected.initialize()
         return connected
+    }
+
+    /// Reads the outgoing-request events until the `session/new` request
+    /// finished.
+    ///
+    /// The connection sends `finished` when it takes the answer of the agent,
+    /// before the caller of the request continues.
+    ///
+    /// - Parameter events: The outgoing-request events of the connection,
+    ///   from a subscription made before the request started.
+    /// - Returns: `true` when the request finished, or `false` when the
+    ///   stream ended first.
+    static func newSessionFinished(in events: AsyncStream<OutgoingRequestEvent>) async -> Bool {
+        var newSessionId: RequestId?
+        for await event in events {
+            switch event {
+            case .started(let id, ClientRequestSpan.Method.newSession):
+                newSessionId = id
+            case .finished(let id) where id == newSessionId:
+                return true
+            case .started, .finished:
+                continue
+            }
+        }
+        return false
     }
 }
 
@@ -160,6 +189,34 @@ struct ConnectionModelSessionTests {
             try await model.newSession(SessionFactoryFixtures.newSessionRequest)
         }
         #expect(model.openSessions.isEmpty)
+    }
+
+    @Test func aConnectionThatClosesAfterTheNewSessionAnswerRegistersNoSession() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(newSessionGate: answerGate)
+        let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
+        let executor = HoldableTaskExecutor()
+        let creating = Task { [model = connected.model] in
+            try await withTaskExecutorPreference(executor) {
+                try await model.newSession(SessionFactoryFixtures.newSessionRequest)
+            }
+        }
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.newSession) }
+
+        // The executor holds the part of the call that follows the answer, so
+        // the close of the connection always comes before `newSession` reads
+        // the answer.
+        try await executor.whileHeld {
+            answerGate.open()
+            #expect(await SessionFactoryFixtures.newSessionFinished(in: requestEvents))
+            connected.agentEnd.close()
+            try await waitUntil { connected.model.state == .disconnected }
+        }
+
+        await #expect(throws: ConnectionError.closed) {
+            try await creating.value
+        }
+        #expect(connected.model.openSessions.isEmpty)
     }
 
     // MARK: - The request sender

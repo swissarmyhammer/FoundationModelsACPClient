@@ -64,6 +64,11 @@ import FoundationModelsACP
 /// `ConnectionModelElicitationTests` sends a request-scoped elicitation while
 /// the login waits, and then opens the gate to finish the request.
 ///
+/// A stub built with a new-session gate holds each `session/new` until the
+/// test opens that gate, in the same way. `ConnectionModelSessionTests` holds
+/// the answer so that it can close the connection between the answer and the
+/// moment the model reads it.
+///
 /// The `script` goes out BEFORE the prompt answer, which is the order a test
 /// wants when it asserts on landed state after the prompt call returned. That
 /// order cannot tell a client that ends its turn on the prompt answer from
@@ -159,6 +164,10 @@ final class ScriptedStubAgent: Agent {
     /// answer each login at once.
     private let loginGate: UpdateGate?
 
+    /// The gate that must open before each `session/new` answers, or `nil`
+    /// to answer each new session at once.
+    private let newSessionGate: UpdateGate?
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -190,6 +199,8 @@ final class ScriptedStubAgent: Agent {
     ///     to accept each login.
     ///   - loginGate: The gate that must open before each `auth/login`
     ///     answers, or `nil` to answer each login at once.
+    ///   - newSessionGate: The gate that must open before each `session/new`
+    ///     answers, or `nil` to answer each new session at once.
     init(
         connection: AgentSideConnection,
         session: SessionId,
@@ -205,7 +216,8 @@ final class ScriptedStubAgent: Agent {
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
         loginError: RequestError? = nil,
-        loginGate: UpdateGate? = nil
+        loginGate: UpdateGate? = nil,
+        newSessionGate: UpdateGate? = nil
     ) {
         self.connection = connection
         self.session = session
@@ -222,6 +234,7 @@ final class ScriptedStubAgent: Agent {
         self.authMethods = authMethods
         self.loginError = loginError
         self.loginGate = loginGate
+        self.newSessionGate = newSessionGate
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -251,6 +264,7 @@ final class ScriptedStubAgent: Agent {
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.newSession)
         workingDirectories.append(params.cwd)
+        await newSessionGate?.wait()
         for update in newSessionScript {
             try await send(update)
         }
