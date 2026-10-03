@@ -65,13 +65,15 @@ public final class SwiftUIACPClient: Client {
     /// others. Resolve one elicitation with
     /// ``acceptElicitation(_:content:)``, ``declineElicitation(_:)``, or
     /// ``cancelElicitation(_:)``.
-    public private(set) var pendingElicitations: [PendingElicitation] = []
+    public var pendingElicitations: [PendingElicitation] {
+        elicitations.items
+    }
 
-    /// The lifecycle state of each unresolved elicitation, keyed by the
-    /// elicitation's local id. The storage is not observable; the UI binds
-    /// to ``pendingElicitations`` instead.
-    @ObservationIgnored private var elicitationStates =
-        PendingRequestStates<CreateElicitationResponse>()
+    /// The pending elicitations and the continuation of each one. The queue
+    /// is observable, so a read of ``pendingElicitations`` tracks it.
+    @ObservationIgnored private let elicitations = PendingRequestQueue<PendingElicitation, CreateElicitationResponse>(
+        cancelledResponse: ElicitationResponseWire.cancelResponse
+    )
 
     /// The cadence between coalesced flushes for each session this client
     /// creates.
@@ -161,23 +163,7 @@ public final class SwiftUIACPClient: Client {
     public func createElicitation(
         _ params: CreateElicitationRequest
     ) async throws -> CreateElicitationResponse {
-        let id = UUID()
-        elicitationStates.recordArrival(of: id)
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                if elicitationStates.suspend(id, with: continuation) {
-                    pendingElicitations.append(
-                        PendingElicitation(id: id, request: params)
-                    )
-                } else {
-                    continuation.resume(returning: Self.cancelResponse)
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelElicitation(id)
-            }
-        }
+        await elicitations.awaitResponse(to: PendingElicitation(id: UUID(), request: params))
     }
 
     /// Receives the agent's notice that a URL-based elicitation finished,
@@ -196,7 +182,7 @@ public final class SwiftUIACPClient: Client {
                 $0.elicitationId == notification.elicitationId
             })
         else { return }
-        resolveElicitation(id: pending.id, response: Self.acceptResponse(content: nil))
+        elicitations.resolve(pending.id, with: ElicitationResponseWire.acceptResponse(content: nil))
     }
 
     /// Accepts one pending elicitation.
@@ -212,7 +198,7 @@ public final class SwiftUIACPClient: Client {
     ///   - id: The id of the pending elicitation.
     ///   - content: The form values, or `nil` for no content.
     public func acceptElicitation(_ id: UUID, content: JSONValue? = nil) {
-        resolveElicitation(id: id, response: Self.acceptResponse(content: content))
+        elicitations.resolve(id, with: ElicitationResponseWire.acceptResponse(content: content))
     }
 
     /// Declines one pending elicitation.
@@ -224,7 +210,7 @@ public final class SwiftUIACPClient: Client {
     ///
     /// - Parameter id: The id of the pending elicitation.
     public func declineElicitation(_ id: UUID) {
-        resolveElicitation(id: id, response: Self.declineResponse)
+        elicitations.resolve(id, with: ElicitationResponseWire.declineResponse)
     }
 
     /// Cancels one pending elicitation.
@@ -236,8 +222,7 @@ public final class SwiftUIACPClient: Client {
     ///
     /// - Parameter id: The id of the pending elicitation.
     public func cancelElicitation(_ id: UUID) {
-        guard elicitationStates.noteCancellation(of: id) else { return }
-        resolveElicitation(id: id, response: Self.cancelResponse)
+        elicitations.cancel(id)
     }
 
     /// Cancels every pending elicitation.
@@ -245,9 +230,7 @@ public final class SwiftUIACPClient: Client {
     /// The host calls this on connection close, so a dropped connection
     /// leaves no pending prompt and leaks no continuation.
     public func cancelAllElicitations() {
-        for id in pendingElicitations.map(\.id) {
-            cancelElicitation(id)
-        }
+        elicitations.cancelAll()
     }
 
     /// Returns the pending elicitations of one session, in arrival order.
@@ -260,65 +243,4 @@ public final class SwiftUIACPClient: Client {
     public func pendingElicitations(for sessionId: SessionId) -> [PendingElicitation] {
         pendingElicitations.filter { $0.sessionId == sessionId }
     }
-
-    /// Removes one pending elicitation and resumes its suspended
-    /// continuation with the response.
-    ///
-    /// An elicitation whose continuation is not suspended stays unchanged,
-    /// so no continuation can resume two times.
-    ///
-    /// - Parameters:
-    ///   - id: The id of the elicitation.
-    ///   - response: The response to answer with.
-    private func resolveElicitation(id: UUID, response: CreateElicitationResponse) {
-        guard let continuation = elicitationStates.takeSuspended(id) else { return }
-        pendingElicitations.removeAll { $0.id == id }
-        continuation.resume(returning: response)
-    }
-
-    /// Makes the accept response, with the content when it is given.
-    ///
-    /// - Parameter content: The form values, or `nil` for no content.
-    /// - Returns: The accept action object.
-    private static func acceptResponse(content: JSONValue?) -> CreateElicitationResponse {
-        var members: [String: JSONValue] = [
-            ElicitationResponseWire.actionKey: .string(ElicitationResponseWire.acceptAction)
-        ]
-        if let content {
-            members[ElicitationResponseWire.contentKey] = content
-        }
-        return .object(members)
-    }
-
-    /// The decline action object.
-    private static let declineResponse: CreateElicitationResponse = .object([
-        ElicitationResponseWire.actionKey: .string(ElicitationResponseWire.declineAction)
-    ])
-
-    /// The cancel action object.
-    private static let cancelResponse: CreateElicitationResponse = .object([
-        ElicitationResponseWire.actionKey: .string(ElicitationResponseWire.cancelAction)
-    ])
-}
-
-/// The wire keys and action values of a `CreateElicitationResponse`.
-///
-/// The wire package models `CreateElicitationResponse` as raw JSON in this
-/// schema revision, so this client builds the spec's action objects
-/// itself, from these named members.
-private enum ElicitationResponseWire {
-    /// The key of the action member.
-    static let actionKey = "action"
-
-    /// The key of the accepted-content member.
-    static let contentKey = "content"
-
-    /// The action value of an accepted elicitation.
-    static let acceptAction = "accept"
-
-    /// The action value of a declined elicitation.
-    static let declineAction = "decline"
-
-    /// The action value of a cancelled elicitation.
-    static let cancelAction = "cancel"
 }

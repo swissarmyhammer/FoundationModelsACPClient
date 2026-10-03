@@ -37,10 +37,26 @@ comments:
     - evidence: feat(model): add SessionModel that folds updates through the merge engine. Tests: swift test 311/311, IntegrationTests 103/103. One local commit, not pushed.
     - next: review
   timestamp: 2026-10-03T13:59:02.728774+00:00
+- actor: claude-code
+  id: 01m4119rwd7ckn12796t9eetgn
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 07b50c3). 5 files reviewed; 4 .kanban files not reviewed (.reviewignore). counts: findings 0, confirmed 0, refuted 2, attempted 7, failed 0, skipped 0. The task had no prior Review Findings sections.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T14:04:45.837400+00:00
+- actor: claude-code
+  id: 01m411a16swgc5nexyfde64xbp
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — SessionModel.swift (new), TranscriptEntry.swift, 3 test files; 30 new tests
+    - test: green — swift test 311/311, IntegrationTests 103/103; only accepted warnings
+    - commit: 07b50c3 feat(model): add SessionModel that folds updates through the merge engine
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T14:04:54.361439+00:00
 depends_on:
 - 01M3YR05Z28B6DMHMSRK03QP9Q
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: bc80
 title: 'Model: SessionModel folds updates through the engine into entries and last-value state'
 ---
 ## What

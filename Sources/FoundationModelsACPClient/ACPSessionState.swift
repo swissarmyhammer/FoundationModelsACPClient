@@ -115,7 +115,16 @@ public final class ACPSessionState {
     /// others. Resolve one request with
     /// ``answerPermissionRequest(_:with:)`` or with
     /// ``cancelPermissionRequest(_:)``.
-    public private(set) var pendingPermissionRequests: [PendingPermissionRequest] = []
+    public var pendingPermissionRequests: [PendingPermissionRequest] {
+        permissionRequests.items
+    }
+
+    /// The pending permission requests and the continuation of each one.
+    /// The queue is observable, so a read of ``pendingPermissionRequests``
+    /// tracks it.
+    @ObservationIgnored private let permissionRequests = PendingRequestQueue<
+        PendingPermissionRequest, RequestPermissionResponse
+    >(cancelledResponse: PendingPermissionRequest.cancelledResponse)
 
     /// The accumulated per-identity state, folded with the wire package's
     /// own upsert rules.
@@ -318,12 +327,6 @@ public final class ACPSessionState {
         lastStopReason = nil
     }
 
-    /// The lifecycle state of each unresolved permission request, keyed by
-    /// the request id. The storage is not observable; the UI binds to
-    /// ``pendingPermissionRequests`` instead.
-    @ObservationIgnored private var permissionRequestStates =
-        PendingRequestStates<RequestPermissionResponse>()
-
     /// Suspends until the user answers or cancels the permission request.
     ///
     /// The call adds one entry to ``pendingPermissionRequests`` and holds
@@ -347,23 +350,7 @@ public final class ACPSessionState {
     public func awaitPermissionDecision(
         for request: RequestPermissionRequest
     ) async -> RequestPermissionResponse {
-        let id = UUID()
-        permissionRequestStates.recordArrival(of: id)
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                if permissionRequestStates.suspend(id, with: continuation) {
-                    pendingPermissionRequests.append(
-                        PendingPermissionRequest(id: id, request: request)
-                    )
-                } else {
-                    continuation.resume(returning: RequestPermissionResponse(outcome: .cancelled))
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelPermissionRequest(id)
-            }
-        }
+        await permissionRequests.awaitResponse(to: PendingPermissionRequest(id: UUID(), request: request))
     }
 
     /// Answers one pending permission request with the selected option.
@@ -377,10 +364,7 @@ public final class ACPSessionState {
     ///   - optionId: The id of the selected option. Give the id of one
     ///     option of the request.
     public func answerPermissionRequest(_ id: UUID, with optionId: PermissionOptionId) {
-        resolvePermissionRequest(
-            id: id,
-            outcome: .selected(SelectedPermissionOutcome(optionId: optionId))
-        )
+        permissionRequests.resolve(id, with: PendingPermissionRequest.selectedResponse(optionId))
     }
 
     /// Cancels one permission request.
@@ -392,8 +376,7 @@ public final class ACPSessionState {
     ///
     /// - Parameter id: The id of the request.
     public func cancelPermissionRequest(_ id: UUID) {
-        guard permissionRequestStates.noteCancellation(of: id) else { return }
-        resolvePermissionRequest(id: id, outcome: .cancelled)
+        permissionRequests.cancel(id)
     }
 
     /// Cancels every pending permission request.
@@ -401,24 +384,7 @@ public final class ACPSessionState {
     /// The host calls this on connection close, so a dropped connection
     /// leaves no pending prompt and leaks no continuation.
     public func cancelAllPermissionRequests() {
-        for id in pendingPermissionRequests.map(\.id) {
-            cancelPermissionRequest(id)
-        }
-    }
-
-    /// Removes one pending permission request and resumes its suspended
-    /// continuation with the outcome.
-    ///
-    /// A request whose continuation is not suspended stays unchanged, so
-    /// no continuation can resume two times.
-    ///
-    /// - Parameters:
-    ///   - id: The id of the request.
-    ///   - outcome: The outcome to answer with.
-    private func resolvePermissionRequest(id: UUID, outcome: RequestPermissionOutcome) {
-        guard let continuation = permissionRequestStates.takeSuspended(id) else { return }
-        pendingPermissionRequests.removeAll { $0.id == id }
-        continuation.resume(returning: RequestPermissionResponse(outcome: outcome))
+        permissionRequests.cancelAll()
     }
 
     /// One buffered chunk update and the in-flight target it lands on.

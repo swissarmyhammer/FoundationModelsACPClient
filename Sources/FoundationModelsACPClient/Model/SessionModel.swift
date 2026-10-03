@@ -21,6 +21,10 @@ import Observation
 /// update becomes an unknown entry with its raw JSON; and an unknown content
 /// block stays raw in the content of its message. The model keeps no rule of
 /// its own, so no update is dropped.
+///
+/// The model also holds the pending permission requests and the pending
+/// session-scoped elicitations of the session, as ``pendingPermissions`` and
+/// ``pendingElicitations``.
 @MainActor @Observable
 public final class SessionModel {
     /// The identifier of the session.
@@ -59,7 +63,25 @@ public final class SessionModel {
     /// The model finds the object of a changed entry by identity and not by
     /// the engine index, because the transcript can also hold entries that the
     /// client makes itself.
-    @ObservationIgnored private var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
+    @ObservationIgnored private(set) var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
+
+    /// The pending permission requests and the continuation of each one.
+    /// The queue is observable, so a read of ``pendingPermissions`` tracks it.
+    @ObservationIgnored let permissions = PendingRequestQueue<PendingPermissionRequest, RequestPermissionResponse>(
+        cancelledResponse: PendingPermissionRequest.cancelledResponse
+    )
+
+    /// The pending session-scoped elicitations and the continuation of each
+    /// one. The queue is observable, so a read of ``pendingElicitations``
+    /// tracks it.
+    @ObservationIgnored let elicitations = PendingRequestQueue<PendingElicitation, CreateElicitationResponse>(
+        cancelledResponse: ElicitationResponseWire.cancelResponse
+    )
+
+    /// The ids of the pending elicitations that name a tool call with no
+    /// transcript entry yet, keyed by that tool call. The entry takes the ids
+    /// when the agent adds the tool call.
+    @ObservationIgnored var unresolvedElicitationLinks: [ToolCallId: [PendingElicitation.ID]] = [:]
 
     /// Makes the model of a session with an empty transcript and no state.
     ///
@@ -109,10 +131,14 @@ public final class SessionModel {
 
     /// Appends the object of a new engine entry to the transcript.
     ///
+    /// A new tool-call entry also takes the links of the pending
+    /// elicitations that arrived before it.
+    ///
     /// - Parameter entry: The engine entry that the engine added.
     private func addEntry(_ entry: FoundationModelsACP.SessionEntry) {
         let object = TranscriptEntry(wire: entry)
         wireEntries[entry.id] = object
+        attachUnresolvedElicitationLinks(to: object)
         transcript.append(object)
     }
 

@@ -21,4 +21,16 @@ public struct PendingPermissionRequest: Identifiable, Hashable, Sendable {
     /// title, the description, and the subject context, so the UI can
     /// show what the agent asks permission for.
     public let request: RequestPermissionRequest
+
+    /// The response for a request that the user did not decide: the
+    /// `cancelled` outcome. It never selects an option for the user.
+    static let cancelledResponse = RequestPermissionResponse(outcome: .cancelled)
+
+    /// Makes the response for a request that the user answered.
+    ///
+    /// - Parameter optionId: The id of the option that the user selected.
+    /// - Returns: The response with the `selected` outcome.
+    static func selectedResponse(_ optionId: PermissionOptionId) -> RequestPermissionResponse {
+        RequestPermissionResponse(outcome: .selected(SelectedPermissionOutcome(optionId: optionId)))
+    }
 }
