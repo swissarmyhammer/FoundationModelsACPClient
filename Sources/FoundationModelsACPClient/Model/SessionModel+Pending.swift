@@ -183,6 +183,19 @@ extension SessionModel {
         toolCall.linkedElicitationIDs.append(contentsOf: ids)
     }
 
+    /// Moves the links of each tool-call entry back to the links that wait
+    /// for an entry.
+    ///
+    /// A transcript reset drops the entry objects. The replayed entry of the
+    /// same tool call then takes the links, so a pending elicitation stays
+    /// linked across the reset.
+    func detachElicitationLinksFromToolCalls() {
+        for case .toolCall(let entry) in wireEntries.values where !entry.linkedElicitationIDs.isEmpty {
+            guard case .wire(.toolCall(let toolCallId)) = entry.id else { continue }
+            unresolvedElicitationLinks[toolCallId, default: []].append(contentsOf: entry.linkedElicitationIDs)
+        }
+    }
+
     /// Resolves one pending elicitation and removes its tool-call link.
     ///
     /// - Parameters:

@@ -40,12 +40,17 @@ extension SessionModel {
     /// The chunk buffer does not delay the stream: a chunk comes out of the
     /// tap before the model folds it. Each call makes a new stream, and each
     /// stream gets each update that arrives after the call. The stream
-    /// finishes when the model closes or is released. acp-client uses it to
-    /// write the chunks to standard output as they arrive.
+    /// finishes when the model closes or is released; a stream made after the
+    /// close is already finished. acp-client uses it to write the chunks to
+    /// standard output as they arrive.
     ///
     /// - Returns: The stream of raw updates.
     public func updateTap() -> AsyncStream<SessionUpdate> {
         let (stream, continuation) = AsyncStream<SessionUpdate>.makeStream()
+        guard !isClosed else {
+            continuation.finish()
+            return stream
+        }
         updateTaps[UUID()] = continuation
         return stream
     }

@@ -38,6 +38,11 @@ import Observation
 /// whichever arrives first, links that entry to the message id that the
 /// agent gave. The entry keeps its object and its identity, and the echo
 /// adds no second entry.
+///
+/// The connection model attaches the update subscription of the session,
+/// runs the replay of a `session/resume` request, and closes the model; the
+/// UI only reads ``hasMissedUpdates``, ``isReplaying``, ``history``, and
+/// ``isClosed``.
 @MainActor @Observable
 public final class SessionModel {
     /// The identifier of the session.
@@ -67,6 +72,26 @@ public final class SessionModel {
     /// The session information, folded as a patch. A field that no update
     /// gave stays `.unchanged`.
     public private(set) var sessionInfo = SessionInfoUpdate()
+
+    /// Whether the connection discarded updates of this session before the
+    /// model subscribed. When this value is `true`, the transcript can lack
+    /// updates. A successful replay from the start of the retained history
+    /// clears it.
+    public internal(set) var hasMissedUpdates = false
+
+    /// The source of the transcript: live updates only, or a replay of the
+    /// retained history before them.
+    public internal(set) var history: SessionHistory = .live
+
+    /// Whether the session is closed. A closed model changes no more.
+    public internal(set) var isClosed = false
+
+    /// The replay of a `session/resume` request, while it runs.
+    var replayPhase: ReplayPhase = .idle
+
+    /// The task that folds the updates of the attached subscription, or `nil`
+    /// when no subscription is attached.
+    @ObservationIgnored var streamTask: Task<Void, Never>?
 
     /// The merge engine that holds the merge rules and the merged state.
     @ObservationIgnored private var engine = SessionMergeEngine()
@@ -158,8 +183,10 @@ public final class SessionModel {
     }
 
     deinit {
-        // A released model must not leave a tap consumer suspended. The
-        // coalescer cancels its own scheduled flush when it is released.
+        // A released model must not leave a tap consumer suspended, or a
+        // stream task that waits on the subscription. The coalescer cancels
+        // its own scheduled flush when it is released.
+        streamTask?.cancel()
         for tap in updateTaps.values {
             tap.finish()
         }
@@ -171,10 +198,11 @@ public final class SessionModel {
     /// goes to the shared ``ChunkCoalescer``: a coalescible chunk goes into
     /// the buffer, which flushes on the cadence, and any other update flushes
     /// the buffer first and then folds, so the applied order is the arrival
-    /// order.
+    /// order. A closed model ignores the update.
     ///
     /// - Parameter update: The update to receive.
     func apply(_ update: SessionUpdate) {
+        guard !isClosed else { return }
         yieldToUpdateTaps(update)
         coalescer.receive(update)
     }
@@ -218,6 +246,28 @@ public final class SessionModel {
         for change in engine.seed(from: response) {
             reflect(change)
         }
+    }
+
+    /// Clears the transcript and the last-value state, so a replay of the
+    /// whole history does not append its chunks to the text it already gave.
+    ///
+    /// The engine forgets each entry, and each replayed entry gets a new
+    /// object. The local prompts lose their link state. A pending elicitation
+    /// keeps its tool-call link: the link waits for the replayed entry of its
+    /// tool call.
+    func resetTranscript() {
+        detachElicitationLinksFromToolCalls()
+        engine.reset()
+        transcript.removeAll()
+        wireEntries.removeAll()
+        heldEchoes.removeAll()
+        unlinkedPrompts.removeAll()
+        promptCorrelator = PendingPromptCorrelator()
+        availableCommands = nil
+        configOptions = nil
+        usage = nil
+        agentState = nil
+        sessionInfo = SessionInfoUpdate()
     }
 
     /// Writes one engine change into the model.
