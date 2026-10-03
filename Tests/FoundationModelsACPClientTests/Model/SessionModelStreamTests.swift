@@ -12,21 +12,6 @@ import Testing
 // the missed-updates mark, the replay of a resumed session, the history value,
 // and the close.
 
-/// The test cadence of the close tests, in milliseconds.
-private let bufferedCadenceMilliseconds = 40
-
-/// A cadence that holds chunks in the buffer, so a test can see the flush.
-private let bufferedCadence: Duration = .milliseconds(bufferedCadenceMilliseconds)
-
-/// The context window that the usage fixture reports.
-private let contextWindowSize = 200_000
-
-/// The used tokens that the usage fixture reports.
-private let usedTokens = 1_500
-
-/// The usage report of the replay fixture.
-private let replayedUsage = UsageUpdate(size: contextWindowSize, used: usedTokens)
-
 /// The tool call of the replay fixture.
 private let replayedToolCallId = ToolCallId(rawValue: "tool-1")
 
@@ -43,21 +28,13 @@ private let replayedUpdates: [SessionUpdate] = [
     agentChunk(text: "Hi "),
     agentChunk(text: "there"),
     toolCallStatus(id: replayedToolCallId.rawValue, .completed),
-    .usageUpdate(replayedUsage),
+    .usageUpdate(SessionModelFixtures.usage),
     idleState(stopReason: .endTurn),
 ]
 
 /// The number of transcript entries that the replay fixture gives: the user
 /// message, the agent message, and the tool call.
 private let replayedEntryCount = 3
-
-/// Makes a model that applies each chunk at once.
-///
-/// - Returns: The model.
-@MainActor
-private func immediateModel() -> SessionModel {
-    SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero)
-}
 
 /// Makes a hand-made subscription and the continuation that feeds it.
 ///
@@ -68,19 +45,6 @@ private func handMadeSubscription(
 ) -> (SessionUpdateSubscription, AsyncStream<SessionUpdate>.Continuation) {
     let (updates, continuation) = AsyncStream<SessionUpdate>.makeStream()
     return (SessionUpdateSubscription(updates: updates, hasMissedUpdates: hasMissedUpdates), continuation)
-}
-
-/// Returns the concatenated text of content blocks.
-///
-/// - Parameter content: The content of a message.
-/// - Returns: The text of all text blocks, joined in order.
-private func joinedText(_ content: [ContentBlock]) -> String {
-    content
-        .compactMap { block in
-            guard case .text(let text) = block else { return nil }
-            return text.text
-        }
-        .joined()
 }
 
 /// Runs one successful replay of the fixture updates into a model.
@@ -95,14 +59,6 @@ private func replayFixture(into model: SessionModel) {
     model.endReplay(succeeded: true)
 }
 
-/// Makes a permission request for the test session.
-///
-/// - Returns: The request, with one option.
-private func permissionRequest() -> RequestPermissionRequest {
-    let allow = PermissionOption(kind: .allowOnce, name: "Allow", optionId: PermissionOptionId(rawValue: "allow-once"))
-    return RequestPermissionRequest(options: [allow], sessionId: testSession, title: "Run the tool?")
-}
-
 /// The stream tests, in one suite so that `swift test --filter
 /// SessionModelStreamTests` selects them. A wait for an update that never
 /// lands would suspend forever, so the suite has a time limit.
@@ -112,7 +68,7 @@ struct SessionModelStreamTests {
     // MARK: - Attachment
 
     @Test func updatesOnTheAttachedSubscriptionLandInOrder() async throws {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = handMadeSubscription()
 
         model.attach(subscription)
@@ -126,7 +82,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func theEndOfTheSubscriptionEndsTheUpdateTap() async {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = handMadeSubscription()
         var tap = model.updateTap().makeAsyncIterator()
 
@@ -139,7 +95,7 @@ struct SessionModelStreamTests {
     // MARK: - Missed updates
 
     @Test func aSubscriptionWithMissedUpdatesSetsTheMark() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.attach(handMadeSubscription(hasMissedUpdates: true).0)
 
@@ -147,7 +103,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aSubscriptionWithNoMissedUpdatesLeavesTheMarkClear() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.attach(handMadeSubscription().0)
 
@@ -155,7 +111,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aSuccessfulReplayFromTheStartClearsTheMark() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.attach(handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromStart)
@@ -165,7 +121,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aFailedReplayFromTheStartKeepsTheMark() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.attach(handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromStart)
@@ -175,7 +131,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aSuccessfulReplayFromACursorKeepsTheMark() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.attach(handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromCursor)
@@ -185,7 +141,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aSuccessfulResumeWithNoReplayKeepsTheMark() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.attach(handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: nil)
@@ -197,7 +153,7 @@ struct SessionModelStreamTests {
     // MARK: - Replay flags
 
     @Test func isReplayingIsTrueBetweenTheBeginAndTheEnd() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         #expect(!model.isReplaying)
 
         model.beginReplay(replayFrom: replayFromStart)
@@ -208,7 +164,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func isReplayingIsFalseAfterAFailedReplay() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.beginReplay(replayFrom: replayFromStart)
         model.endReplay(succeeded: false)
@@ -217,28 +173,23 @@ struct SessionModelStreamTests {
     }
 
     @Test func theEndOfAReplayFlushesTheBufferedChunks() throws {
-        let model = SessionModel(
-            sessionId: testSession,
-            requestSender: FakeSessionRequestSender(),
-            coalescingCadence: bufferedCadence,
-            clock: ManualClock()
-        )
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
         model.beginReplay(replayFrom: replayFromStart)
         model.apply(agentChunk(text: "replayed"))
         model.endReplay(succeeded: true)
 
-        #expect(joinedText(try #require(model.transcript.first?.agentMessage).content) == "replayed")
+        #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "replayed")
     }
 
     // MARK: - History
 
     @Test func aNewModelHasLiveHistory() {
-        #expect(immediateModel().history == .live)
+        #expect(SessionModelFixtures.immediateModel().history == .live)
     }
 
     @Test func aSuccessfulReplayGivesTheRetainedHistoryOfItsCursor() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.beginReplay(replayFrom: replayFromStart)
         model.endReplay(succeeded: true)
@@ -247,7 +198,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aResumeWithNoReplayKeepsLiveHistory() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.beginReplay(replayFrom: nil)
         model.endReplay(succeeded: true)
@@ -256,7 +207,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aFailedReplayKeepsLiveHistory() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
 
         model.beginReplay(replayFrom: replayFromStart)
         model.endReplay(succeeded: false)
@@ -267,9 +218,9 @@ struct SessionModelStreamTests {
     // MARK: - Second replay
 
     @Test func aSecondReplayGivesTheTranscriptOfOneReplay() throws {
-        let once = immediateModel()
+        let once = SessionModelFixtures.immediateModel()
         replayFixture(into: once)
-        let twice = immediateModel()
+        let twice = SessionModelFixtures.immediateModel()
         replayFixture(into: twice)
         let firstAgentMessage = try #require(twice.transcript.dropFirst().first?.agentMessage)
 
@@ -277,14 +228,14 @@ struct SessionModelStreamTests {
 
         #expect(twice.transcript.map(\.id) == once.transcript.map(\.id))
         let agentMessage = try #require(twice.transcript.dropFirst().first?.agentMessage)
-        #expect(joinedText(agentMessage.content) == "Hi there")
+        #expect(agentMessage.content.joinedText == "Hi there")
         #expect(agentMessage !== firstAgentMessage)
-        #expect(twice.usage == replayedUsage)
+        #expect(twice.usage == SessionModelFixtures.usage)
         #expect(twice.agentState == once.agentState)
     }
 
     @Test func aReplayIntoAModelWithATranscriptClearsTheLastValueState() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         replayFixture(into: model)
 
         model.beginReplay(replayFrom: replayFromStart)
@@ -295,17 +246,17 @@ struct SessionModelStreamTests {
     }
 
     @Test func aResumeWithNoReplayKeepsTheTranscript() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         replayFixture(into: model)
 
         model.beginReplay(replayFrom: nil)
 
         #expect(model.transcript.count == replayedEntryCount)
-        #expect(model.usage == replayedUsage)
+        #expect(model.usage == SessionModelFixtures.usage)
     }
 
     @Test func aReplayedToolCallTakesTheLinkOfAPendingElicitation() async throws {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         replayFixture(into: model)
         let request = ElicitationFixtures.formRequest(
             scope: .session(ElicitationSessionScope(sessionId: testSession, toolCallId: replayedToolCallId))
@@ -325,7 +276,7 @@ struct SessionModelStreamTests {
     // MARK: - Close
 
     @Test func closeSetsIsClosed() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         #expect(!model.isClosed)
 
         model.markClosed()
@@ -334,22 +285,17 @@ struct SessionModelStreamTests {
     }
 
     @Test func closeFlushesTheBufferedChunks() throws {
-        let model = SessionModel(
-            sessionId: testSession,
-            requestSender: FakeSessionRequestSender(),
-            coalescingCadence: bufferedCadence,
-            clock: ManualClock()
-        )
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         model.apply(agentChunk(text: "last words"))
 
         model.markClosed()
 
-        #expect(joinedText(try #require(model.transcript.first?.agentMessage).content) == "last words")
+        #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "last words")
     }
 
     @Test func closeCancelsAPendingPermission() async throws {
-        let model = immediateModel()
-        let request = permissionRequest()
+        let model = SessionModelFixtures.immediateModel()
+        let request = SessionModelFixtures.permissionRequest()
         let task = Task { await model.awaitPermissionDecision(for: request) }
         try await waitUntil { !model.pendingPermissions.isEmpty }
 
@@ -360,7 +306,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func closeEndsTheUpdateTap() async {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         var tap = model.updateTap().makeAsyncIterator()
 
         model.markClosed()
@@ -369,7 +315,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func aTapMadeAfterCloseEndsAtOnce() async {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.markClosed()
 
         var tap = model.updateTap().makeAsyncIterator()
@@ -378,7 +324,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func closeCancelsTheStreamTask() async throws {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = handMadeSubscription()
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
@@ -390,7 +336,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func releasingTheModelCancelsTheStreamTask() async throws {
-        var model: SessionModel? = immediateModel()
+        var model: SessionModel? = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = handMadeSubscription()
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
@@ -402,7 +348,7 @@ struct SessionModelStreamTests {
     }
 
     @Test func anUpdateAfterCloseChangesNothing() {
-        let model = immediateModel()
+        let model = SessionModelFixtures.immediateModel()
         model.apply(agentChunk(text: "before"))
 
         model.markClosed()
@@ -410,7 +356,7 @@ struct SessionModelStreamTests {
         model.apply(idleState(stopReason: .endTurn))
 
         #expect(model.transcript.count == 1)
-        #expect(model.transcript.first?.agentMessage.map { joinedText($0.content) } == "before")
+        #expect(model.transcript.first?.agentMessage?.content.joinedText == "before")
         #expect(model.agentState == nil)
     }
 }

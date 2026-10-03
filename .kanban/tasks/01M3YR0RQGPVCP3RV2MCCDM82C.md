@@ -58,6 +58,61 @@ comments:
     - evidence: feat(model): attach SessionModel to its subscription, add replay, missed updates and close. Tests: swift test 393/393 two times, IntegrationTests 103/103.
     - next: review
   timestamp: 2026-10-03T16:04:57.824937+00:00
+- actor: claude-code
+  id: 01m418es56ynwvdkthxewbz8fe
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (commit cacd4ce). counts: 1 finding, 1 confirmed, 0 refuted. Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:77 (reuse/reuse: `joinedText()` is a duplicate of the function in SessionModelCoalescingTests.swift).
+    - next: /implement the open item in the "Review Findings (2026-10-03 11:05)" section, then /review again.
+  timestamp: 2026-10-03T16:09:49.990735+00:00
+- actor: claude-code
+  id: 01m418f0f2dm29z1bmt8kpf0s0
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 6 files (SessionModel+Stream.swift, SessionHistory.swift, 27 new tests)
+    - test: green — swift test 393/393 x2, IntegrationTests 103/103
+    - commit: cacd4ce feat(model): attach SessionModel to its subscription, add replay, missed updates and close
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:77
+  timestamp: 2026-10-03T16:09:57.474290+00:00
+- actor: claude-code
+  id: 01m418vdse06eq90jp16df9mbr
+  text: |-
+    Finding fix (reuse/reuse, joinedText copy). Research: the Model test files had more copied helpers than joinedText. Copies found and removed:
+    - `joinedText(_:)`: SessionModelStreamTests and SessionModelCoalescingTests.
+    - `immediateModel()` (zero cadence model): SessionModelStreamTests; the same construction in SessionModelFoldTests `foldedModel` and in one SessionModelCoalescingTests test.
+    - The buffered model (40 ms cadence + ManualClock): `coalescingModel(clock:)` in SessionModelCoalescingTests, two inline copies in SessionModelStreamTests, and the 40 ms cadence constant in SessionModelPromptTests.
+    - `permissionRequest`: SessionModelPendingTests (two options) and SessionModelStreamTests (one option), with the allow/reject options.
+    - The usage fixture (200_000 / 1_500): SessionModelFoldTests and SessionModelStreamTests.
+
+    New shared file Tests/FoundationModelsACPClientTests/Model/SessionModelFixtures.swift: an `enum SessionModelFixtures` namespace (the same shape as `ElicitationFixtures`, so no new function stands alone at file scope, as the Swift immutability rule asks) with `bufferedCadence`, `usage`, `allowOption`, `rejectOption`, `immediateModel()`, `coalescingModel(clock:)` and `permissionRequest(title:)`; and `extension [ContentBlock] { var joinedText }`. Call sites now read `entry.content.joinedText`.
+
+    Kept on purpose: ChunkCoalescerTests keeps its own `testCadence`. It tests ChunkCoalescer, not SessionModel, and it is a constant, not a helper. The shared names are namespaced because DecliningClientTests and SessionStateTests (outside Model/) have file-private `allowOption`, `permissionRequest`, `contextWindowSize` and `usedTokens`; a module-level name of the same spelling can make an ambiguous reference.
+
+    Tool note: the `files` tool `edit file` with `replace_all: true` made only one replacement for each call here. Write the whole file, or give each edit a unique context.
+
+    TDD: this is a test-only refactor with no production change, so no RED step. The existing suites are the check.
+  timestamp: 2026-10-03T16:16:44.334908+00:00
+- actor: claude-code
+  id: 01m418vfw0xbj8bj2477bbq1xm
+  text: |-
+    ### implement — changed
+    - evidence: 6 files. New: Tests/FoundationModelsACPClientTests/Model/SessionModelFixtures.swift. Changed: Model/SessionModelStreamTests.swift, Model/SessionModelCoalescingTests.swift, Model/SessionModelPendingTests.swift, Model/SessionModelPromptTests.swift, Model/SessionModelFoldTests.swift. No production file changed. `swift build`: Build complete; only the accepted MLX warning "missing creator for mutated node". `swift test`: 393 tests in 33 suites passed, 0 failures. Finding in "Review Findings (2026-10-03 11:05)" flipped to `- [x]`. Not committed.
+    - next: /review
+  timestamp: 2026-10-03T16:16:46.464777+00:00
+- actor: claude-code
+  id: 01m4190br3wtdfz4rypfq84a4s
+  text: |-
+    ### test — green (iteration 2, shared test fixtures)
+    - evidence: swift build ok; swift test 393 tests in 33 suites passed, 0 failed, 0 skipped; swift build --package-path IntegrationTests ok; swift test --package-path IntegrationTests 103 tests in 14 suites passed, 0 failed, 0 skipped. Only warning: mlx-swift_Cmlx.bundle "missing creator for mutated node" (accepted MLX warning).
+    - next: review
+  timestamp: 2026-10-03T16:19:26.083211+00:00
+- actor: claude-code
+  id: 01m4190y5pkmdqc3dw6sb15m50
+  text: |-
+    ### commit — changed (iteration 2)
+    - evidence: test(model): share SessionModel test fixtures. 8 files (SessionModelFixtures.swift new; 5 Model test files changed; task files in .kanban). Tests: swift test 393/393, IntegrationTests 103/103.
+    - next: review
+  timestamp: 2026-10-03T16:19:44.950517+00:00
 depends_on:
 - 01M3YRC0ERS5FADQYB965X5KJR
 - 01M3YR18MVWMMHJGQ69PFCG77P
@@ -88,3 +143,12 @@ Upstream API (foundationmodelsacp-c7, task ^1heg5df): `connection.subscribe(to: 
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-10-03 11:05)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 6 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift:77` `reuse/reuse` — Function `joinedText()` is an exact duplicate of an existing function in SessionModelCoalescingTests.swift. The author should have searched for and reused the existing implementation instead of duplicating it. Extract `joinedText()` to a shared test utilities module or file (e.g., SessionModelTestHelpers.swift) and import it in both test files.

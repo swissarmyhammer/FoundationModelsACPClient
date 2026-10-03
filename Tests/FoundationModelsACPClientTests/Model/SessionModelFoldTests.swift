@@ -9,12 +9,6 @@ import Testing
 // entry object or in one last-value property. The engine owns the merge
 // rules, so these tests check that the model reflects each rule.
 
-/// The context-window size that the usage test reports.
-private let contextWindowSize = 200_000
-
-/// The used-token count that the usage test reports.
-private let usedTokens = 1_500
-
 /// The raw stop reason that this schema revision does not know.
 private let truncatedStopReason = "_truncated"
 
@@ -46,7 +40,7 @@ private let toolCallId = ToolCallId(rawValue: "tool-1")
 /// - Returns: The model.
 @MainActor
 private func foldedModel(_ updates: SessionUpdate...) -> SessionModel {
-    let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero)
+    let model = SessionModelFixtures.immediateModel()
     for update in updates {
         model.apply(update)
     }
@@ -311,11 +305,9 @@ struct SessionModelFoldTests {
     }
 
     @Test func usageUpdateSetsTheUsage() {
-        let usage = UsageUpdate(size: contextWindowSize, used: usedTokens)
+        let model = foldedModel(.usageUpdate(SessionModelFixtures.usage))
 
-        let model = foldedModel(.usageUpdate(usage))
-
-        #expect(model.usage == usage)
+        #expect(model.usage == SessionModelFixtures.usage)
     }
 
     @Test func sessionInfoUpdateFoldsAsAPatch() {

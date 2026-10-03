@@ -15,19 +15,11 @@ import Testing
 // `ElicitationTests` test the `Client` conformance, which the model does not
 // have; the routing task of the model client ports them.
 
-/// The "allow" option that each test permission request offers.
-private let allowOption = PermissionOption(
-    kind: .allowOnce,
-    name: "Allow",
-    optionId: PermissionOptionId(rawValue: "allow-once")
-)
+/// The option id of the "allow" option of each test permission request.
+private let allowOptionId = SessionModelFixtures.allowOption.optionId
 
-/// The "reject" option that each test permission request offers.
-private let rejectOption = PermissionOption(
-    kind: .rejectOnce,
-    name: "Reject",
-    optionId: PermissionOptionId(rawValue: "reject-once")
-)
+/// The option id of the "reject" option of each test permission request.
+private let rejectOptionId = SessionModelFixtures.rejectOption.optionId
 
 /// The tool call that the link tests name.
 private let linkedToolCallId = ToolCallId(rawValue: "tool-1")
@@ -35,14 +27,6 @@ private let linkedToolCallId = ToolCallId(rawValue: "tool-1")
 /// The form values that the accept tests give: one "name" string, which
 /// matches the requested schema of the fixtures.
 private let nameValues: JSONValue = .object(["name": .string("orion")])
-
-/// Makes a permission request for the test session.
-///
-/// - Parameter title: The title of the permission prompt.
-/// - Returns: The request, with the two test options.
-private func permissionRequest(title: String = "Run the tool?") -> RequestPermissionRequest {
-    RequestPermissionRequest(options: [allowOption, rejectOption], sessionId: testSession, title: title)
-}
 
 /// Makes a session-scoped form elicitation for the test session.
 ///
@@ -67,7 +51,7 @@ struct SessionModelPendingTests {
     /// - Returns: The task of the agent's call.
     private func startPermission(
         on model: SessionModel,
-        _ request: RequestPermissionRequest = permissionRequest()
+        _ request: RequestPermissionRequest = SessionModelFixtures.permissionRequest()
     ) async throws -> Task<RequestPermissionResponse, Never> {
         let count = model.pendingPermissions.count
         let task = Task { await model.awaitPermissionDecision(for: request) }
@@ -105,7 +89,7 @@ struct SessionModelPendingTests {
 
     @Test func selectingAnOptionResolvesThePermissionWithThatOption() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let request = permissionRequest()
+        let request = SessionModelFixtures.permissionRequest()
         let task = try await startPermission(on: model, request)
 
         // The pending state carries the whole request, so the UI can show the
@@ -113,11 +97,11 @@ struct SessionModelPendingTests {
         let pending = try #require(model.pendingPermissions.first)
         #expect(pending.request == request)
 
-        model.selectPermission(pending.id, option: rejectOption.optionId)
+        model.selectPermission(pending.id, option: rejectOptionId)
 
         #expect(model.pendingPermissions.isEmpty)
         let response = await task.value
-        #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOption.optionId)))
+        #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
     }
 
     @Test func cancellingTheAgentCallAnswersCancelledAndClearsThePermission() async throws {
@@ -151,32 +135,32 @@ struct SessionModelPendingTests {
         let task = try await startPermission(on: model)
         let pending = try #require(model.pendingPermissions.first)
 
-        model.selectPermission(pending.id, option: allowOption.optionId)
+        model.selectPermission(pending.id, option: allowOptionId)
         // A second resume of the continuation traps, so these two calls prove
         // that a resolved request resumes one time only.
-        model.selectPermission(pending.id, option: rejectOption.optionId)
+        model.selectPermission(pending.id, option: rejectOptionId)
         model.cancelPermission(pending.id)
 
         let response = await task.value
-        #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: allowOption.optionId)))
+        #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
     }
 
     @Test func twoOverlappingPermissionsResolveIndependently() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let firstTask = try await startPermission(on: model, permissionRequest(title: "First?"))
-        let secondTask = try await startPermission(on: model, permissionRequest(title: "Second?"))
+        let firstTask = try await startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
+        let secondTask = try await startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
 
         // More than one outstanding request is supported, in arrival order.
         #expect(model.pendingPermissions.map(\.request.title) == ["First?", "Second?"])
 
-        model.selectPermission(model.pendingPermissions[1].id, option: allowOption.optionId)
+        model.selectPermission(model.pendingPermissions[1].id, option: allowOptionId)
         let secondResponse = await secondTask.value
-        #expect(secondResponse.outcome == .selected(SelectedPermissionOutcome(optionId: allowOption.optionId)))
+        #expect(secondResponse.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
         #expect(model.pendingPermissions.map(\.request.title) == ["First?"])
 
-        model.selectPermission(try #require(model.pendingPermissions.first).id, option: rejectOption.optionId)
+        model.selectPermission(try #require(model.pendingPermissions.first).id, option: rejectOptionId)
         let firstResponse = await firstTask.value
-        #expect(firstResponse.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOption.optionId)))
+        #expect(firstResponse.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
         #expect(model.pendingPermissions.isEmpty)
     }
 

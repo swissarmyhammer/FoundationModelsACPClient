@@ -14,12 +14,6 @@ private let rapidChunkCount = 200
 /// The default cadence that the model must use, in milliseconds.
 private let expectedDefaultCadenceMilliseconds = 33
 
-/// The test cadence, in milliseconds.
-private let testCadenceMilliseconds = 40
-
-/// The cadence that these tests give the model under test.
-private let testCadence: Duration = .milliseconds(testCadenceMilliseconds)
-
 /// The message id that `agentChunk` gives by default.
 private let agentMessageId = MessageId(rawValue: "agent-1")
 
@@ -29,15 +23,6 @@ private let thoughtMessageId = MessageId(rawValue: "thought-1")
 /// Chunks with combining marks, emoji, and white space, so a coalesced fold
 /// that changed one byte would show.
 private let mixedChunks = ["Hé", "llo,  ", "\n\t", "👋🏽 ", "cafe\u{301}", "  ", "end."]
-
-/// Makes a model for the test session that coalesces on the test cadence.
-///
-/// - Parameter clock: The clock that schedules the flushes.
-/// - Returns: The model.
-@MainActor
-private func coalescingModel(clock: ManualClock) -> SessionModel {
-    SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: testCadence, clock: clock)
-}
 
 /// Counts each observable change of the values that `read` reads.
 ///
@@ -57,19 +42,6 @@ private func countChanges(of read: @escaping @MainActor @Sendable () -> Void, in
     }
 }
 
-/// Returns the concatenated text of content blocks.
-///
-/// - Parameter content: The content of a message.
-/// - Returns: The text of all text blocks, joined in order.
-private func joinedText(_ content: [ContentBlock]) -> String {
-    content
-        .compactMap { block in
-            guard case .text(let text) = block else { return nil }
-            return text.text
-        }
-        .joined()
-}
-
 /// The coalescing tests, in one suite so that `swift test --filter
 /// SessionModelCoalescingTests` selects them. A tap test that waits for an
 /// update the model never yields would suspend forever, so the suite has a
@@ -85,19 +57,19 @@ struct SessionModelCoalescingTests {
 
     @Test func bufferedChunksWaitUntilTheCadenceElapses() async throws {
         let clock = ManualClock()
-        let model = coalescingModel(clock: clock)
+        let model = SessionModelFixtures.coalescingModel(clock: clock)
 
         model.apply(agentChunk(text: "one "))
         model.apply(agentChunk(text: "two"))
         #expect(model.transcript.isEmpty)
 
         await yieldUntil { clock.sleeperCount > 0 }
-        clock.advance(by: testCadence)
+        clock.advance(by: SessionModelFixtures.bufferedCadence)
         await yieldUntil { !model.transcript.isEmpty }
 
         let entry = try #require(model.transcript.first?.agentMessage)
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(agentMessageId))])
-        #expect(joinedText(entry.content) == "one two")
+        #expect(entry.content.joinedText == "one two")
     }
 
     @Test func zeroCadenceAppliesEachChunkAtOnce() throws {
@@ -113,7 +85,7 @@ struct SessionModelCoalescingTests {
     // MARK: - Write count
 
     @Test func chunksInsideOneCadenceWriteTheEntryOneTime() throws {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         model.apply(agentChunk(text: "first "))
         model.flushPendingChunks()
         let entry = try #require(model.transcript.first?.agentMessage)
@@ -131,7 +103,7 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func chunksForANewEntryAppendTheTranscriptOneTime() throws {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         let appends = MutationCounter()
         countChanges(of: { _ = model.transcript }, into: appends)
 
@@ -145,8 +117,8 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func coalescedTextEqualsOneByOneApplication() throws {
-        let coalesced = coalescingModel(clock: ManualClock())
-        let oneByOne = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero, clock: ManualClock())
+        let coalesced = SessionModelFixtures.coalescingModel(clock: ManualClock())
+        let oneByOne = SessionModelFixtures.immediateModel()
 
         for chunk in mixedChunks {
             coalesced.apply(agentChunk(text: chunk))
@@ -156,13 +128,13 @@ struct SessionModelCoalescingTests {
 
         let coalescedContent = try #require(coalesced.transcript.first?.agentMessage).content
         #expect(coalescedContent == (try #require(oneByOne.transcript.first?.agentMessage)).content)
-        #expect(joinedText(coalescedContent) == mixedChunks.joined())
+        #expect(coalescedContent.joinedText == mixedChunks.joined())
     }
 
     // MARK: - Order
 
     @Test func aTurnEndFlushesTheBufferedRemainderSynchronously() throws {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
         model.apply(agentChunk(text: "partial "))
         model.apply(agentChunk(text: "tail"))
@@ -170,12 +142,12 @@ struct SessionModelCoalescingTests {
         // The clock never moves, so only the turn end can flush the buffer.
         model.apply(idleState(stopReason: .endTurn))
 
-        #expect(joinedText(try #require(model.transcript.first?.agentMessage).content) == "partial tail")
+        #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "partial tail")
         #expect(model.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)))
     }
 
     @Test func aNonChunkUpdateAppliesAfterTheBufferedChunks() {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
         model.apply(agentChunk(text: "before the tool"))
         model.apply(toolCallStatus(id: "tool-1", .pending))
@@ -188,7 +160,7 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func interleavedMessageAndThoughtChunksCoalesceIntoTheirOwnEntries() throws {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
         model.apply(thoughtChunk(text: "think-a "))
         model.apply(agentChunk(text: "say-a "))
@@ -197,24 +169,24 @@ struct SessionModelCoalescingTests {
         model.flushPendingChunks()
 
         #expect(model.transcript.map(\.id) == [.wire(.agentThought(thoughtMessageId)), .wire(.agentMessage(agentMessageId))])
-        #expect(joinedText(try #require(model.transcript.first?.thought).content) == "think-a think-b")
-        #expect(joinedText(try #require(model.transcript.last?.agentMessage).content) == "say-a say-b")
+        #expect(try #require(model.transcript.first?.thought).content.joinedText == "think-a think-b")
+        #expect(try #require(model.transcript.last?.agentMessage).content.joinedText == "say-a say-b")
     }
 
     @Test func flushPendingChunksAppliesTheBufferAtOnce() throws {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
         model.apply(agentChunk(text: "left open"))
         // The clock never moves, so only the explicit flush can apply it.
         model.flushPendingChunks()
 
-        #expect(joinedText(try #require(model.transcript.first?.agentMessage).content) == "left open")
+        #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "left open")
     }
 
     // MARK: - Update tap
 
     @Test func updateTapYieldsEachUpdateInArrivalOrder() async {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         var tap = model.updateTap().makeAsyncIterator()
         let updates = [
             thoughtChunk(text: "think"),
@@ -237,7 +209,7 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func updateTapYieldsAChunkBeforeTheBufferFlushes() async {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         var tap = model.updateTap().makeAsyncIterator()
         let chunk = agentChunk(text: "at once")
 
@@ -248,7 +220,7 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func finishingTheTapsEndsEachStream() async {
-        let model = coalescingModel(clock: ManualClock())
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
         var first = model.updateTap().makeAsyncIterator()
         var second = model.updateTap().makeAsyncIterator()
 
@@ -259,7 +231,7 @@ struct SessionModelCoalescingTests {
     }
 
     @Test func releasingTheModelEndsTheTap() async throws {
-        var model: SessionModel? = coalescingModel(clock: ManualClock())
+        var model: SessionModel? = SessionModelFixtures.coalescingModel(clock: ManualClock())
         var tap = try #require(model).updateTap().makeAsyncIterator()
 
         model = nil

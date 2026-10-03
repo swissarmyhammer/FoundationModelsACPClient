@@ -26,12 +26,6 @@ private let promptText = "Hello agent"
 /// The `_meta` field that the tests give a request, as a trace parent does.
 private let traceMeta: JSONValue = .object(["traceparent": .string("00-trace-span-01")])
 
-/// The cadence of the model under the buffered-path tests, in milliseconds.
-private let bufferedCadenceMilliseconds = 40
-
-/// The cadence of the model under the buffered-path tests.
-private let bufferedCadence: Duration = .milliseconds(bufferedCadenceMilliseconds)
-
 /// The request tests, in one suite so that `swift test --filter
 /// SessionModelPromptTests` selects them. A test that waits for a prompt the
 /// fake never receives would suspend forever, so the suite has a time limit.
@@ -141,7 +135,7 @@ struct SessionModelPromptTests {
 
     @Test func echoAfterBufferedChunksLinksTheLocalEntry() async throws {
         let clock = ManualClock()
-        let model = makeModel(cadence: bufferedCadence, clock: clock)
+        let model = makeModel(cadence: SessionModelFixtures.bufferedCadence, clock: clock)
         let call = await startPrompt(on: model)
         let local = try #require(model.transcript.first?.userMessage)
         sender.answerPrompt(with: promptedResponse)
@@ -158,7 +152,7 @@ struct SessionModelPromptTests {
 
     @Test func echoBeforeTheResponseThroughTheBufferLinksTheLocalEntry() async throws {
         let clock = ManualClock()
-        let model = makeModel(cadence: bufferedCadence, clock: clock)
+        let model = makeModel(cadence: SessionModelFixtures.bufferedCadence, clock: clock)
         let call = await startPrompt(on: model)
         let local = try #require(model.transcript.first?.userMessage)
 
