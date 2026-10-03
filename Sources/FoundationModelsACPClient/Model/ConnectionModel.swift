@@ -76,6 +76,11 @@ public final class ConnectionModel {
     /// pending elicitation whose request finished.
     @ObservationIgnored private var requestWatch: Task<Void, Never>?
 
+    /// The queue that runs the `session/resume` calls of one session one
+    /// after the other, keyed by session id. Two resumes of one session that
+    /// overlap would share one replay state.
+    @ObservationIgnored let resumeTurns = KeyedTurnQueue<SessionId>()
+
     /// The cadence between coalesced flushes of each session model that this
     /// connection makes.
     @ObservationIgnored private let coalescingCadence: Duration

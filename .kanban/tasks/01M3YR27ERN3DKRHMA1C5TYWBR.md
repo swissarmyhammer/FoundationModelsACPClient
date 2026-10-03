@@ -56,6 +56,16 @@ comments:
     - evidence: One local commit: feat(model): add the session list and deleteSession to ConnectionModel. The sha is in the git log. The commit is not pushed.
     - next: One card item waits for a decision by a person: a local close without the close capability. The task stays in its column.
   timestamp: 2026-10-03T21:51:39.120295+00:00
+- actor: claude-code
+  id: 01m41w0wx3q356yagpjrs08nsb
+  text: |-
+    ### finish iteration 1 — stuck
+    - implement: stuck — the card item "else markClosed() and unregister locally (no request)" and the criterion "without the close capability it closes locally and sends only delete" cannot occur: canDeleteSessions (session.delete != nil) gives canCloseSessions (session != nil), and alpha.7 at f72b8ad has no separate session.close flag. The dead-code rule forbids the branch. A person must choose: (a) remove the branch and that part of the criterion from the card, or (b) get a separate upstream session.close capability.
+    - test: green — swift test 508/508, IntegrationTests 103/103
+    - commit: 80979a4 feat(model): add the session list and deleteSession to ConnectionModel (partial checkpoint)
+    - review: not run — the task is stuck on the open card item
+    - next: after the decision, /finish c5tywbr.
+  timestamp: 2026-10-03T21:51:46.595387+00:00
 depends_on:
 - 01M3YR1XW7S2KVG2ABV6NP8VDV
 - 01M3YRB9RRT2GXY0Q47K0BRVV6

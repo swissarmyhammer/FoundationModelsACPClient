@@ -46,6 +46,14 @@ private enum SessionFactoryFixtures {
     /// ``chunkedReplay``.
     static let cancelledAndRunningResumeCount = 2
 
+    /// The number of `session/resume` requests that the agent got when only
+    /// the first of two concurrent resumes went out.
+    static let firstResumeOnlyCount = 1
+
+    /// The number of resumes of one session that the concurrent-resume tests
+    /// start at the same time.
+    static let concurrentResumeCount = 2
+
     /// The number of agent messages in ``manyReplayedMessages``.
     static let manyReplayedMessageCount = 200
 
@@ -183,6 +191,31 @@ private enum SessionFactoryFixtures {
             }
         }
         return false
+    }
+
+    /// Counts the `session/resume` requests that the agent got.
+    ///
+    /// - Parameter connected: The connected model and its stub agent.
+    /// - Returns: The number of `session/resume` requests in the record of
+    ///   the agent.
+    @MainActor
+    static func resumeRequestCount(of connected: ConnectedModel) -> Int {
+        connected.receivedMethods.count { $0 == ClientRequestSpan.Method.resumeSession }
+    }
+
+    /// Starts a resume of the test session that runs on the main actor up to
+    /// its first suspension before this call returns.
+    ///
+    /// Thus the resume has entered `resumeSession(_:)` when the test goes on,
+    /// with no wait.
+    ///
+    /// - Parameter model: The connection model that resumes.
+    /// - Returns: The task of the resume.
+    @MainActor
+    static func startResumeNow(on model: ConnectionModel) -> Task<SessionModel, any Error> {
+        Task.immediate { @MainActor in
+            try await model.resumeSession(resumeRequest)
+        }
     }
 
     /// Gives the text of each agent message of a session model, in
@@ -549,6 +582,97 @@ struct ConnectionModelSessionTests {
 
         answerGate.open()
         #expect(try await resuming.value === session)
+        #expect(!session.isReplaying)
+        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+    }
+
+    @Test func twoConcurrentResumesOfANewSessionGiveOneModelWithOneReplayEach() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
+            resumeSessionGate: answerGate
+        )
+        let first = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        try await waitUntil {
+            SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        }
+
+        // The gate holds the answer of the first resume, so the second resume
+        // enters `resumeSession(_:)` while the first one runs.
+        let second = SessionFactoryFixtures.startResumeNow(on: connected.model)
+        answerGate.open()
+
+        let firstModel = try await first.value
+        let secondModel = try await second.value
+        #expect(secondModel === firstModel)
+        #expect(connected.model.session(for: testSession) === firstModel)
+        #expect(SessionFactoryFixtures.messageTexts(of: firstModel) == [SessionFactoryFixtures.replayedText])
+        #expect(!firstModel.isReplaying)
+        #expect(firstModel.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.concurrentResumeCount)
+    }
+
+    @Test func aCancelledFirstResumeDoesNotEndTheReplayOfTheSecondResume() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
+            resumeSessionGate: answerGate
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let cancelled = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        try await waitUntil {
+            SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        }
+        let resuming = SessionFactoryFixtures.startResumeNow(on: connected.model)
+
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await cancelled.value
+        }
+        try await waitUntil {
+            SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.concurrentResumeCount
+        }
+
+        // The gate still holds the answer of the second resume, so its replay
+        // runs.
+        #expect(session.isReplaying)
+        answerGate.open()
+        #expect(try await resuming.value === session)
+        #expect(!session.isReplaying)
+        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+    }
+
+    @Test func aWaitingResumeThatItsTaskCancelsThrowsAtOnceAndSendsNothing() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
+            resumeSessionGate: answerGate
+        )
+        let first = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        try await waitUntil {
+            SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        }
+        let waiting = SessionFactoryFixtures.startResumeNow(on: connected.model)
+
+        // The gate holds the answer of the first resume, so the cancelled
+        // resume ends while the first one still runs.
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await waiting.value
+        }
+        answerGate.open()
+        let session = try await first.value
+        // A second initialize makes a round trip after the first resume, so a
+        // resume that went out would be in the record before its answer.
+        try await connected.initialize()
+
+        #expect(SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount)
         #expect(!session.isReplaying)
         #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
     }

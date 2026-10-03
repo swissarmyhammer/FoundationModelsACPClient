@@ -67,6 +67,13 @@ extension ConnectionModel {
     /// takes its place, after the response arrives but before this call reads
     /// it, a new model is closed too.
     ///
+    /// The resumes of one session run one after the other. A call for a
+    /// session whose earlier resume still runs waits until that resume
+    /// returned or threw, and then runs. Thus it finds the model that the
+    /// earlier resume registered, and its replay ends only at the marker of
+    /// its own request. A failure or a cancel of the earlier resume does not
+    /// end the replay of this call.
+    ///
     /// - Parameter request: The resume-session request.
     /// - Returns: The open model of the session.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
@@ -76,6 +83,20 @@ extension ConnectionModel {
     ///   `RequestError` of the agent; or the error of the connection.
     public func resumeSession(_ request: ResumeSessionRequest) async throws -> SessionModel {
         try requireCapability(canResumeSessions, method: ClientRequestSpan.Method.resumeSession)
+        return try await resumeTurns.run(for: request.sessionId) {
+            try await resumeInTurn(request)
+        }
+    }
+
+    /// Sends one `session/resume` request when no other resume of its session
+    /// runs, and gives the model of the session with the replay.
+    ///
+    /// - Parameter request: The resume-session request.
+    /// - Returns: The open model of the session.
+    /// - Throws: `ConnectionError.closed` when no connection is open, or when
+    ///   the connection of the request is no longer the open connection; the
+    ///   `RequestError` of the agent; or the error of the connection.
+    private func resumeInTurn(_ request: ResumeSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
         if let open = openSessions[request.sessionId] {
             try await replay(request, into: open, over: connection)

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Synchronization
 
 @testable import FoundationModelsACPClient
 
@@ -484,32 +485,52 @@ struct ReceivedMeta: Sendable {
 /// A test that wants an update to arrive at a chosen moment cannot race it:
 /// it holds the gate closed, asserts what it needs to assert, and then opens
 /// the gate. A gate opens one time and stays open.
+///
+/// Only ``open()`` lets a waiter through. The cancel of a waiting task does
+/// not: a stub agent that cancels one request while another request waits at
+/// the same gate must not open it for the other request.
 final class UpdateGate: Sendable {
-    /// The stream whose end is the opening of the gate.
-    ///
-    /// Nothing is ever yielded into it. The waiting side asks for one element
-    /// and is resumed when ``open()`` finishes the stream.
-    private let stream: AsyncStream<Void>
+    /// The state of the gate.
+    private struct State {
+        /// Whether ``open()`` ran.
+        var isOpen = false
 
-    /// The continuation that opens the gate.
-    private let continuation: AsyncStream<Void>.Continuation
+        /// The callers that wait for the gate to open.
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    /// The state of the gate, which any task can reach.
+    private let state = Mutex(State())
 
     /// Builds a closed gate.
-    init() {
-        let (stream, continuation) = AsyncStream<Void>.makeStream()
-        self.stream = stream
-        self.continuation = continuation
-    }
+    init() {}
 
-    /// Opens the gate, and lets the waiting side through.
+    /// Opens the gate, and lets each waiting caller through.
     func open() {
-        continuation.finish()
+        let released = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.isOpen = true
+            let waiters = state.waiters
+            state.waiters = []
+            return waiters
+        }
+        for waiter in released {
+            waiter.resume()
+        }
     }
 
-    /// Waits until the gate opens.
+    /// Waits until the gate opens. The call returns at once when the gate is
+    /// open, and a cancel of the calling task does not end the wait.
     func wait() async {
-        var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next()
+        await withCheckedContinuation { waiter in
+            let isOpen = state.withLock { state -> Bool in
+                guard !state.isOpen else { return true }
+                state.waiters.append(waiter)
+                return false
+            }
+            if isOpen {
+                waiter.resume()
+            }
+        }
     }
 }
 
