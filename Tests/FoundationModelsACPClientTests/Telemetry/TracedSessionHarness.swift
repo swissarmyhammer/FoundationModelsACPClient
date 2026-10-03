@@ -52,6 +52,8 @@ struct TracedSessionHarness {
     ///   - cwd: The `--cwd` value of the session, or `nil` for the working
     ///     directory of the test process.
     ///   - script: The updates the stub sends before it answers the prompt.
+    ///   - deferredScript: The updates the stub sends after it answers the
+    ///     prompt, one step per gate.
     ///   - cancelScript: The updates the stub sends when `session/cancel`
     ///     arrives.
     ///   - permissionRequest: The permission the stub asks for when the
@@ -63,6 +65,7 @@ struct TracedSessionHarness {
         prompt: String = tracedPromptText,
         cwd: String? = nil,
         script: [SessionUpdate] = [idleState(stopReason: .endTurn)],
+        deferredScript: [GatedUpdates] = [],
         cancelScript: [SessionUpdate] = [],
         permissionRequest: RequestPermissionRequest? = nil,
         promptError: RequestError? = nil,
@@ -76,6 +79,7 @@ struct TracedSessionHarness {
                 connection: connection,
                 session: testSession,
                 script: script,
+                deferredScript: deferredScript,
                 cancelScript: cancelScript,
                 permissionRequest: permissionRequest,
                 promptError: promptError,

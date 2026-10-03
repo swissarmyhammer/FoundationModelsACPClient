@@ -72,12 +72,32 @@ struct ClientRequestMetricsTests {
     @MainActor @Test("a successful prompt gives one count and one duration, and no error", .timeLimit(.minutes(1)))
     func aSuccessfulPromptGivesOneCountAndOneDuration() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
-            let harness = await TracedSessionHarness()
+            let idleGate = UpdateGate()
+            let harness = await TracedSessionHarness(
+                script: [],
+                deferredScript: [GatedUpdates(gate: idleGate, updates: [idleState(stopReason: .endTurn)])]
+            )
             _ = try await harness.session.initialize()
-            _ = try await harness.runner.run()
+            let turn = Task { @MainActor in
+                try await harness.runner.run()
+            }
+            let dimensions = [methodDimension(ClientRequestSpan.Method.prompt)]
+
+            // The turn ends on `idle` and cancels a prompt that is still in
+            // flight. The agent sends `idle` only after the prompt answer
+            // reached the client, which the request counter shows, so the
+            // prompt is never cancelled.
+            let answered = await eventually {
+                context.metricsFactory.counters.contains { counter in
+                    counter.label == ACPClientTelemetry.MetricName.requests
+                        && counter.dimensions.contains { $0 == dimensions[0] }
+                }
+            }
+            #expect(answered, "The prompt answer never reached the client.")
+            idleGate.open()
+            _ = try await turn.value
             await harness.teardown()
 
-            let dimensions = [methodDimension(ClientRequestSpan.Method.prompt)]
             let requests = try context.metricsFactory.expectCounter(ACPClientTelemetry.MetricName.requests, dimensions)
             let durations = try context.metricsFactory.expectTimer(ACPClientTelemetry.MetricName.requestDuration, dimensions)
             #expect(requests.totalValue == 1)
