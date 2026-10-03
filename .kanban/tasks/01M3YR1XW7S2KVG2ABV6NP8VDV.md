@@ -157,6 +157,68 @@ comments:
     - evidence: One local commit "feat(model): add resumeSession with the upstream requestFinished replay barrier" holds all 16 changed files, with the .kanban files. The sha is in the report of the step.
     - next: Review. Nothing is pushed.
   timestamp: 2026-10-03T20:42:21.160330+00:00
+- actor: claude-code
+  id: 01m41rr4s0gj8jj23p4vpyehpd
+  text: |-
+    ### review — findings
+    - evidence: review sha bac358d~1..bac358d: 1 finding (1 confirmed, 0 refuted). review sha HEAD~1..HEAD: 2 findings (2 confirmed, 0 refuted). Recorded risk is a defect: 1 item. Total 4 open items: Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift:475, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:100, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:144, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:139.
+    - next: correct the 4 items in the dated Review Findings section, then run /review again. The task stays in review.
+  timestamp: 2026-10-03T20:54:34.016917+00:00
+- actor: claude-code
+  id: 01m41rrrr0hxn2h7jsjantn9bd
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — 12 files (resumeSession, SessionStreamEvent reader, pin f72b8ad)
+    - test: green — swift test 494/494, IntegrationTests 103/103, stream/resume filter 10/10 runs
+    - commit: e79970d feat(model): add resumeSession with the upstream requestFinished replay barrier
+    - review: findings — Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift:475, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:100, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:144, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:139 (bac358d and e79970d both reviewed)
+  timestamp: 2026-10-03T20:54:54.464904+00:00
+- actor: claude-code
+  id: 01m41sca7j1fbn0he53yvrmbtm
+  text: |-
+    Picked up again 2026-10-03 for the 4 items of "Review Findings (2026-10-03 15:46)". Research:
+    - Item 1: `GatedUpdates.init(gate:updates:)` in ScriptedStubAgent.swift is the only explicit initializer in that file that equals the synthesized one (`ScriptedStubAgent` is a class, `UpdateGate.init()` makes a stream).
+    - Items 2 and 3: the integration copy already has `waitForIdle(in events:)` and `promptTurnLandsReply` with `waitForIdle(in: events)` (commit e79970d changed both copies). The two bodies of `waitForIdle` still differ: the unit copy calls `outcome(within:of:)`, the integration copy writes the task group inline. The two copies cannot share one source: they are test targets of two packages, and a SwiftPM package can only use the PRODUCTS of another package. A shared source needs a public test-support product in the root manifest (shipped to each user) or a symlink across package roots; the headers of both files and IntegrationTests/Package.swift record the separate-copies decision. So the fix is to keep the shared helpers in exact sync: the integration copy gets `outcome(within:of:)` and the same `waitForIdle` body.
+    - Item 4: upstream f72b8ad facts. `Connection.request` calls `outgoingRequests.start(id:method:params:)` before the write, inside the continuation body. A cancel after the start goes `cancelOutbound` -> `fail` -> `removePending(outcome: .failed)` -> tracker `finish` -> session observer -> router yields `requestFinished(id:method:"session/resume",outcome:.failed)` BEFORE the caller gets `CancellationError`. A cancel before the start gives no start event and no marker. `subscribeToOutgoingRequests()` gives `started(id:method:)` with no session id, synchronously at the start, and replays only the requests that are in flight at subscription.
+    - Probe (scratch, not in the repo): a main-actor consumer of an `AsyncStream` with buffered elements lets another main-actor job run between two elements. So the stream task of the model CAN be behind the caller, and the stale marker of a cancelled resume can arrive during the next replay.
+    - Chosen exact approach: `resumeSession` subscribes to the outgoing-request events BEFORE the send; the model collects the ids of the `session/resume` starts of the running replay. The replay ends only at a `session/resume` marker whose id is one of these ids. A marker that arrives before the start event of its id is kept until the start arrives. A cancelled earlier resume finished before the next subscription, so its id is never in the set of the next replay. Ids of resumes of other sessions are in the set, but their markers never come in the stream of this session.
+    - Not covered and out of the finding: two CONCURRENT resumes of one session share one replay state. New task for that.
+  timestamp: 2026-10-03T21:05:34.962442+00:00
+- actor: claude-code
+  id: 01m41t01q19ypd3phrgfgj2drx
+  text: |-
+    Fixes of "Review Findings (2026-10-03 15:46)" landed (not committed), with TDD.
+
+    - Item 1: removed `GatedUpdates.init(gate:updates:)` from ScriptedStubAgent.swift. It was the only initializer in that file that equals the synthesized one.
+    - Items 2 and 3: the shared helpers of the two TransportTestSupport.swift copies are now the same word for word. The integration copy got `outcome(within:of:)`, and its `waitForIdle(in:within:)` uses it, as the unit copy does. One shared source is not possible: the two files are test targets of two packages, and a package can use only the products of another package, so a shared source needs a test-support product that each user of the root package gets. Both headers now name the helpers that must stay in sync, and the unit header says "another package" (was "an other").
+    - Item 4: the replay ends only at the marker of a `session/resume` request that started during the replay. `ConnectionModel.replay` subscribes to `subscribeToOutgoingRequests()` before the send (`watchResumeStarts(of:for:)`) and gives each `.started(id, "session/resume")` to `SessionModel.replayRequestDidStart(_:)`. `SessionModel.ReplayRequests` matches the started ids to the marker ids; a marker that comes before its start event waits for it. An earlier cancelled resume finished before the next subscription, so its id is never in the set and its late marker changes nothing. `beginReplay` and `endReplay` reset the set.
+    - RED seen: the new test `aResumeAfterACancelledStartedResumeEndsItsReplayOnlyAtItsOwnMarker` failed before the fix with `isReplaying == false` and `history == .live`. The model-level tests failed to compile (no `replayRequestDidStart`) before the fix.
+    - How the test is exact: the session model is attached to a held relay of the session stream (`heldSubscription(of:until:)`), so the marker of the cancelled resume is still unread when the second resume begins. A second subscription (`wire`) tells the test when each replay is on the wire. The update tap tells when the model read the chunks of both replays, so the stale marker in between is read. No sleep.
+    - `handMadeSubscription` moved from SessionModelStreamTests to `SessionModelFixtures.handMadeSubscription(hasMissedUpdates:)`, so the relay reuses it.
+    - New task ^j391mtx: two CONCURRENT resumes of one session share one replay state (the fix is exact for resumes that run one after the other).
+  timestamp: 2026-10-03T21:16:21.601502+00:00
+- actor: claude-code
+  id: 01m41t06anwpbyfpnavgqmfhra
+  text: |-
+    ### implement — changed
+    - evidence: 9 files — Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Stream.swift, Sources/FoundationModelsACPClient/Model/SessionModel.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelFixtures.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift, Tests/FoundationModelsACPClientTests/TransportTestSupport.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift. `swift build`: complete, only the accepted MLX "missing creator for mutated node" warning. `swift test`: 497 tests in 40 suites passed (3 new). `swift test --package-path IntegrationTests`: 103 tests in 14 suites passed. Warnings: only the accepted MLX warning and the permitted SessionUpdateAggregator deprecation. All 4 findings checked. New task ^j391mtx.
+    - next: /review. No commit and no push.
+  timestamp: 2026-10-03T21:16:26.325422+00:00
+- actor: claude-code
+  id: 01m41tcr5xkr60sy07hpzws27k
+  text: |-
+    ### test — green
+    - evidence: swift build — complete, 0 errors. swift test — 497 tests in 40 suites passed, 0 failed, 0 skipped. swift test --package-path IntegrationTests — 103 tests in 14 suites passed, 0 failed, 0 skipped. swift test --filter "ConnectionModelSessionTests|SessionModelStreamTests" run 10 times — 10 of 10 runs passed (59 tests each).
+    - warnings: only the accepted SwiftPM "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle. No other warning.
+    - next: review
+  timestamp: 2026-10-03T21:23:17.821863+00:00
+- actor: claude-code
+  id: 01m41td6gs7tpva45mh3vep1nv
+  text: |-
+    ### commit — changed
+    - evidence: One local commit "fix(model): end a resume replay only at the marker of its own request" holds all 11 changed files, the .kanban files of this task, and the new task ^j391mtx files. The sha is in the report of the step.
+    - next: /review. Nothing is pushed. The task is not moved.
+  timestamp: 2026-10-03T21:23:32.505812+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
@@ -187,3 +249,12 @@ Add the session factory to `ConnectionModel` in `Sources/FoundationModelsACPClie
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-10-03 15:46)
+
+> Scope: `review sha bac358d~1..bac358d` (commit bac358d) and `review sha HEAD~1..HEAD` (commit e79970d). Each scope reviewed the diffs only — lines the change added or modified. The `.kanban/` files were excluded by `.reviewignore`. The last item is the evaluation of the risk that the implementer recorded.
+
+- [x] `Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift:475` `code-hygiene/idioms-swift` — UseSynthesizedInitializer: remove this explicit initializer, which is identical to the compiler-synthesized initializer.
+- [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:100` `completeness/invariant-propagation` — The `waitForIdle` function signature was changed to require a new parameter `in events: AsyncStream<SessionStreamEvent>`. A 0.94 near-copy exists in the integration tests file that was not updated, causing any integration tests that call this function to fail compilation. Update the `waitForIdle` function in `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift` to match the new signature, adding the `in events: AsyncStream<SessionStreamEvent>` parameter and changing the loop to iterate over `AsyncStream<SessionStreamEvent>` instead of the previous implementation.
+- [x] `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift:144` `completeness/invariant-propagation` — The `promptTurnLandsReply` function was changed to extract session events (line 140) and pass them to `waitForIdle` (line 144) with the new required parameter. A 1.00 exact duplicate exists in the integration tests file that was not updated, so it will call `waitForIdle` without the required `in events` parameter, causing a compilation error. Update the `promptTurnLandsReply` function in `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/Support/TransportTestSupport.swift` to extract the events stream (`let events = connection.subscribe(to: sessionId).updates`) and pass it to `waitForIdle(in: events)` to match the updated unit tests version.
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:139` `correctness/recorded-risk` — A `CancellationError` does not prove that the request never went out. Upstream `Connection.request` calls `outgoingRequests.start` before the write. A cancel after that point goes through `cancelOutbound` -> `fail` -> `removePending(outcome: .failed)`, so the router yields a `requestFinished(method: "session/resume", outcome: .failed)` marker into the session stream BEFORE the caller gets `CancellationError`. `endReplay(of:afterFailure:)` ends the replay at once and does not consume that marker. `SessionModel.requestDidFinish` (`Sources/FoundationModelsACPClient/Model/SessionModel+Stream.swift:77`) matches the marker by method only, not by request id. When the stream task is behind the caller (for example, a long replay is in the stream), a fast second `resumeSession` of the same open model reads the old marker. The second replay then ends as a failure while its request is still in flight, `history` is not set, a `.start` replay does not clear `hasMissedUpdates`, and the call can return before the model holds the whole replay. This breaks the documented contract of `resumeSession(_:)`. Match the replay end to the request id of the running `session/resume` request (the marker has `id`), or consume the marker of a started request before the replay ends. Add a test: cancel a resume after the request started, then resume the same open session at once, and check that the second replay ends only at its own marker.

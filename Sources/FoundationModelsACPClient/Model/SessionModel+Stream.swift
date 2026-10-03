@@ -16,6 +16,53 @@ extension SessionModel {
         case replaying(from: ReplayFrom?)
     }
 
+    /// The `session/resume` requests of the running replay, matched to their
+    /// markers by the wire id of the request.
+    ///
+    /// The start of a request comes from the outgoing-request events of the
+    /// connection, and its marker comes from the stream of the session. The
+    /// two streams have no common order, so either one can come first. A
+    /// marker whose request did not start during the replay is the marker of
+    /// an earlier request, for example a resume that its caller cancelled
+    /// after the request went out. That marker never ends the replay.
+    struct ReplayRequests {
+        /// The wire ids of the `session/resume` requests that started during
+        /// the running replay.
+        private var started: Set<RequestId> = []
+
+        /// The outcome of each `session/resume` marker that came before the
+        /// start of its request, keyed by the wire id of the request.
+        private var finishedBeforeStart: [RequestId: OutgoingRequestOutcome] = [:]
+
+        /// Records the start of a `session/resume` request.
+        ///
+        /// - Parameter requestId: The wire id of the request.
+        /// - Returns: The outcome of the request when its marker came first,
+        ///   or `nil` when the marker did not come yet.
+        mutating func didStart(_ requestId: RequestId) -> OutgoingRequestOutcome? {
+            if let outcome = finishedBeforeStart.removeValue(forKey: requestId) {
+                return outcome
+            }
+            started.insert(requestId)
+            return nil
+        }
+
+        /// Records the marker of a `session/resume` request.
+        ///
+        /// - Parameters:
+        ///   - requestId: The wire id of the request.
+        ///   - outcome: How the request finished.
+        /// - Returns: The outcome when the request started during the replay,
+        ///   or `nil` when its start did not come yet.
+        mutating func didFinish(_ requestId: RequestId, outcome: OutgoingRequestOutcome) -> OutgoingRequestOutcome? {
+            guard started.contains(requestId) else {
+                finishedBeforeStart[requestId] = outcome
+                return nil
+            }
+            return outcome
+        }
+    }
+
     /// Whether a `session/resume` request runs, from the moment before the
     /// request goes out until its response or its failure.
     public var isReplaying: Bool {
@@ -55,27 +102,45 @@ extension SessionModel {
         switch event {
         case .update(let update):
             apply(update)
-        case .requestFinished(_, let method, let outcome):
-            requestDidFinish(method: method, outcome: outcome)
+        case .requestFinished(let requestId, let method, let outcome):
+            requestDidFinish(requestId, method: method, outcome: outcome)
         }
     }
 
-    /// Ends the running replay when the marker of a `session/resume` request
-    /// arrives.
+    /// Ends the running replay when the marker of its `session/resume`
+    /// request arrives.
     ///
     /// The connection yields the marker at the wire position of the
     /// response, after each replayed update. Thus, at the marker, the model
-    /// applied the whole replay. The stream of a session holds only the
-    /// markers of the requests that name that session, so the first
-    /// `session/resume` marker is the marker of the running replay. The
-    /// marker of another request changes nothing.
+    /// applied the whole replay. Only the marker of a request that started
+    /// during the replay ends it, and ``replayRequestDidStart(_:)`` gives
+    /// those starts. When the start did not come yet, the model keeps the
+    /// marker until it comes. The marker of another request changes nothing.
     ///
     /// - Parameters:
+    ///   - requestId: The wire id of the finished request.
     ///   - method: The wire method of the finished request.
     ///   - outcome: How the request finished.
-    private func requestDidFinish(method: String, outcome: OutgoingRequestOutcome) {
-        guard method == ClientRequestSpan.Method.resumeSession, isReplaying else { return }
-        endReplay(succeeded: outcome == .succeeded)
+    private func requestDidFinish(_ requestId: RequestId, method: String, outcome: OutgoingRequestOutcome) {
+        guard method == ClientRequestSpan.Method.resumeSession, isReplaying,
+            let finished = replayRequests.didFinish(requestId, outcome: outcome)
+        else { return }
+        endReplay(succeeded: finished == .succeeded)
+    }
+
+    /// Records that a `session/resume` request started during the running
+    /// replay.
+    ///
+    /// The connection model calls this for each `session/resume` request that
+    /// the connection starts while the replay runs. A request of another
+    /// session never gives a marker in the stream of this session, so its id
+    /// changes nothing. When the marker of the request came first, the replay
+    /// ends now. When no replay runs, the call changes nothing.
+    ///
+    /// - Parameter requestId: The wire id of the request.
+    func replayRequestDidStart(_ requestId: RequestId) {
+        guard isReplaying, let finished = replayRequests.didStart(requestId) else { return }
+        endReplay(succeeded: finished == .succeeded)
     }
 
     /// Ends each tap and the running replay when the connection ended the
@@ -111,6 +176,7 @@ extension SessionModel {
             flushPendingChunks()
             resetTranscript()
         }
+        replayRequests = ReplayRequests()
         replayPhase = .replaying(from: replayFrom)
     }
 
@@ -127,6 +193,7 @@ extension SessionModel {
     func endReplay(succeeded: Bool) {
         let phase = replayPhase
         replayPhase = .idle
+        replayRequests = ReplayRequests()
         defer { resumeReplayEndWaiters() }
         flushPendingChunks()
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }

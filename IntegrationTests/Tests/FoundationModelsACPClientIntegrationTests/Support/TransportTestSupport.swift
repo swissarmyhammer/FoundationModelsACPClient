@@ -11,7 +11,15 @@ import FoundationModelsACP
 // `Tests/FoundationModelsACPClientTests/TransportTestSupport.swift`. The two
 // copies stay separate on purpose: a test target cannot share source with a
 // test target in another package, and the sibling package
-// FoundationModelsMultitool makes the same choice.
+// FoundationModelsMultitool makes the same choice. A package can use only the
+// products of another package, so one shared source would need a test-support
+// product that each user of the root package gets too.
+//
+// The helpers that both copies hold are the same, word for word:
+// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
+// `waitForIdle(in:within:)`, `makeInitializeRequest()` and
+// `promptTurnLandsReply(over:client:sessionId:messageID:expectedText:)`. A
+// change to one of them goes into both copies.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {
@@ -49,6 +57,32 @@ func eventually(
     return await condition()
 }
 
+/// Runs `work` and waits for its answer, or gives up when `limit` ends first.
+///
+/// The wait cancels `work` when the limit ends. A wait on a stream that
+/// never ends therefore stops at the limit, and the cancellation ends the
+/// iteration of the stream.
+///
+/// - Parameters:
+///   - limit: The longest time to wait.
+///   - work: The work to run.
+/// - Returns: The answer of `work`, or `nil` when the limit ended first.
+func outcome<Answer: Sendable>(
+    within limit: Duration = TransportTestDeadline.limit,
+    of work: @escaping @Sendable () async -> Answer
+) async -> Answer? {
+    await withTaskGroup(of: Answer?.self) { group in
+        group.addTask { await work() }
+        group.addTask {
+            try? await Task.sleep(for: limit)
+            return nil
+        }
+        let first = await group.next() ?? nil
+        group.cancelAll()
+        return first
+    }
+}
+
 /// Waits for an idle `state_update` on one session event stream. The
 /// request markers of the stream do not end the wait.
 ///
@@ -60,21 +94,12 @@ func waitForIdle(
     in events: AsyncStream<SessionStreamEvent>,
     within limit: Duration = TransportTestDeadline.limit
 ) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask {
-            for await case .update(.stateUpdate(.idle(_))) in events {
-                return true
-            }
-            return false
+    await outcome(within: limit) {
+        for await case .update(.stateUpdate(.idle(_))) in events {
+            return true
         }
-        group.addTask {
-            try? await Task.sleep(for: limit)
-            return false
-        }
-        let sawIdle = await group.next() ?? false
-        group.cancelAll()
-        return sawIdle
-    }
+        return false
+    } ?? false
 }
 
 /// Makes the initialize request the transport tests send.

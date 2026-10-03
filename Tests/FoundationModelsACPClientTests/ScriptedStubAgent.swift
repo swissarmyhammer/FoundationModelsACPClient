@@ -466,14 +466,4 @@ struct GatedUpdates: Sendable {
 
     /// The updates to send once the gate opens, in order.
     let updates: [SessionUpdate]
-
-    /// Creates one step of a deferred script.
-    ///
-    /// - Parameters:
-    ///   - gate: The gate that must open before the updates go out.
-    ///   - updates: The updates to send once the gate opens, in order.
-    init(gate: UpdateGate, updates: [SessionUpdate]) {
-        self.gate = gate
-        self.updates = updates
-    }
 }

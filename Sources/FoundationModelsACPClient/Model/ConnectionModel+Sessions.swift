@@ -99,6 +99,12 @@ extension ConnectionModel {
     /// The call returns after the model read the marker of the request, so
     /// the model then holds each replayed update.
     ///
+    /// The model learns the wire id of the request from the outgoing-request
+    /// events, and only the marker with that id ends the replay. The marker
+    /// of an earlier `session/resume` request that its caller cancelled can
+    /// still be unread in the stream of the session, and it must not end
+    /// this replay.
+    ///
     /// - Parameters:
     ///   - request: The resume-session request.
     ///   - session: The model of the session, attached to its subscription.
@@ -111,6 +117,8 @@ extension ConnectionModel {
         over connection: ClientSideConnection
     ) async throws {
         session.beginReplay(replayFrom: request.replayFrom)
+        let resumeStarts = watchResumeStarts(of: connection, for: session)
+        defer { resumeStarts.cancel() }
         let response: ResumeSessionResponse
         do {
             response = try await connection.resumeSession(request)
@@ -122,6 +130,30 @@ extension ConnectionModel {
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
     }
 
+    /// Starts the task that gives a session model the wire id of each
+    /// `session/resume` request that the connection starts.
+    ///
+    /// The subscription is made before this method returns, so the task sees
+    /// the start of the request that the caller sends next. The events name
+    /// no session, so the model also gets the ids of the resumes of other
+    /// sessions; their markers never come in the stream of this session. A
+    /// request that finished before the subscription gives no start event, so
+    /// its marker never ends the replay of the model.
+    ///
+    /// - Parameters:
+    ///   - connection: The connection whose requests to watch.
+    ///   - session: The model whose replay runs.
+    /// - Returns: The task that reads the events. Cancel it when the replay
+    ///   ended.
+    private func watchResumeStarts(of connection: ClientSideConnection, for session: SessionModel) -> Task<Void, Never> {
+        let events = connection.subscribeToOutgoingRequests()
+        return Task { [weak session] in
+            for await case .started(let requestId, ClientRequestSpan.Method.resumeSession) in events {
+                session?.replayRequestDidStart(requestId)
+            }
+        }
+    }
+
     /// Ends the replay of a `session/resume` request that failed.
     ///
     /// The connection gives a failed marker to each request that went out,
@@ -130,7 +162,9 @@ extension ConnectionModel {
     /// after each replayed update that came before the failure. A request
     /// that never went out gives no marker: the encoding of the request
     /// failed, or the task was cancelled before the start. For these two
-    /// errors, the replay ends at once.
+    /// errors, the replay ends at once. When a cancelled request did go out,
+    /// its late marker cannot end a later replay, because the request did not
+    /// start during that replay.
     ///
     /// - Parameters:
     ///   - session: The model of the session.

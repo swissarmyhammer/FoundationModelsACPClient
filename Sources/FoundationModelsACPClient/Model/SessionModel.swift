@@ -102,6 +102,10 @@ public final class SessionModel {
     /// The replay of a `session/resume` request, while it runs.
     var replayPhase: ReplayPhase = .idle
 
+    /// The `session/resume` requests of the running replay, and the markers
+    /// that came before the start of their request.
+    @ObservationIgnored var replayRequests = ReplayRequests()
+
     /// The callers that wait for the end of the running replay. The end of
     /// the replay resumes each one.
     @ObservationIgnored var replayEndWaiters: [CheckedContinuation<Void, Never>] = []

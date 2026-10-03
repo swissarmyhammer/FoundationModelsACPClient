@@ -9,8 +9,16 @@ import FoundationModelsACP
 //
 // The nested `IntegrationTests` package keeps a copy of its own, in its
 // `Support/TransportTestSupport.swift`. The two copies stay separate on
-// purpose: a test target cannot share source with a test target in an
-// other package.
+// purpose: a test target cannot share source with a test target in another
+// package. A package can use only the products of another package, so one
+// shared source would need a test-support product that each user of this
+// package gets too.
+//
+// The helpers that both copies hold are the same, word for word:
+// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
+// `waitForIdle(in:within:)`, `makeInitializeRequest()` and
+// `promptTurnLandsReply(over:client:sessionId:messageID:expectedText:)`. A
+// change to one of them goes into both copies.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {

@@ -1,5 +1,8 @@
-import FoundationModelsACP
-
+// `SessionUpdateSubscription` has no public initializer: only the connection
+// makes one. The testable import reaches its memberwise initializer, so
+// ``SessionModelFixtures/handMadeSubscription(hasMissedUpdates:)`` can make a
+// subscription by hand.
+@testable import FoundationModelsACP
 @testable import FoundationModelsACPClient
 
 // This file holds the shared helpers of the `SessionModel` tests. Each helper
@@ -40,6 +43,17 @@ enum SessionModelFixtures {
         name: "Reject",
         optionId: PermissionOptionId(rawValue: "reject-once")
     )
+
+    /// Makes a hand-made subscription and the continuation that feeds it.
+    ///
+    /// - Parameter hasMissedUpdates: The missed-updates mark of the subscription.
+    /// - Returns: The subscription and its continuation.
+    static func handMadeSubscription(
+        hasMissedUpdates: Bool = false
+    ) -> (SessionUpdateSubscription, AsyncStream<SessionStreamEvent>.Continuation) {
+        let (events, continuation) = AsyncStream<SessionStreamEvent>.makeStream()
+        return (SessionUpdateSubscription(updates: events, hasMissedUpdates: hasMissedUpdates), continuation)
+    }
 
     /// Makes a model for the test session that applies each chunk at once.
     ///

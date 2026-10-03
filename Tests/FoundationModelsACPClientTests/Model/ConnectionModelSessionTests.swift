@@ -191,6 +191,49 @@ private enum SessionFactoryFixtures {
         session.transcript.map { $0.agentMessage?.content.joinedText }
     }
 
+    /// Reads a session stream until it gave a number of updates. The request
+    /// markers of the stream do not count.
+    ///
+    /// - Parameters:
+    ///   - count: The number of updates to read.
+    ///   - events: The iterator of the session stream.
+    @MainActor
+    static func skipUpdates(_ count: Int, of events: inout AsyncStream<SessionStreamEvent>.Iterator) async {
+        var updates = 0
+        while updates < count, let event = await events.next(isolation: MainActor.shared) {
+            if case .update = event {
+                updates += 1
+            }
+        }
+    }
+
+    /// Makes a subscription that holds each event of a session stream until a
+    /// gate opens, and then passes the events on in order.
+    ///
+    /// A session model attached to this subscription is a model whose stream
+    /// task is behind the connection: the connection already yielded an event
+    /// that the model did not read yet.
+    ///
+    /// - Parameters:
+    ///   - events: The session stream of the connection.
+    ///   - gate: The gate that releases the events.
+    /// - Returns: The subscription to attach to the model.
+    static func heldSubscription(
+        of events: AsyncStream<SessionStreamEvent>,
+        until gate: UpdateGate
+    ) -> SessionUpdateSubscription {
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
+        let relay = Task {
+            await gate.wait()
+            for await event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in relay.cancel() }
+        return subscription
+    }
+
     /// Runs one operation of the connection model under a task executor that
     /// the test holds. The test then decides when the part of the call that
     /// follows the answer of the agent runs.
@@ -458,6 +501,51 @@ struct ConnectionModelSessionTests {
             try await resuming.value
         }
         #expect(connected.model.openSessions.isEmpty)
+    }
+
+    @Test func aResumeAfterACancelledStartedResumeEndsItsReplayOnlyAtItsOwnMarker() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
+            resumeSessionGate: answerGate
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let connection = try #require(connected.model.connection)
+        // The model reads the session stream only after `streamGate` opens, so
+        // the marker of the cancelled resume is still unread when the second
+        // resume starts its replay. `wire` reads the same stream at once.
+        let streamGate = UpdateGate()
+        session.attach(SessionFactoryFixtures.heldSubscription(of: connection.subscribe(to: testSession).updates, until: streamGate))
+        var wire = connection.subscribe(to: testSession).updates.makeAsyncIterator()
+        var tap = session.updateTap().makeAsyncIterator()
+        let replayLength = SessionFactoryFixtures.chunkedReplay.count
+
+        let cancelled = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        await SessionFactoryFixtures.skipUpdates(replayLength, of: &wire)
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await cancelled.value
+        }
+        let resuming = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
+        }
+        await SessionFactoryFixtures.skipUpdates(replayLength, of: &wire)
+
+        // The stream holds the replay of the cancelled resume, its marker, and
+        // the replay of the running resume. When the tap gave the chunks of
+        // both replays, the model read that marker.
+        streamGate.open()
+        for _ in 0..<(2 * replayLength) {
+            _ = await tap.next()
+        }
+        #expect(session.isReplaying)
+
+        answerGate.open()
+        #expect(try await resuming.value === session)
+        #expect(!session.isReplaying)
+        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
     }
 
     // MARK: - The request sender

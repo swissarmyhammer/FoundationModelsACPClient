@@ -1,11 +1,8 @@
 import Foundation
+import FoundationModelsACP
 import Synchronization
 import Testing
 
-// `SessionUpdateSubscription` has no public initializer: only the connection
-// makes one. The testable import reaches its memberwise initializer, so a test
-// can make a subscription by hand.
-@testable import FoundationModelsACP
 @testable import FoundationModelsACPClient
 
 // The tests of the stream life of `SessionModel`: the attached subscription,
@@ -36,19 +33,12 @@ private let replayedUpdates: [SessionUpdate] = [
 /// message, the agent message, and the tool call.
 private let replayedEntryCount = 3
 
-/// Makes a hand-made subscription and the continuation that feeds it.
-///
-/// - Parameter hasMissedUpdates: The missed-updates mark of the subscription.
-/// - Returns: The subscription and its continuation.
-private func handMadeSubscription(
-    hasMissedUpdates: Bool = false
-) -> (SessionUpdateSubscription, AsyncStream<SessionStreamEvent>.Continuation) {
-    let (events, continuation) = AsyncStream<SessionStreamEvent>.makeStream()
-    return (SessionUpdateSubscription(updates: events, hasMissedUpdates: hasMissedUpdates), continuation)
-}
-
 /// The JSON-RPC ID of the request whose marker a hand-made stream carries.
 private let markedRequestId: RequestId = .number(1)
+
+/// The JSON-RPC ID of a `session/resume` request that started after the
+/// request of ``markedRequestId``.
+private let runningRequestId: RequestId = .number(2)
 
 /// Makes the marker of a finished request of the test session.
 ///
@@ -85,7 +75,7 @@ struct SessionModelStreamTests {
 
     @Test func updatesOnTheAttachedSubscriptionLandInOrder() async throws {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
 
         model.attach(subscription)
         continuation.yield(.update(agentChunk(text: "first")))
@@ -99,7 +89,7 @@ struct SessionModelStreamTests {
 
     @Test func theEndOfTheSubscriptionEndsTheUpdateTap() async {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         var tap = model.updateTap().makeAsyncIterator()
 
         model.attach(subscription)
@@ -113,7 +103,7 @@ struct SessionModelStreamTests {
     @Test func aSubscriptionWithMissedUpdatesSetsTheMark() {
         let model = SessionModelFixtures.immediateModel()
 
-        model.attach(handMadeSubscription(hasMissedUpdates: true).0)
+        model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
         #expect(model.hasMissedUpdates)
     }
@@ -121,14 +111,14 @@ struct SessionModelStreamTests {
     @Test func aSubscriptionWithNoMissedUpdatesLeavesTheMarkClear() {
         let model = SessionModelFixtures.immediateModel()
 
-        model.attach(handMadeSubscription().0)
+        model.attach(SessionModelFixtures.handMadeSubscription().0)
 
         #expect(!model.hasMissedUpdates)
     }
 
     @Test func aSuccessfulReplayFromTheStartClearsTheMark() {
         let model = SessionModelFixtures.immediateModel()
-        model.attach(handMadeSubscription(hasMissedUpdates: true).0)
+        model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromStart)
         model.endReplay(succeeded: true)
@@ -138,7 +128,7 @@ struct SessionModelStreamTests {
 
     @Test func aFailedReplayFromTheStartKeepsTheMark() {
         let model = SessionModelFixtures.immediateModel()
-        model.attach(handMadeSubscription(hasMissedUpdates: true).0)
+        model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromStart)
         model.endReplay(succeeded: false)
@@ -148,7 +138,7 @@ struct SessionModelStreamTests {
 
     @Test func aSuccessfulReplayFromACursorKeepsTheMark() {
         let model = SessionModelFixtures.immediateModel()
-        model.attach(handMadeSubscription(hasMissedUpdates: true).0)
+        model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: replayFromCursor)
         model.endReplay(succeeded: true)
@@ -158,7 +148,7 @@ struct SessionModelStreamTests {
 
     @Test func aSuccessfulResumeWithNoReplayKeepsTheMark() {
         let model = SessionModelFixtures.immediateModel()
-        model.attach(handMadeSubscription(hasMissedUpdates: true).0)
+        model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
         model.beginReplay(replayFrom: nil)
         model.endReplay(succeeded: true)
@@ -202,9 +192,10 @@ struct SessionModelStreamTests {
 
     @Test func theResumeMarkerEndsTheReplayAfterEachReplayedUpdate() async {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
         model.beginReplay(replayFrom: replayFromStart)
+        model.replayRequestDidStart(markedRequestId)
 
         for update in replayedUpdates {
             continuation.yield(.update(update))
@@ -219,9 +210,10 @@ struct SessionModelStreamTests {
 
     @Test func aFailedResumeMarkerEndsTheReplayAsAFailure() async {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
         model.beginReplay(replayFrom: replayFromStart)
+        model.replayRequestDidStart(markedRequestId)
 
         continuation.yield(requestFinished(.failed))
         await model.waitForReplayEnd()
@@ -230,9 +222,39 @@ struct SessionModelStreamTests {
         #expect(model.history == .live)
     }
 
+    @Test func theResumeMarkerOfAnotherResumeRequestLeavesTheReplayRunning() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+        model.replayRequestDidStart(runningRequestId)
+
+        continuation.yield(requestFinished(.failed))
+        continuation.yield(.update(agentChunk(text: "after the marker")))
+        try await waitUntil { !model.transcript.isEmpty }
+
+        #expect(model.isReplaying)
+    }
+
+    @Test func aResumeMarkerThatComesBeforeTheStartOfItsRequestEndsTheReplayAtTheStart() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
+        model.attach(subscription)
+        model.beginReplay(replayFrom: replayFromStart)
+        continuation.yield(requestFinished(.succeeded))
+        continuation.yield(.update(agentChunk(text: "after the marker")))
+        try await waitUntil { !model.transcript.isEmpty }
+        try #require(model.isReplaying)
+
+        model.replayRequestDidStart(markedRequestId)
+
+        #expect(!model.isReplaying)
+        #expect(model.history == .retained(replayFrom: replayFromStart))
+    }
+
     @Test func theMarkerOfAnotherRequestLeavesTheReplayRunning() async throws {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
         model.beginReplay(replayFrom: replayFromStart)
 
@@ -245,7 +267,7 @@ struct SessionModelStreamTests {
 
     @Test func theEndOfTheSubscriptionEndsTheReplayAsAFailure() async {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
         model.beginReplay(replayFrom: replayFromStart)
 
@@ -409,7 +431,7 @@ struct SessionModelStreamTests {
 
     @Test func closeCancelsTheStreamTask() async throws {
         let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
         model.attach(subscription)
@@ -421,7 +443,7 @@ struct SessionModelStreamTests {
 
     @Test func releasingTheModelCancelsTheStreamTask() async throws {
         var model: SessionModel? = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = handMadeSubscription()
+        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
         try #require(model).attach(subscription)
