@@ -46,6 +46,52 @@ comments:
     - evidence: one local commit, subject "fix(process): spawn the agent with POSIX_SPAWN_CLOEXEC_DEFAULT". It holds 4 source and test files and the .kanban files. The sha is in the git log. Nothing was pushed.
     - next: none
   timestamp: 2026-10-03T19:30:01.555215+00:00
+- actor: claude-code
+  id: 01m41m6hqgmy060t9v084hwzx0
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (b14f6fe); 1 finding (1 confirmed, 0 refuted) — Tests/FoundationModelsACPClientTests/AgentProcessPipeInheritanceTests.swift:106 (swift/immutability)
+    - next: implement the open item in the Review Findings section, then review again.
+  timestamp: 2026-10-03T19:35:03.152800+00:00
+- actor: claude-code
+  id: 01m41m6teqwwythdtzbxaxf0s2
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 4 files (AgentProcess.swift, AgentProcessPipeInheritanceTests.swift new, AgentProcessTeardownTests.swift, StdioChild.swift)
+    - test: green — swift test 479/479 x5, IntegrationTests 103/103
+    - commit: b14f6fe fix(process): spawn the agent with POSIX_SPAWN_CLOEXEC_DEFAULT
+    - review: findings — Tests/FoundationModelsACPClientTests/AgentProcessPipeInheritanceTests.swift:106 (swift/immutability)
+  timestamp: 2026-10-03T19:35:12.087318+00:00
+- actor: claude-code
+  id: 01m41mbf8808dd26yq0knj352m
+  text: |-
+    Finding swift/immutability fixed.
+    - `descriptorProbeAnswer(for:)` in AgentProcessPipeInheritanceTests.swift: the `var answer = Data()` accumulator and its `for try await` loop are gone. The function now uses `let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }`. The call stays in a `do`/`catch`, because the `outcome` closure does not throw; a stream error still gives `nil`.
+    - Whole-file scan, and scan of the lines that this task added in AgentProcess.swift, AgentProcessTeardownTests.swift and StdioChild.swift: no other mutable accumulator. The remaining `var` items are C out-parameters (`var descriptors` for `pipe(2)`, `var fileActions`, `var attributes`), not accumulators.
+    - Discovery (not changed, outside the finding): `descriptorProbeAnswer(for:)` is a top-level `private func`. The swift/immutability rule "A function belongs to a type" can apply to it. The review did not report it.
+    - TDD: this is a refactor with no behavior change. The two tests `agentHoldsNoDescriptorThatLacksTheCloseOnExecFlag` and `agentKeepsTheStandardErrorOfThisProcess` cover it and pass.
+  timestamp: 2026-10-03T19:37:44.456807+00:00
+- actor: claude-code
+  id: 01m41mbghfp60qa4ewmx5hcsjf
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPClientTests/AgentProcessPipeInheritanceTests.swift. `swift build` complete; `swift test` 479 tests in 40 suites passed, 0 failed. Warnings: only the accepted MLX "missing creator for mutated node".
+    - next: /review
+  timestamp: 2026-10-03T19:37:45.775040+00:00
+- actor: claude-code
+  id: 01m41mffrhqg0031xbc4925pdz
+  text: |-
+    ### test — green
+    - evidence: swift build ok. swift test: 479 tests in 40 suites passed. swift test --package-path IntegrationTests: 103 tests in 14 suites passed. 0 failures, 0 skipped. Only warning: accepted SwiftPM "missing creator for mutated node" (mlx-swift).
+    - next: review
+  timestamp: 2026-10-03T19:39:56.049923+00:00
+- actor: claude-code
+  id: 01m41mft51w3vyk91mht5pk4e2
+  text: |-
+    ### commit — changed
+    - evidence: commit "test(process): read the descriptor probe answer with reduce(into:)" (sha in git log of this branch)
+    - next: review
+  timestamp: 2026-10-03T19:40:06.689585+00:00
 position_column: doing
 position_ordinal: '8180'
 title: 'AgentProcess.spawn: close the pipe()/fcntl window with POSIX_SPAWN_CLOEXEC_DEFAULT'
@@ -62,3 +108,12 @@ Found during ^h5z930j: the test helper `spawnInThisProcessGroup` had the same wi
 ## Acceptance Criteria
 - [x] A child of `AgentProcess.spawn` holds no descriptor of this process except its stdin, stdout and (if kept) stderr.
 - [x] `swift test` passes.
+
+## Review Findings (2026-10-03 14:30)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/AgentProcessPipeInheritanceTests.swift:106` `swift/immutability` — Build a collection with `reduce`, not a mutable accumulator variable. The accumulator is mutable for the whole loop, making it harder to understand at a glance what value gets constructed. Replace with `let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }`, moving the reduce call outside the try-catch as `let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }` (the async stream's error propagates through `try await`, so error handling stays the same).

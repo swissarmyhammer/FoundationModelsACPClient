@@ -103,14 +103,11 @@ private func descriptorProbeAnswer(for descriptor: Int32) async throws -> String
 
     let bytes = probe.transport.bytes
     return await outcome { () async -> String? in
-        var answer = Data()
         do {
-            for try await chunk in bytes {
-                answer.append(chunk)
-            }
+            let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }
+            return String(decoding: answer, as: UTF8.self)
         } catch {
             return nil
         }
-        return String(decoding: answer, as: UTF8.self)
     } ?? nil
 }
