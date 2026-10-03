@@ -39,7 +39,7 @@ private let foreignAgentScript = """
           printf '%s\\n' '{"id":2,"jsonrpc":"2.0","result":{"sessionId":"foreign-session"}}'
           ;;
         *'"method":"session/prompt"'*)
-          printf '%s\\n' '{"id":3,"jsonrpc":"2.0","result":{}}'
+          printf '%s\\n' '{"id":3,"jsonrpc":"2.0","result":{"messageId":"foreign-user-msg-1"}}'
           printf '%s\\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"foreign-session","update":{"content":{"text":"Hello from the foreign agent.","type":"text"},"messageId":"foreign-agent-msg-1","sessionUpdate":"agent_message_chunk"}}}'
           printf '%s\\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"foreign-session","update":{"sessionUpdate":"state_update","state":"idle","stopReason":"end_turn"}}}'
           ;;

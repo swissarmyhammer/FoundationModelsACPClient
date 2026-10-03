@@ -218,7 +218,7 @@ final class PermissionStubAgent: Agent {
                 )
             )
         )
-        return PromptResponse()
+        return testPromptResponse
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

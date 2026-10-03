@@ -124,7 +124,7 @@ func promptTurnLandsReply(
     messageID: MessageId,
     expectedText: String
 ) async throws -> Bool {
-    let updates = connection.updates(for: sessionId)
+    let updates = connection.subscribe(to: sessionId).updates
     _ = try await connection.prompt(
         PromptRequest(prompt: [.text(TextContent(text: "Hello"))], sessionId: sessionId)
     )

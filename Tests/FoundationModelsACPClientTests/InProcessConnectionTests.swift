@@ -69,7 +69,7 @@ private final class InProcessStubAgent: Agent {
                 update: .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn)))
             )
         )
-        return PromptResponse()
+        return testPromptResponse
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

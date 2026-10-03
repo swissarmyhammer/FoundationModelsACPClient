@@ -196,7 +196,7 @@ final class ScriptedStubAgent: Agent {
             try await send(update)
         }
         startDeferredScript()
-        return PromptResponse()
+        return testPromptResponse
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {

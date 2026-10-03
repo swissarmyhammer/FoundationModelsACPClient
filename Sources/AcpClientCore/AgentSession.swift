@@ -16,9 +16,9 @@
 //    default exists so a SwiftUI view does not thrash; a byte stream has no
 //    such problem, and a delayed chunk is a delayed byte.
 // 2. ``openSession()`` subscribes to the session's updates before it returns.
-//    The wire package drops an update for a session with no active
-//    subscriber, so a subscription taken after the prompt would lose every
-//    chunk that arrived in between.
+//    The wire package keeps the updates of a session with no subscriber in
+//    a buffer of limited size, and a full buffer discards them, so a
+//    subscription taken after a long prompt could lose chunks.
 //
 // `--cwd` is the **session's** working directory, and never this binary's.
 // The value reaches the agent as `NewSessionRequest.cwd` exactly as typed:
@@ -187,9 +187,10 @@ struct AgentSession {
     /// Opens one session and subscribes to its updates.
     ///
     /// The subscription is live before this call returns. The wire package
-    /// drops an update for a session with no active subscriber, so a caller
-    /// that subscribed after driving the turn would lose every chunk the
-    /// agent sent in between.
+    /// keeps the updates of a session with no subscriber in a buffer of
+    /// limited size, and gives them to the first subscriber. A full buffer
+    /// discards its updates, so the subscription starts here, before any
+    /// turn can fill it.
     ///
     /// The session that opens is a session event of §8, and the line carries
     /// the working directory beside the id, so a person reads what the agent
@@ -214,7 +215,7 @@ struct AgentSession {
         output.event(
             "session/new opened \(response.sessionId.rawValue) in \(cwd.rawValue)"
         )
-        return (response.sessionId, connection.updates(for: response.sessionId))
+        return (response.sessionId, connection.subscribe(to: response.sessionId).updates)
     }
 
     /// Returns the `cwd` to send: `--cwd` as typed, or the working directory

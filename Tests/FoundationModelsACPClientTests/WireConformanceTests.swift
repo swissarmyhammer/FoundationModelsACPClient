@@ -129,3 +129,97 @@ func everySessionUpdateCaseLandsInObservableStateOverTheWire() async throws {
     await connection.close()
     withExtendedLifetime(agentConnection) {}
 }
+
+/// The decode tests for the wire fields that ACP schema v2.0.0-alpha.7 added
+/// and that this client reads: the message id of a prompt response, the
+/// tool-call name patch, and the initial command list of a new or resumed
+/// session.
+///
+/// Each test decodes the JSON text an agent writes, so a schema change that
+/// renames, drops, or loosens one of these fields fails here first.
+struct AlphaSevenWireDecodeTests {
+    /// The raw message id that the prompt-response JSON carries.
+    private static let promptedMessageID = "user-message-1"
+
+    /// The tool-call name that the tool-call JSON carries.
+    private static let toolName = "read_file"
+
+    /// The `availableCommands` member that holds the scripted command, as an
+    /// agent writes it.
+    private static let scriptedCommandsMember =
+        #""availableCommands":[{"description":"Makes a plan","name":"create_plan"}]"#
+
+    /// Decodes one wire value from the JSON text an agent writes.
+    ///
+    /// - Parameters:
+    ///   - type: The wire type to decode.
+    ///   - json: The JSON text.
+    /// - Returns: The decoded value.
+    /// - Throws: The `DecodingError` of the decoder.
+    private static func decode<Value: Decodable>(_ type: Value.Type, from json: String) throws -> Value {
+        try JSONDecoder().decode(type, from: Data(json.utf8))
+    }
+
+    @Test func promptResponseDecodesTheMessageIdOfTheInsertedUserMessage() throws {
+        let response = try Self.decode(
+            PromptResponse.self,
+            from: #"{"messageId":"\#(Self.promptedMessageID)"}"#
+        )
+
+        #expect(response.messageId == MessageId(rawValue: Self.promptedMessageID))
+    }
+
+    @Test(arguments: [#"{}"#, #"{"messageId":null}"#])
+    func promptResponseWithoutAMessageIdDoesNotDecode(json: String) {
+        #expect(throws: DecodingError.self) {
+            try Self.decode(PromptResponse.self, from: json)
+        }
+    }
+
+    @Test(arguments: [
+        (#""#, PatchField<String>.unchanged),
+        (#","name":null"#, PatchField<String>.cleared),
+        (#","name":"\#(toolName)""#, PatchField<String>.value(toolName)),
+    ])
+    func toolCallUpdateDecodesTheNameAsAPatch(nameMember: String, expected: PatchField<String>) throws {
+        let update = try Self.decode(
+            ToolCallUpdate.self,
+            from: #"{"toolCallId":"call-1"\#(nameMember)}"#
+        )
+
+        #expect(update.name == expected)
+    }
+
+    @Test func newSessionResponseWithoutCommandsDecodesNoCommandList() throws {
+        let response = try Self.decode(
+            NewSessionResponse.self,
+            from: #"{"sessionId":"\#(testSession.rawValue)"}"#
+        )
+
+        #expect(response.availableCommands == nil)
+    }
+
+    @Test func newSessionResponseDecodesTheInitialCommands() throws {
+        let response = try Self.decode(
+            NewSessionResponse.self,
+            from: #"{"sessionId":"\#(testSession.rawValue)",\#(Self.scriptedCommandsMember)}"#
+        )
+
+        #expect(response.availableCommands == [scriptedCommand])
+    }
+
+    @Test func resumeSessionResponseWithoutCommandsDecodesNoCommandList() throws {
+        let response = try Self.decode(ResumeSessionResponse.self, from: #"{}"#)
+
+        #expect(response.availableCommands == nil)
+    }
+
+    @Test func resumeSessionResponseDecodesTheInitialCommands() throws {
+        let response = try Self.decode(
+            ResumeSessionResponse.self,
+            from: #"{\#(Self.scriptedCommandsMember)}"#
+        )
+
+        #expect(response.availableCommands == [scriptedCommand])
+    }
+}

@@ -303,9 +303,10 @@ func theServedClientDeclinesAndTheUpdateStillReachesTheContainer() async throws 
     await harness.teardown()
 }
 
-/// The wire package drops updates for a session with no active subscriber, so
-/// the subscription is live before `openSession()` returns. A chunk the agent
-/// sends the moment the prompt lands therefore reaches the returned stream.
+/// The wire package keeps the updates of a session with no subscriber only in
+/// a buffer of limited size, so the subscription is live before
+/// `openSession()` returns. A chunk the agent sends the moment the prompt
+/// lands therefore reaches the returned stream.
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aChunkSentAsSoonAsThePromptLandsReachesTheReturnedStream() async throws {
     let harness = await AgentSessionHarness(script: replyThenIdle)

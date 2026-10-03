@@ -45,6 +45,11 @@ let stubAgentUnsupportedProtocolVersion = ProtocolVersion(rawValue: 1)
 /// The message id each stub agent stamps on its reply chunks.
 let stubAgentMessageID = MessageId(rawValue: "stub-agent-msg-1")
 
+/// The message id each stub agent gives the user message that a prompt
+/// inserted. Since ACP schema v2.0.0-alpha.7 the `session/prompt` answer must
+/// carry it.
+private let stubAgentPromptedMessageID = MessageId(rawValue: "stub-user-msg-1")
+
 /// How long a stub agent that will not go away stays alive, in seconds.
 ///
 /// The seventh row of the check table of `cli-plan.md` §10 asks whether an agent left
@@ -372,8 +377,9 @@ func makeExitingAtOnceAgent(pidFile: String? = nil) throws -> String {
 ///
 /// The command list goes out right after the `session/new` answer, which is
 /// where a real agent sends it and which is also the moment that proves `probe`
-/// reads the list off the observable container: the connection drops an update
-/// for a session with no subscriber yet, and the container has no such gate.
+/// reads the list off the observable container: the update arrives before any
+/// subscription to the session can exist, and the container gets it with no
+/// subscription.
 ///
 /// - Parameters:
 ///   - commands: How the agent reports its slash commands.
@@ -1938,8 +1944,8 @@ private func newSessionStatements(_ answer: StubAgentNewSessionAnswer) throws ->
     }
 }
 
-/// The `session/prompt` acknowledgement. The turn's content follows it as
-/// notifications.
+/// The `session/prompt` acknowledgement. It names the user message the prompt
+/// inserted, and the turn's content follows it as notifications.
 ///
 /// - Returns: The message as one ndJSON line.
 /// - Throws: A JSON-encoding failure.
@@ -1947,7 +1953,7 @@ private func promptAnswer() throws -> String {
     try ndjsonLine([
         "id": promptAnswerID,
         "jsonrpc": jsonRPCVersion,
-        "result": [String: String](),
+        "result": ["messageId": stubAgentPromptedMessageID.rawValue],
     ])
 }
 

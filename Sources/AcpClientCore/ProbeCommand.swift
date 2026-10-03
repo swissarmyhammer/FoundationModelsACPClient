@@ -25,12 +25,12 @@ import FoundationModelsACPClient
 //    to read them is to open a session and wait. The session closes again, and
 //    the agent is never prompted.
 // 3. **The commands are read off the observable container, not off the update
-//    stream.** `SessionUpdateRouter` drops an update for a session with no
-//    active subscriber, and the subscription cannot exist before the
-//    `session/new` answer names the session — so an agent that reports its
-//    commands right after that answer reaches the router first, and the stream
-//    misses the update. The container has no such gate: the connection calls
-//    the client for every notification it decodes.
+//    stream.** The subscription cannot exist before the `session/new` answer
+//    names the session, so an agent that reports its commands right after
+//    that answer reaches `SessionUpdateRouter` first. The router keeps such an
+//    update only in a buffer of limited size, and a full buffer discards it.
+//    The container has no such limit: the connection calls the client for
+//    every notification it decodes.
 //
 // One name to watch. `FoundationModelsACP` exports a `TerminalOutput` of its
 // own — the ACP model of what an agent-owned terminal printed. Inside this

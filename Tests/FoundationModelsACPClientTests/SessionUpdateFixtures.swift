@@ -10,6 +10,13 @@ import FoundationModelsACP
 /// The session id that most tests use.
 let testSession = SessionId(rawValue: "session-1")
 
+/// The `session/prompt` answer that the stub agents give.
+///
+/// Since ACP schema v2.0.0-alpha.7 a prompt response must name the user
+/// message that the prompt inserted into the conversation, so each stub agent
+/// answers with this one id.
+let testPromptResponse = PromptResponse(messageId: MessageId(rawValue: "prompted-user-1"))
+
 /// Makes a text content block.
 ///
 /// - Parameter text: The text of the block.

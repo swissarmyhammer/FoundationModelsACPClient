@@ -256,7 +256,7 @@ private final class ElicitationStubAgent: Agent {
                 )
             )
         )
-        return PromptResponse()
+        return testPromptResponse
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

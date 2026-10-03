@@ -379,7 +379,7 @@ private actor CompactingStubAgent: Agent {
         promptedTurnCount += 1
         let updates = promptedTurnCount == 1 ? firstTurnLiveUpdates() : secondTurnLiveUpdates()
         try await sendToClient(updates)
-        return PromptResponse()
+        return testPromptResponse
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
