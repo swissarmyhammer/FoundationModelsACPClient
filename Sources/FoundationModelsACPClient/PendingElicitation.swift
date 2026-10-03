@@ -9,7 +9,8 @@ import FoundationModelsACP
 /// ``SessionModel/acceptElicitation(_:content:)``,
 /// ``SessionModel/declineElicitation(_:)``, or
 /// ``SessionModel/cancelElicitation(_:)`` — or through the methods of the
-/// same names on ``SwiftUIACPClient``.
+/// same names on ``ConnectionModel``, which holds the request-scoped
+/// elicitations, or on ``SwiftUIACPClient``.
 ///
 /// A form-mode elicitation asks the UI to render a form from the
 /// requested schema, and to accept with values that match that schema. A
@@ -32,6 +33,27 @@ public struct PendingElicitation: Identifiable, Hashable, Sendable {
     /// mode payload, and the scope, so the UI can show what the agent
     /// asks for.
     public let request: CreateElicitationRequest
+
+    /// The wire method of the client request that this elicitation names, or
+    /// `nil`.
+    ///
+    /// Only a request-scoped elicitation that ``ConnectionModel`` holds has a
+    /// method, for example `auth/login`, so the UI can show which operation
+    /// asked. The model reads the method when the elicitation arrives.
+    public let requestMethod: String?
+
+    /// Makes a pending elicitation.
+    ///
+    /// - Parameters:
+    ///   - id: The local identity of the pending elicitation.
+    ///   - request: The request as the agent sent it.
+    ///   - requestMethod: The wire method of the client request that the
+    ///     elicitation names, or `nil` when it names no request.
+    init(id: UUID, request: CreateElicitationRequest, requestMethod: String? = nil) {
+        self.id = id
+        self.request = request
+        self.requestMethod = requestMethod
+    }
 
     /// The session this elicitation is tied to, or `nil`.
     ///
@@ -172,5 +194,25 @@ extension CreateElicitationRequest {
         case .unknown(let name, _):
             .unknownMode(name)
         }
+    }
+}
+
+extension PendingRequestQueue where Item == PendingElicitation, Response == CreateElicitationResponse {
+    /// Closes the pending url-mode elicitation that an `elicitation/complete`
+    /// notification names.
+    ///
+    /// The elicitation resolves with the accept action and no content: the URL
+    /// flow returned its data out of band, so no credentials go back over ACP.
+    /// Each owner of pending elicitations closes them through this method, so
+    /// the match and the answer exist one time.
+    ///
+    /// - Parameter elicitationId: The elicitation id that the notification
+    ///   names.
+    /// - Returns: The closed elicitation, or `nil` when no pending
+    ///   elicitation has that id.
+    @discardableResult
+    func complete(elicitationId: ElicitationId) -> PendingElicitation? {
+        guard let pending = items.first(where: { $0.elicitationId == elicitationId }) else { return nil }
+        return resolve(pending.id, with: ElicitationResponseWire.acceptResponse(content: nil))
     }
 }

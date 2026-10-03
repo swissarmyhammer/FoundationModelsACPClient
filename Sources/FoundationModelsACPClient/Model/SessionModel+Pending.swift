@@ -147,10 +147,8 @@ extension SessionModel {
     /// - Returns: `true` when this model held a pending elicitation with that
     ///   id, `false` when nothing changed.
     func completeElicitation(elicitationId: ElicitationId) -> Bool {
-        guard let pending = pendingElicitations.first(where: { $0.elicitationId == elicitationId }) else {
-            return false
-        }
-        resolveElicitation(pending.id, with: ElicitationResponseWire.acceptResponse(content: nil))
+        guard let removed = elicitations.complete(elicitationId: elicitationId) else { return false }
+        unlinkFromToolCall(removed)
         return true
     }
 

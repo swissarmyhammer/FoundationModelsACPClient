@@ -61,4 +61,25 @@ enum ElicitationFixtures {
             )
         )
     }
+
+    /// Sends an elicitation from the agent, and waits until a model holds it
+    /// as pending.
+    ///
+    /// - Parameters:
+    ///   - request: The elicitation to send.
+    ///   - agentConnection: The agent-side connection that sends it.
+    ///   - isPending: Tells whether the model that must hold the
+    ///     elicitation holds it.
+    /// - Returns: The task of the agent's call.
+    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    @MainActor
+    static func start(
+        _ request: CreateElicitationRequest,
+        over agentConnection: AgentSideConnection,
+        until isPending: () -> Bool
+    ) async throws -> Task<CreateElicitationResponse, any Error> {
+        let call = Task { try await agentConnection.createElicitation(request) }
+        try await waitUntil(isPending)
+        return call
+    }
 }

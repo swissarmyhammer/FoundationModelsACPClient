@@ -9,6 +9,11 @@ import Observation
 /// closes each open session model, which cancels each pending permission
 /// request and elicitation of that session, and empties ``openSessions``.
 ///
+/// A request-scoped elicitation has no session, so the connection model holds
+/// it in ``pendingElicitations`` while the client request that it names is in
+/// flight. The end of that request, the close of the connection, and a new
+/// connection each cancel it.
+///
 /// The model reads the close from `ClientSideConnection.closed`. That value
 /// comes one time, after each inbound handler of the served `Client` ended,
 /// so the close of the session models has no race with a handler that still
@@ -38,6 +43,18 @@ public final class ConnectionModel {
     /// The open connection, or `nil` when no connection is open. A close
     /// that comes from an earlier connection changes nothing.
     @ObservationIgnored private(set) var connection: ClientSideConnection?
+
+    /// The pending request-scoped elicitations and the continuation of each
+    /// one. The queue is observable, so a read of ``pendingElicitations``
+    /// tracks it.
+    @ObservationIgnored let elicitations = PendingRequestQueue<PendingElicitation, CreateElicitationResponse>(
+        cancelledResponse: ElicitationResponseWire.cancelResponse
+    )
+
+    /// The task that reads the outgoing-request events of the open
+    /// connection, or `nil` when no connection is open. It cancels each
+    /// pending elicitation whose request finished.
+    @ObservationIgnored private var requestWatch: Task<Void, Never>?
 
     /// The cadence between coalesced flushes of each session model that this
     /// connection makes.
@@ -97,6 +114,9 @@ public final class ConnectionModel {
     /// call this method again with a new transport. Each call forgets the
     /// `initialize` answer and the auth state of the last connection, so
     /// each capability flag is `false` until ``initialize(_:)`` runs again.
+    /// Each call also cancels each pending elicitation of the last
+    /// connection, because the model no longer reads the events of its
+    /// requests.
     ///
     /// - Parameters:
     ///   - transport: The bidirectional transport to run over.
@@ -113,12 +133,14 @@ public final class ConnectionModel {
         state = .connecting
         initializeResponse = nil
         authState = .unknown
+        stopWatchingRequests()
         let connectionLogger = logger ?? self.logger
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
         let served = wrap(ModelClient(model: self, logger: connectionLogger))
         let opened = await ClientSideConnection(stream: transport, logger: connectionLogger) { _ in served }
         connection = opened
+        requestWatch = watchOutgoingRequests(of: opened)
         state = .connected
         // The wait for the close runs in a task of its own, never in an
         // inbound handler: the close reason comes only after each inbound
@@ -131,7 +153,8 @@ public final class ConnectionModel {
     }
 
     /// Records the close of a connection: sets ``state`` from the reason,
-    /// and closes each open session model.
+    /// cancels each pending request-scoped elicitation, and closes each open
+    /// session model.
     ///
     /// - Parameters:
     ///   - closed: The connection that closed.
@@ -140,7 +163,17 @@ public final class ConnectionModel {
         guard closed === connection else { return }
         connection = nil
         state = ConnectionState(closedBecause: reason)
+        stopWatchingRequests()
         closeOpenSessions()
+    }
+
+    /// Stops the read of the outgoing-request events, and cancels each
+    /// pending request-scoped elicitation, whose request can no longer
+    /// finish in the eyes of the model.
+    private func stopWatchingRequests() {
+        requestWatch?.cancel()
+        requestWatch = nil
+        elicitations.cancelAll()
     }
 
     /// Closes each open session model and empties ``openSessions``.

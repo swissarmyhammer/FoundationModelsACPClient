@@ -168,12 +168,7 @@ public final class SwiftUIACPClient: Client {
     ///
     /// - Parameter notification: The completion notification.
     public func elicitationComplete(_ notification: CompleteElicitationNotification) async {
-        guard
-            let pending = pendingElicitations.first(where: {
-                $0.elicitationId == notification.elicitationId
-            })
-        else { return }
-        elicitations.resolve(pending.id, with: ElicitationResponseWire.acceptResponse(content: nil))
+        elicitations.complete(elicitationId: notification.elicitationId)
     }
 
     /// Accepts one pending elicitation.

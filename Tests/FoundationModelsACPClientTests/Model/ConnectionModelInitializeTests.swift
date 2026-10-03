@@ -75,8 +75,9 @@ private struct ConnectedModel {
     }
 }
 
-/// The fixtures of the initialize and auth tests.
-private enum InitializeFixtures {
+/// The fixtures of the initialize and auth tests. The elicitation tests of
+/// the connection model send the same login.
+enum InitializeFixtures {
     /// The capabilities of an agent that advertises each optional session
     /// method.
     static let fullCapabilities = AgentCapabilities(

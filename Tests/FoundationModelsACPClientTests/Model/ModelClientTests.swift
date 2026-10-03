@@ -64,9 +64,7 @@ private struct RoutedModel {
         _ request: CreateElicitationRequest,
         on session: SessionModel
     ) async throws -> Task<CreateElicitationResponse, any Error> {
-        let task = Task { [agentConnection] in try await agentConnection.createElicitation(request) }
-        try await waitUntil { !session.pendingElicitations.isEmpty }
-        return task
+        try await ElicitationFixtures.start(request, over: agentConnection) { !session.pendingElicitations.isEmpty }
     }
 }
 
@@ -145,7 +143,7 @@ struct ModelClientTests {
         #expect(routed.loggedMessages.count == 1)
     }
 
-    @Test func aRequestScopedElicitationGoesToTheConnectionHookThatAnswersCancel() async throws {
+    @Test func aRequestScopedElicitationForARequestNotInFlightAnswersCancelWithOneWarning() async throws {
         let routed = await RoutedModel()
         let session = routed.openTestSession()
 
@@ -155,6 +153,8 @@ struct ModelClientTests {
 
         #expect(response == ElicitationResponseWire.cancelResponse)
         #expect(session.pendingElicitations.isEmpty)
+        #expect(routed.model.pendingElicitations.isEmpty)
+        #expect(routed.loggedMessages.count == 1)
     }
 
     @Test func anElicitationOfAnUnknownModeAnswersCancelWithOneWarning() async throws {

@@ -52,6 +52,11 @@ import FoundationModelsACP
 /// three to drive the capability flags and the auth state of
 /// ``ConnectionModel``.
 ///
+/// A stub built with a login gate holds each `auth/login` until the test
+/// opens that gate, so the login request stays in flight.
+/// `ConnectionModelElicitationTests` sends a request-scoped elicitation while
+/// the login waits, and then opens the gate to finish the request.
+///
 /// The `script` goes out BEFORE the prompt answer, which is the order a test
 /// wants when it asserts on landed state after the prompt call returned. That
 /// order cannot tell a client that ends its turn on the prompt answer from
@@ -131,6 +136,10 @@ final class ScriptedStubAgent: Agent {
     /// login.
     private let loginError: RequestError?
 
+    /// The gate that must open before each `auth/login` answers, or `nil` to
+    /// answer each login at once.
+    private let loginGate: UpdateGate?
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -155,6 +164,8 @@ final class ScriptedStubAgent: Agent {
     ///     `nil` to leave the member out.
     ///   - loginError: The error to refuse each `auth/login` with, or `nil`
     ///     to accept each login.
+    ///   - loginGate: The gate that must open before each `auth/login`
+    ///     answers, or `nil` to answer each login at once.
     init(
         connection: AgentSideConnection,
         session: SessionId,
@@ -167,7 +178,8 @@ final class ScriptedStubAgent: Agent {
         closeSessionError: RequestError = .methodNotFound("session/close"),
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
-        loginError: RequestError? = nil
+        loginError: RequestError? = nil,
+        loginGate: UpdateGate? = nil
     ) {
         self.connection = connection
         self.session = session
@@ -181,6 +193,7 @@ final class ScriptedStubAgent: Agent {
         self.capabilities = capabilities
         self.authMethods = authMethods
         self.loginError = loginError
+        self.loginGate = loginGate
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -195,6 +208,7 @@ final class ScriptedStubAgent: Agent {
 
     func loginAuth(_ params: LoginAuthRequest) async throws -> LoginAuthResponse {
         record(params.meta, of: ConnectionModel.WireMethod.login)
+        await loginGate?.wait()
         if let loginError {
             throw loginError
         }

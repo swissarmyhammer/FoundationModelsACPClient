@@ -6,16 +6,18 @@ import FoundationModelsACP
 ///
 /// - A permission request goes to the open ``SessionModel`` of its session.
 /// - A session-scoped elicitation goes to the open ``SessionModel`` of its
-///   session. A request-scoped elicitation goes to the request-scope hook of
-///   the ``ConnectionModel``.
+///   session. A request-scoped elicitation goes to the ``ConnectionModel``,
+///   which holds it while the client request that it names is in flight.
 /// - An `elicitation/complete` goes to the session model that holds that
-///   elicitation, or else to the request-scope hook.
+///   elicitation, or else to the request-scoped elicitations of the
+///   ``ConnectionModel``.
 ///
 /// The router answers at once when no model can take a request: a permission
 /// request gets the `cancelled` outcome, and an elicitation gets the `cancel`
 /// action. These are the answers of the spec for a request that nobody
 /// decided, so the agent never waits for ever. A request for a session that is
-/// not open, and an elicitation of a mode that the client does not know, also
+/// not open, a request-scoped elicitation for a client request that is not in
+/// flight, and an elicitation of a mode that the client does not know, also
 /// log one warning.
 ///
 /// The router ignores each `session/update`: each ``SessionModel`` reads its
@@ -76,8 +78,8 @@ struct ModelClient: Client {
         switch params.elicitationScope {
         case .session(let scope):
             return await awaitSessionElicitation(params, sessionId: scope.sessionId)
-        case .request:
-            return await model?.awaitRequestScopedElicitation(params) ?? ElicitationResponseWire.cancelResponse
+        case .request(let scope):
+            return await awaitRequestElicitation(params, requestId: scope.requestId)
         case .unknownMode(let name):
             logger.log(Self.logPrefix + "answered cancel to an elicitation of the unknown mode \"\(name)\"")
             return ElicitationResponseWire.cancelResponse
@@ -108,6 +110,28 @@ struct ModelClient: Client {
             return ElicitationResponseWire.cancelResponse
         }
         return await session.awaitElicitation(request)
+    }
+
+    /// Gives a request-scoped elicitation to the connection model, and waits
+    /// for the user's response.
+    ///
+    /// - Parameters:
+    ///   - request: The request-scoped elicitation.
+    ///   - requestId: The wire id of the client request that it names.
+    /// - Returns: The user's response, or the `cancel` action when no client
+    ///   request with that id is in flight.
+    private func awaitRequestElicitation(
+        _ request: CreateElicitationRequest,
+        requestId: RequestId
+    ) async -> CreateElicitationResponse {
+        guard let response = await model?.awaitRequestScopedElicitation(request, requestId: requestId) else {
+            logger.log(
+                Self.logPrefix
+                    + "answered cancel to a request-scoped elicitation, because the request \(requestId) is not in flight"
+            )
+            return ElicitationResponseWire.cancelResponse
+        }
+        return response
     }
 
     /// Makes the warning for a request whose session is not open.
