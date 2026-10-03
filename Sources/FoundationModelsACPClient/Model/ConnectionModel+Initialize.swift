@@ -153,9 +153,12 @@ extension ConnectionModel {
 
     /// Gives the open connection.
     ///
+    /// The session part of the model sends its requests over this connection
+    /// too.
+    ///
     /// - Returns: The open connection.
     /// - Throws: `ConnectionError.closed` when no connection is open.
-    private func openConnection() throws -> ClientSideConnection {
+    func openConnection() throws -> ClientSideConnection {
         guard let connection else {
             throw ConnectionError.closed
         }

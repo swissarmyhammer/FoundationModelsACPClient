@@ -11,8 +11,11 @@ import FoundationModelsACP
 ///
 /// The stub answers `session/new` with the session the script belongs to,
 /// because a test that drives the whole turn path opens a session before it
-/// prompts. Every other session method stays unanswered: no test needs one,
-/// and a stub that answers a method it does not model would hide a mistake.
+/// prompts. The answer carries the `newSessionCommands` the test chose, and
+/// the stub sends the `newSessionScript` before the answer, so a test can
+/// prove that an update which comes before the session id is not lost.
+/// Every other session method stays unanswered: no test needs one, and a
+/// stub that answers a method it does not model would hide a mistake.
 ///
 /// `session/cancel` sends the `cancelScript` the test chose. The default is no
 /// script at all, which is the agent that IGNORES a cancellation; a test that
@@ -20,10 +23,14 @@ import FoundationModelsACP
 /// the `cancelled` stop reason, which is how the schema confirms a
 /// cancellation.
 ///
-/// `session/close` refuses with the error the test chose. The default is the
-/// `methodNotFound` refusal an agent that does not implement the optional
-/// method sends, and a test that drives the other branch of
-/// `AgentSession.closeSession(_:)` asks for an error with another code.
+/// `session/close` refuses with the error the test chose, or accepts the
+/// close when the test chose no error. The default is the `methodNotFound`
+/// refusal an agent that does not implement the optional method sends, and a
+/// test that drives the other branch of `AgentSession.closeSession(_:)` asks
+/// for an error with another code.
+///
+/// `session/set_config_option` accepts each request with no option, so a
+/// test can prove that the request reached the agent.
 ///
 /// A stub built with an elicitation asks the client for that elicitation
 /// before it sends the script. The prompt turn then ends only after the
@@ -65,6 +72,10 @@ import FoundationModelsACP
 /// answer, when the test opens that step's gate. `TurnRunnerTests` uses it to
 /// prove that the turn outlives the acknowledgement.
 final class ScriptedStubAgent: Agent {
+    /// The ACP wire method of the set-config-option request, as the stub
+    /// records it.
+    static let setConfigOptionMethod = "session/set_config_option"
+
     /// The connection back to the client.
     private let connection: AgentSideConnection
 
@@ -111,8 +122,16 @@ final class ScriptedStubAgent: Agent {
     /// The error to refuse each prompt with, or `nil` to answer each prompt.
     private let promptError: RequestError?
 
-    /// The error this stub answers `session/close` with.
-    private let closeSessionError: RequestError
+    /// The error this stub answers `session/close` with, or `nil` to accept
+    /// each close.
+    private let closeSessionError: RequestError?
+
+    /// The updates to send, in order, before the `session/new` answer.
+    private let newSessionScript: [SessionUpdate]
+
+    /// The command list of the `session/new` answer, or `nil` to leave the
+    /// member out.
+    private let newSessionCommands: [AvailableCommand]?
 
     /// The updates to send after the prompt answer, one step per gate.
     private let deferredScript: [GatedUpdates]
@@ -158,7 +177,12 @@ final class ScriptedStubAgent: Agent {
     ///     prompt turn, before the elicitation, or `nil` to ask for none.
     ///   - promptError: The error to refuse each prompt with, or `nil` to
     ///     answer each prompt.
-    ///   - closeSessionError: The error to answer `session/close` with.
+    ///   - closeSessionError: The error to answer `session/close` with, or
+    ///     `nil` to accept each close.
+    ///   - newSessionScript: The updates to send before the `session/new`
+    ///     answer.
+    ///   - newSessionCommands: The command list of the `session/new` answer,
+    ///     or `nil` to leave the member out.
     ///   - capabilities: The capabilities to answer `initialize` with.
     ///   - authMethods: The auth methods to answer `initialize` with, or
     ///     `nil` to leave the member out.
@@ -175,7 +199,9 @@ final class ScriptedStubAgent: Agent {
         elicitation: CreateElicitationRequest? = nil,
         permissionRequest: RequestPermissionRequest? = nil,
         promptError: RequestError? = nil,
-        closeSessionError: RequestError = .methodNotFound("session/close"),
+        closeSessionError: RequestError? = .methodNotFound("session/close"),
+        newSessionScript: [SessionUpdate] = [],
+        newSessionCommands: [AvailableCommand]? = nil,
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
         loginError: RequestError? = nil,
@@ -190,6 +216,8 @@ final class ScriptedStubAgent: Agent {
         self.permissionRequest = permissionRequest
         self.promptError = promptError
         self.closeSessionError = closeSessionError
+        self.newSessionScript = newSessionScript
+        self.newSessionCommands = newSessionCommands
         self.capabilities = capabilities
         self.authMethods = authMethods
         self.loginError = loginError
@@ -223,7 +251,10 @@ final class ScriptedStubAgent: Agent {
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.newSession)
         workingDirectories.append(params.cwd)
-        return NewSessionResponse(sessionId: session)
+        for update in newSessionScript {
+            try await send(update)
+        }
+        return NewSessionResponse(sessionId: session, availableCommands: newSessionCommands)
     }
 
     func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
@@ -236,7 +267,15 @@ final class ScriptedStubAgent: Agent {
 
     func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.closeSession)
-        throw closeSessionError
+        if let closeSessionError {
+            throw closeSessionError
+        }
+        return CloseSessionResponse()
+    }
+
+    func setSessionConfigOption(_ params: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse {
+        record(params.meta, of: Self.setConfigOptionMethod)
+        return SetSessionConfigOptionResponse(configOptions: [])
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {

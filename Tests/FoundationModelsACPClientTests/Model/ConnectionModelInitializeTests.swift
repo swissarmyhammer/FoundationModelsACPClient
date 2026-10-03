@@ -8,72 +8,10 @@ import Testing
 // capability flags, `requireCapability(_:method:)`, the auth state, login and
 // logout.
 //
-// `InMemoryTransport.pair()` gives the real ACP wire, with a
-// `ScriptedStubAgent` on the agent end. The stub answers `initialize` with the
-// capabilities and the auth methods of each test, and records each request
-// that it gets, so a test can prove that a request did not go out.
-
-/// A model that is connected over an in-memory pair to a scripted stub agent.
-@MainActor
-private struct ConnectedModel {
-    /// The model under test.
-    let model: ConnectionModel
-
-    /// The agent-side connection. The test holds it so the agent end of the
-    /// pair outlives the test body.
-    let agentConnection: AgentSideConnection
-
-    /// The stubs that the agent-side factory built. The factory runs one
-    /// time, so the list holds one element.
-    private let builtAgents: ThreadSafeBuffer<ScriptedStubAgent>
-
-    /// The ACP method of each request that the agent got, in arrival order.
-    var receivedMethods: [String] {
-        (builtAgents.elements.last?.receivedMeta ?? []).map(\.method)
-    }
-
-    /// Connects a new model to a new stub agent.
-    ///
-    /// - Parameters:
-    ///   - capabilities: The capabilities the agent answers `initialize`
-    ///     with.
-    ///   - authMethods: The auth methods the agent answers `initialize` with,
-    ///     or `nil` to leave the member out.
-    ///   - loginError: The error the agent refuses each login with, or `nil`
-    ///     to accept each login.
-    init(
-        capabilities: AgentCapabilities = AgentCapabilities(),
-        authMethods: [AuthMethod]? = nil,
-        loginError: RequestError? = nil
-    ) async {
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let builtAgents = ThreadSafeBuffer<ScriptedStubAgent>()
-        self.builtAgents = builtAgents
-        agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
-            let stub = ScriptedStubAgent(
-                connection: connection,
-                session: testSession,
-                script: [],
-                capabilities: capabilities,
-                authMethods: authMethods,
-                loginError: loginError
-            )
-            builtAgents.append(stub)
-            return stub
-        }
-        model = ConnectionModel()
-        _ = await model.connect(over: clientEnd)
-    }
-
-    /// Sends `initialize` through the model.
-    ///
-    /// - Returns: The answer of the agent.
-    /// - Throws: Whatever the model threw.
-    @discardableResult
-    func initialize() async throws -> InitializeResponse {
-        try await model.initialize(makeInitializeRequest())
-    }
-}
+// `ConnectedModel` gives the real ACP wire, with a `ScriptedStubAgent` on the
+// agent end. The stub answers `initialize` with the capabilities and the auth
+// methods of each test, and records each request that it gets, so a test can
+// prove that a request did not go out.
 
 /// The fixtures of the initialize and auth tests. The elicitation tests of
 /// the connection model send the same login.

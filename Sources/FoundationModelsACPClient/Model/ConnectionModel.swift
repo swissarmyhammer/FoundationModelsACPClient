@@ -64,8 +64,9 @@ public final class ConnectionModel {
     /// that this connection makes.
     @ObservationIgnored private let clock: any Clock<Duration>
 
-    /// The diagnostic sink of the connection when ``connect(over:logger:client:)``
-    /// gets no logger of its own.
+    /// The diagnostic sink of the connection when
+    /// ``connect(over:logger:bufferLimits:client:)`` gets no logger of its
+    /// own.
     @ObservationIgnored private let logger: ACPLogger
 
     /// Makes a model with no connection and no open session.
@@ -123,11 +124,17 @@ public final class ConnectionModel {
     ///   - logger: The diagnostic sink of this connection, or `nil` for the
     ///     logger given to ``init(coalescingCadence:clock:logger:)``; never
     ///     stdout.
+    ///   - bufferLimits: The limits on the `session/update` notifications that
+    ///     the connection keeps for a session with no subscriber, for example
+    ///     the updates that come before a `session/new` response. Past a
+    ///     limit, the model of that session gets
+    ///     ``SessionModel/hasMissedUpdates``.
     ///   - wrap: Builds the served `Client` from the router of this model.
     /// - Returns: The client-side connection, ready to drive the agent.
     public func connect(
         over transport: any ACPTransport,
         logger: ACPLogger? = nil,
+        bufferLimits: SessionUpdateBufferLimits = .default,
         client wrap: @escaping @Sendable @MainActor (any Client) -> any Client = { $0 }
     ) async -> ClientSideConnection {
         state = .connecting
@@ -138,7 +145,11 @@ public final class ConnectionModel {
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
         let served = wrap(ModelClient(model: self, logger: connectionLogger))
-        let opened = await ClientSideConnection(stream: transport, logger: connectionLogger) { _ in served }
+        let opened = await ClientSideConnection(
+            stream: transport,
+            logger: connectionLogger,
+            bufferLimits: bufferLimits
+        ) { _ in served }
         connection = opened
         requestWatch = watchOutgoingRequests(of: opened)
         state = .connected

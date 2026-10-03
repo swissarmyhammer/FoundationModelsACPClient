@@ -47,11 +47,27 @@ comments:
     - evidence: one local commit "feat(model): keep request-scoped elicitations on ConnectionModel until their request finishes". The sha is in the step record that the commit step returns. Tests were green before the commit. No push.
     - next: review
   timestamp: 2026-10-03T18:33:07.594395+00:00
+- actor: claude-code
+  id: 01m41gvre8yn7v4khan53mh93g
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (4055c2d); 11 files reviewed; counts findings 0, confirmed 0, refuted 0, attempted 7, failed 0, skipped 0; .kanban/ files excluded by .reviewignore.
+    - next: none. Task moved to done.
+  timestamp: 2026-10-03T18:36:43.848704+00:00
+- actor: claude-code
+  id: 01m41gw0mfjkkhby2xdrw3djez
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 11 files (ConnectionModel+Elicitation.swift, ConnectionModel.swift, ModelClient.swift, PendingElicitation.swift, new ConnectionModelElicitationTests.swift, fixtures)
+    - test: green — swift test 461/461, IntegrationTests 103/103
+    - commit: 4055c2d feat(model): keep request-scoped elicitations on ConnectionModel until their request finishes
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T18:36:52.239962+00:00
 depends_on:
 - 01M3YRBGEKBG5X2Z9MFCFH2WSW
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c680
 title: 'Model: ConnectionModel request-scoped elicitations, removed when their request finishes'
 ---
 ## What
