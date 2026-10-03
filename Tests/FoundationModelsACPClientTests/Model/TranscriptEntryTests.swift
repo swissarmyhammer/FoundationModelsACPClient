@@ -200,6 +200,22 @@ private let invalidUTF8Byte: UInt8 = 0xFF
     #expect(entry.meta == metaObject("plan"))
 }
 
+@MainActor @Test func planUpdateOfUnknownContentKeepsTheTypeAndThePayload() throws {
+    let payload: JSONValue = .object(["steps": .array([.string("Read the notes")])])
+    let update = PlanUpdate(plan: .unknown("future_plan", payload))
+    let entry = try #require(TranscriptEntry(wire: try engineEntry(after: .planUpdate(update))).plan)
+
+    #expect(entry.unknownContent == PlanTranscriptEntry.UnknownContent(type: "future_plan", payload: payload))
+    #expect(entry.entries.isEmpty)
+}
+
+@MainActor @Test func planUpdateOfItemsHasNoUnknownContent() throws {
+    let entry = try #require(TranscriptEntry(wire: try engineEntry(after: .planUpdate(onePlan))).plan)
+
+    #expect(entry.unknownContent == nil)
+    #expect(!entry.entries.isEmpty)
+}
+
 @MainActor @Test func unknownUpdateKeepsTheTypeAndTheRawPayload() throws {
     let payload: JSONValue = .object(["note": .string("new"), "_meta": metaObject("unknown")])
     let entry = try #require(TranscriptEntry(wire: try engineEntry(after: .unknown("future_update", payload))).unknown)
@@ -269,7 +285,7 @@ private let invalidUTF8Byte: UInt8 = 0xFF
 
     let fired = observationFires {
         _ = (terminal.bytes, terminal.exitStatus, terminal.command, terminal.cwd, terminal.meta)
-        _ = (plan.planId, plan.entries, plan.meta)
+        _ = (plan.planId, plan.entries, plan.meta, plan.unknownContent)
         _ = (unknown.type, unknown.raw, unknown.meta)
     } during: {
         terminal.update(from: terminalWire)

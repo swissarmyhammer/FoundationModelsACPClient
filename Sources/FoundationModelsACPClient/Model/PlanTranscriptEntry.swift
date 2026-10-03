@@ -9,6 +9,18 @@ import Observation
 /// `planId`, and the entry keeps the position where the plan first appeared.
 @MainActor @Observable
 public final class PlanTranscriptEntry: ObservableTranscriptEntry {
+    /// Plan content of a type that this revision of the schema does not know.
+    ///
+    /// The value keeps the content type and the raw payload, so that no plan
+    /// is dropped and a UI can show it as raw JSON.
+    public struct UnknownContent: Hashable, Sendable {
+        /// The `type` discriminator of the plan content.
+        public let type: String
+
+        /// The members of the plan content, without the `type` member.
+        public let payload: JSONValue
+    }
+
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
@@ -18,6 +30,10 @@ public final class PlanTranscriptEntry: ObservableTranscriptEntry {
 
     /// The items of the plan. A plan of unknown content has no items.
     public internal(set) var entries: [PlanEntry] = []
+
+    /// The content of the plan when its type is unknown, or `nil` for a plan
+    /// of items.
+    public internal(set) var unknownContent: UnknownContent?
 
     /// The `_meta` field of the last plan update.
     public internal(set) var meta: JSONValue?
@@ -41,6 +57,7 @@ public final class PlanTranscriptEntry: ObservableTranscriptEntry {
         }
         assign(Self.planId(of: entry.id), to: \.planId)
         assign(Self.items(of: plan.plan), to: \.entries)
+        assign(Self.unknownContent(of: plan.plan), to: \.unknownContent)
         assign(plan.meta, to: \.meta)
     }
 
@@ -61,6 +78,17 @@ public final class PlanTranscriptEntry: ObservableTranscriptEntry {
         switch content {
         case .items(let items): items.entries
         case .unknown: []
+        }
+    }
+
+    /// The content of a plan update of an unknown type.
+    ///
+    /// - Parameter content: The content of the plan update.
+    /// - Returns: The type and the raw payload, or `nil` for items.
+    private static func unknownContent(of content: PlanUpdateContent) -> UnknownContent? {
+        switch content {
+        case .items: nil
+        case .unknown(let type, let payload): UnknownContent(type: type, payload: payload)
         }
     }
 }

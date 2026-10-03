@@ -38,8 +38,24 @@ comments:
     - evidence: One local commit: fix(model): do not register a new session after its connection closed. The commit holds the newSession fix, the new tests, the test helpers, and the .kanban files. No push.
     - next: Review.
   timestamp: 2026-10-03T19:03:23.561958+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m41jj30yyx3mc6mqn4sqyrg8
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (35e27f7). 0 findings, 0 confirmed, 0 refuted. 7 validator runs attempted, 0 failed, 0 skipped. 5 files reviewed. 4 .kanban files not reviewed (.reviewignore).
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T19:06:24.158112+00:00
+- actor: claude-code
+  id: 01m41jj9sdxrn520bmtpegpv36
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files (ConnectionModel+Sessions.swift, HoldableTaskExecutor.swift new, ScriptedStubAgent.swift, ConnectedModel.swift, ConnectionModelSessionTests.swift)
+    - test: green — swift test 475/475, IntegrationTests 103/103, race test 10/10 runs
+    - commit: 35e27f7 fix(model): do not register a new session after its connection closed
+    - review: clean — task moved to done. The resumeSession check moved to ^6np8vdv.
+  timestamp: 2026-10-03T19:06:31.085545+00:00
+position_column: done
+position_ordinal: c780
 title: 'Model: newSession must not register a session after its connection closed'
 ---
 ## What
