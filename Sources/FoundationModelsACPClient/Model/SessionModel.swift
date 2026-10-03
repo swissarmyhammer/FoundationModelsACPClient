@@ -171,6 +171,11 @@ public final class SessionModel {
     /// The sender of the requests of this session.
     @ObservationIgnored let requestSender: any SessionRequestSender
 
+    /// Receives the session id and the new ``sessionInfo`` each time a
+    /// `session_info_update` changes it, or `nil` when no one listens. The
+    /// connection model sets it, so its session list shows the change.
+    @ObservationIgnored var sessionInfoDidChange: ((SessionId, SessionInfoUpdate) -> Void)?
+
     /// Links each local prompt to the user message that the agent inserts
     /// for it, from the prompt response and from the echoed `user_message`.
     @ObservationIgnored private var promptCorrelator = PendingPromptCorrelator<TranscriptEntry.ID>()
@@ -320,9 +325,18 @@ public final class SessionModel {
         case .configOptionsChanged(let options): configOptions = options
         case .usageChanged(let report): usage = report
         case .agentStateChanged(let state): agentState = state
-        case .sessionInfoChanged(let info): sessionInfo = info
+        case .sessionInfoChanged(let info): changeSessionInfo(info)
         case .notice(let notice): notices.append(SessionNotice(notice: notice, arrivalTime: elapsedTime()))
         }
+    }
+
+    /// Writes the session information that the engine folded, and tells
+    /// ``sessionInfoDidChange`` of the change.
+    ///
+    /// - Parameter info: The folded session information.
+    private func changeSessionInfo(_ info: SessionInfoUpdate) {
+        sessionInfo = info
+        sessionInfoDidChange?(sessionId, info)
     }
 
     /// Shows a new engine entry in the transcript.

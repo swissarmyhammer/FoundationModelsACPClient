@@ -77,6 +77,14 @@ import FoundationModelsACP
 /// the answer so that it can close the connection between the answer and the
 /// moment the model reads it.
 ///
+/// `session/list` answers with the page that the test keyed by the cursor of
+/// the request, and refuses a cursor with no page with `invalidParams`. A
+/// stub built with a gate for a cursor holds the answer of that page until
+/// the test opens the gate. `session/delete` accepts each delete. The stub
+/// records each list request and each delete request, so
+/// `ConnectionModelListTests` can assert on their order and their
+/// parameters.
+///
 /// The `script` goes out BEFORE the prompt answer, which is the order a test
 /// wants when it asserts on landed state after the prompt call returned. That
 /// order cannot tell a client that ends its turn on the prompt answer from
@@ -192,6 +200,33 @@ final class ScriptedStubAgent: Agent {
     /// to answer each new session at once.
     private let newSessionGate: UpdateGate?
 
+    /// The page that `session/list` answers, keyed by the cursor of the
+    /// request. The `nil` key is the first page.
+    private let sessionListPages: [SessionListCursor?: ListSessionsResponse]
+
+    /// The gate that must open before the page of a cursor answers, keyed by
+    /// that cursor. A cursor with no gate answers at once.
+    private let sessionListGates: [SessionListCursor?: UpdateGate]
+
+    /// Each `session/list` request this stub got, in arrival order.
+    ///
+    /// The connection serves each request on a task of its own, so the record
+    /// must tolerate a write from a thread other than the test body's.
+    private let listRequestRecord = ThreadSafeBuffer<ListSessionsRequest>()
+
+    /// Each `session/list` request this stub got, in arrival order.
+    var listRequests: [ListSessionsRequest] {
+        listRequestRecord.elements
+    }
+
+    /// Each `session/delete` request this stub got, in arrival order.
+    private let deleteRequestRecord = ThreadSafeBuffer<DeleteSessionRequest>()
+
+    /// Each `session/delete` request this stub got, in arrival order.
+    var deleteRequests: [DeleteSessionRequest] {
+        deleteRequestRecord.elements
+    }
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -233,6 +268,10 @@ final class ScriptedStubAgent: Agent {
     ///     answers, or `nil` to answer each login at once.
     ///   - newSessionGate: The gate that must open before each `session/new`
     ///     answers, or `nil` to answer each new session at once.
+    ///   - sessionListPages: The page that `session/list` answers, keyed by
+    ///     the cursor of the request; the `nil` key is the first page.
+    ///   - sessionListGates: The gate that must open before the page of a
+    ///     cursor answers, keyed by that cursor.
     init(
         connection: AgentSideConnection,
         session: SessionId,
@@ -253,7 +292,9 @@ final class ScriptedStubAgent: Agent {
         authMethods: [AuthMethod]? = nil,
         loginError: RequestError? = nil,
         loginGate: UpdateGate? = nil,
-        newSessionGate: UpdateGate? = nil
+        newSessionGate: UpdateGate? = nil,
+        sessionListPages: [SessionListCursor?: ListSessionsResponse] = [:],
+        sessionListGates: [SessionListCursor?: UpdateGate] = [:]
     ) {
         self.connection = connection
         self.session = session
@@ -275,6 +316,8 @@ final class ScriptedStubAgent: Agent {
         self.loginError = loginError
         self.loginGate = loginGate
         self.newSessionGate = newSessionGate
+        self.sessionListPages = sessionListPages
+        self.sessionListGates = sessionListGates
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -312,7 +355,19 @@ final class ScriptedStubAgent: Agent {
     }
 
     func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        throw RequestError.methodNotFound("session/list")
+        record(params.meta, of: ConnectionModel.WireMethod.listSessions)
+        listRequestRecord.append(params)
+        await sessionListGates[params.cursor]?.wait()
+        guard let page = sessionListPages[params.cursor] else {
+            throw RequestError.invalidParams
+        }
+        return page
+    }
+
+    func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
+        record(params.meta, of: ConnectionModel.WireMethod.deleteSession)
+        deleteRequestRecord.append(params)
+        return DeleteSessionResponse()
     }
 
     func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {

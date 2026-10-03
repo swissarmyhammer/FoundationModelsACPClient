@@ -29,6 +29,16 @@ struct ConnectedModel {
         (builtAgents.elements.last?.receivedMeta ?? []).map(\.method)
     }
 
+    /// Each `session/list` request that the agent got, in arrival order.
+    var listRequests: [ListSessionsRequest] {
+        builtAgents.elements.last?.listRequests ?? []
+    }
+
+    /// Each `session/delete` request that the agent got, in arrival order.
+    var deleteRequests: [DeleteSessionRequest] {
+        builtAgents.elements.last?.deleteRequests ?? []
+    }
+
     /// Connects a model to the stub agent that `makeAgent` builds.
     ///
     /// - Parameters:

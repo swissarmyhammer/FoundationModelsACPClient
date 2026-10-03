@@ -266,13 +266,29 @@ comments:
     - evidence: One local commit with the review finding fix. The resume replay tests now name the request numbers. Tests were green before the commit.
     - next: review
   timestamp: 2026-10-03T21:35:37.114004+00:00
+- actor: claude-code
+  id: 01m41v97mc57j9wd67a55rjsqn
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 51e90c8). 2 files reviewed, 2 `.kanban/` files excluded by `.reviewignore`. Counts: findings 0, confirmed 0, refuted 0, attempted 7, failed 0. All 5 prior findings are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-03T21:38:51.148852+00:00
+- actor: claude-code
+  id: 01m41v9fex7pynkkc8rdar99r4
+  text: |-
+    ### finish iteration 4 — clean
+    - implement: changed — 2 files (named request numbers in SessionModelStreamTests.swift, ConnectionModelSessionTests.swift)
+    - test: green — swift test 497/497, IntegrationTests 103/103
+    - commit: 51e90c8 test(model): name the request numbers in the resume replay tests
+    - review: clean — all 5 prior findings checked; task moved to done
+  timestamp: 2026-10-03T21:38:59.165111+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
 - 01M3YR107XV14K8J9F1HFGS4Y9
 - 01M3YR0RQGPVCP3RV2MCCDM82C
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ca80
 title: 'Model: ConnectionModel session factory — newSession, resumeSession, open sessions, close'
 ---
 ## What

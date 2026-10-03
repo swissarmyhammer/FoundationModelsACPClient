@@ -30,6 +30,26 @@ public final class ConnectionModel {
     /// The model of each open session, keyed by its session id.
     public private(set) var openSessions: [SessionId: SessionModel] = [:]
 
+    /// The sessions that the `session/list` pages of the last refresh gave,
+    /// in page order. ``refreshSessions(cwd:)`` replaces the list,
+    /// ``loadMoreSessions()`` appends to it, ``deleteSession(_:)`` removes
+    /// an item, and a `session_info_update` of an open session patches its
+    /// item.
+    public internal(set) var sessions: [SessionInfo] = []
+
+    /// The cursor of the next `session/list` page, or `nil` when the last
+    /// page arrived or no refresh ran.
+    var sessionListCursor: SessionListCursor?
+
+    /// The working-directory filter of the last refresh. Each load of more
+    /// sessions sends it again.
+    @ObservationIgnored var sessionListWorkingDirectory: AbsolutePath?
+
+    /// The generation of the session list. The start of each refresh and
+    /// each page that lands change it, so a page whose request started in
+    /// an earlier generation is discarded.
+    @ObservationIgnored var sessionListGeneration = 0
+
     /// The answer of the agent to the last `initialize` of the open
     /// connection, or `nil` before ``initialize(_:)`` succeeds. Each new
     /// connection sets it back to `nil`.
@@ -213,17 +233,25 @@ public final class ConnectionModel {
     /// clock of this connection. The model is not open until ``register(_:)``
     /// adds it.
     ///
+    /// The model tells this connection model each change of its
+    /// ``SessionModel/sessionInfo``, so the item of the session in
+    /// ``sessions`` shows the change.
+    ///
     /// - Parameters:
     ///   - sessionId: The id of the session.
     ///   - requestSender: The sender of the requests of the session.
     /// - Returns: The model.
     func makeSessionModel(sessionId: SessionId, requestSender: any SessionRequestSender) -> SessionModel {
-        SessionModel(
+        let model = SessionModel(
             sessionId: sessionId,
             requestSender: requestSender,
             coalescingCadence: coalescingCadence,
             clock: clock
         )
+        model.sessionInfoDidChange = { [weak self] sessionId, info in
+            self?.patchListedSession(sessionId, with: info)
+        }
+        return model
     }
 
     /// Adds a session model to ``openSessions``, keyed by its session id. A
