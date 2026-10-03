@@ -113,11 +113,27 @@ comments:
     - evidence: test(model): share SessionModel test fixtures. 8 files (SessionModelFixtures.swift new; 5 Model test files changed; task files in .kanban). Tests: swift test 393/393, IntegrationTests 103/103.
     - next: review
   timestamp: 2026-10-03T16:19:44.950517+00:00
+- actor: claude-code
+  id: 01m41971zpd9cpzckfwap5yd38
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 27cb93a). counts: 0 findings, 0 confirmed, 0 refuted (7 attempted, 0 failed, 0 skipped). 6 files reviewed; 2 .kanban files not reviewed (.reviewignore). The prior item in "Review Findings (2026-10-03 11:05)" is checked.
+    - next: none. The task is in done.
+  timestamp: 2026-10-03T16:23:05.462689+00:00
+- actor: claude-code
+  id: 01m419790xe14jyxa8gb0yqz9z
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — shared SessionModelFixtures; 6 files
+    - test: green — swift test 393/393, IntegrationTests 103/103
+    - commit: 27cb93a test(model): share SessionModel test fixtures
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T16:23:12.669043+00:00
 depends_on:
 - 01M3YRC0ERS5FADQYB965X5KJR
 - 01M3YR18MVWMMHJGQ69PFCG77P
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c080
 title: 'Model: SessionModel stream attachment, replay, missed updates, and close'
 ---
 ## What

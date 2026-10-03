@@ -109,13 +109,13 @@ extension SessionMergeEngine.Change {
     }
 
     /// The entry that this change adds or changes, or `nil` for a change of
-    /// last-value state.
+    /// last-value state and for a notice.
     private var changedEntry: FoundationModelsACP.SessionEntry? {
         switch self {
         case .entryAdded(_, let entry), .entryChanged(_, let entry):
             entry
         case .availableCommandsChanged, .configOptionsChanged, .usageChanged, .agentStateChanged,
-            .sessionInfoChanged:
+            .sessionInfoChanged, .notice:
             nil
         }
     }
@@ -132,7 +132,7 @@ extension SessionMergeEngine.Change {
         case .entryChanged(let index, _):
             .entryChanged(index: index, entry: entry)
         case .availableCommandsChanged, .configOptionsChanged, .usageChanged, .agentStateChanged,
-            .sessionInfoChanged:
+            .sessionInfoChanged, .notice:
             self
         }
     }

@@ -59,6 +59,9 @@ public enum TranscriptEntry: Identifiable, Sendable {
     /// A session update that this revision of the schema does not know.
     case unknown(UnknownEntry)
 
+    /// **UNSTABLE** A context compaction. It changes no earlier entry.
+    case compaction(CompactionEntry)
+
     /// An error that the client shows in the transcript.
     case error(ErrorEntry)
 
@@ -92,6 +95,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .terminal(let entry): entry.id
         case .plan(let entry): entry.id
         case .unknown(let entry): entry.id
+        case .compaction(let entry): entry.id
         case .error(let entry): entry.id
         }
     }
@@ -110,6 +114,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .terminal: self = .terminal(TerminalEntry(wire: entry))
         case .plan: self = .plan(PlanTranscriptEntry(wire: entry))
         case .unknown: self = .unknown(UnknownEntry(wire: entry))
+        case .compaction(let compaction): self = .compaction(CompactionEntry(wire: entry, compaction: compaction))
         }
     }
 
@@ -131,6 +136,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .terminal(let object): object.update(from: entry)
         case .plan(let object): object.update(from: entry)
         case .unknown(let object): object.update(from: entry)
+        case .compaction(let object): object.update(from: entry)
         case .error(let object): object.recordKindMismatch()
         }
     }

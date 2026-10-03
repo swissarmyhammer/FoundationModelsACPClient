@@ -71,6 +71,60 @@ enum SessionModelFixtures {
     static func permissionRequest(title: String = "Run the tool?") -> RequestPermissionRequest {
         RequestPermissionRequest(options: [allowOption, rejectOption], sessionId: testSession, title: title)
     }
+
+    // MARK: - Unstable updates
+
+    /// The compaction id that the compaction tests use.
+    static let compactionId = Unstable.CompactionId(rawValue: "compaction-1")
+
+    /// Makes a `compaction_update` for the test compaction, as the stable
+    /// update that carries it on the wire.
+    ///
+    /// - Parameters:
+    ///   - status: The status of the compaction.
+    ///   - summary: The `summary` field of the update.
+    ///   - error: The `error` field of the update.
+    /// - Returns: The update.
+    /// - Throws: `EncodingError` when the payload does not encode.
+    static func compactionUpdate(
+        _ status: Unstable.CompactionStatus,
+        summary: PatchField<[ContentBlock]> = .unchanged,
+        error: PatchField<String> = .unchanged
+    ) throws -> SessionUpdate {
+        let update = Unstable.CompactionUpdate(compactionId: compactionId, status: status, error: error, summary: summary)
+        return try SessionUpdate(.compactionUpdate(update))
+    }
+
+    /// Makes a `compaction_summary_chunk` for the test compaction, as the
+    /// stable update that carries it on the wire.
+    ///
+    /// - Parameter text: The text of the summary block.
+    /// - Returns: The update.
+    /// - Throws: `EncodingError` when the payload does not encode.
+    static func compactionChunk(_ text: String) throws -> SessionUpdate {
+        let chunk = Unstable.CompactionSummaryChunk(compactionId: compactionId, content: textBlock(text))
+        return try SessionUpdate(.compactionSummaryChunk(chunk))
+    }
+
+    /// Makes a `notice`, as the stable update that carries it on the wire.
+    ///
+    /// - Parameter notice: The notice.
+    /// - Returns: The update.
+    /// - Throws: `EncodingError` when the payload does not encode.
+    static func noticeUpdate(_ notice: Unstable.Notice) throws -> SessionUpdate {
+        try SessionUpdate(.notice(notice))
+    }
+}
+
+extension SessionModel {
+    /// Gives each update to ``SessionModel/apply(_:)``, in order.
+    ///
+    /// - Parameter updates: The updates to apply.
+    func applyEach(_ updates: [SessionUpdate]) {
+        for update in updates {
+            apply(update)
+        }
+    }
 }
 
 extension [ContentBlock] {

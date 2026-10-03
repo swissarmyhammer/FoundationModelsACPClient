@@ -62,14 +62,16 @@ extension SessionModel {
     /// Marks the start of a `session/resume` request.
     ///
     /// Call this before the request goes out, with the `replayFrom` cursor of
-    /// the request. When the request asks for a replay and the model already
-    /// has a transcript, the model first clears its transcript and its
-    /// last-value state, because a replayed chunk appends again and would
-    /// double the text.
+    /// the request. The model clears ``notices``, because a notice is a live
+    /// event of the earlier attachment and no replay gives it again. When the
+    /// request asks for a replay and the model already has a transcript, the
+    /// model also clears its transcript and its last-value state, because a
+    /// replayed chunk appends again and would double the text.
     ///
     /// - Parameter replayFrom: The `replayFrom` field of the request that the
     ///   client sends, or `nil` for no replay.
     func beginReplay(replayFrom: ReplayFrom?) {
+        clearNotices()
         if replayFrom != nil, !transcript.isEmpty {
             flushPendingChunks()
             resetTranscript()
@@ -103,15 +105,16 @@ extension SessionModel {
     /// Closes the model.
     ///
     /// The model folds the buffered chunks, stops the task of the
-    /// subscription, ends each ``updateTap()`` stream, and cancels each
-    /// pending permission request and elicitation. After the close,
-    /// ``apply(_:)`` changes nothing.
+    /// subscription, ends each ``updateTap()`` stream, cancels each pending
+    /// permission request and elicitation, and clears ``notices``. After the
+    /// close, ``apply(_:)`` changes nothing.
     func markClosed() {
         flushPendingChunks()
         streamTask?.cancel()
         streamTask = nil
         finishUpdateTaps()
         cancelAllPending()
+        clearNotices()
         isClosed = true
     }
 }

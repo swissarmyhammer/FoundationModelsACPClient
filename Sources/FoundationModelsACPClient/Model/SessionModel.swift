@@ -22,6 +22,13 @@ import Observation
 /// block stays raw in the content of its message. The model keeps no rule of
 /// its own, so no update is dropped.
 ///
+/// **UNSTABLE:** A `compaction_update` adds one ``CompactionEntry`` at the
+/// end of the transcript, and later updates and summary chunks change only
+/// that entry. A compaction changes only the model context of the agent, so
+/// no earlier entry changes. A `notice` goes into ``notices`` and never into
+/// ``transcript``: it is a live event, so the start of a resume and the close
+/// clear the list.
+///
 /// The model also holds the pending permission requests and the pending
 /// session-scoped elicitations of the session, as ``pendingPermissions`` and
 /// ``pendingElicitations``.
@@ -72,6 +79,12 @@ public final class SessionModel {
     /// The session information, folded as a patch. A field that no update
     /// gave stays `.unchanged`.
     public private(set) var sessionInfo = SessionInfoUpdate()
+
+    /// **UNSTABLE** The notices that the agent sent for the user and that
+    /// the user did not dismiss, in arrival order. A notice is transient: it
+    /// is never in ``transcript``, no replay gives it again, and the start of
+    /// a resume and the close clear the list.
+    public private(set) var notices: [SessionNotice] = []
 
     /// Whether the connection discarded updates of this session before the
     /// model subscribed. When this value is `true`, the transcript can lack
@@ -128,6 +141,10 @@ public final class SessionModel {
     /// The clock that schedules the coalesced flushes.
     @ObservationIgnored private let clock: any Clock<Duration>
 
+    /// Gives the time on ``clock`` from the creation of the model to the
+    /// call. A notice records it as its arrival time.
+    @ObservationIgnored private let elapsedTime: @Sendable () -> Duration
+
     /// The chunk buffer. A buffered chunk causes no observation; the flush
     /// folds the whole buffer through ``fold(_:)``, and each other update
     /// folds at once. Each closure holds the model weakly, so the coalescer
@@ -168,8 +185,9 @@ public final class SessionModel {
     ///     connection model gives the real sender; tests give a fake.
     ///   - coalescingCadence: The cadence between coalesced flushes of the
     ///     chunk buffer. `.zero` applies each chunk at once.
-    ///   - clock: The clock that schedules the coalesced flushes. Tests give
-    ///     a manual clock, so they do not read the wall clock.
+    ///   - clock: The clock that schedules the coalesced flushes and gives
+    ///     the arrival time of each notice. Tests give a manual clock, so
+    ///     they do not read the wall clock.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
@@ -180,6 +198,19 @@ public final class SessionModel {
         self.requestSender = requestSender
         self.coalescingCadence = coalescingCadence
         self.clock = clock
+        self.elapsedTime = Self.makeElapsedTime(on: clock)
+    }
+
+    /// Makes a function that gives the time on a clock from now to the call.
+    ///
+    /// The generic parameter opens the existential clock, so the function
+    /// can subtract two instants of the same clock type.
+    ///
+    /// - Parameter clock: The clock to read.
+    /// - Returns: The function that gives the elapsed time.
+    private static func makeElapsedTime<SomeClock: Clock<Duration>>(on clock: SomeClock) -> @Sendable () -> Duration {
+        let start = clock.now
+        return { start.duration(to: clock.now) }
     }
 
     deinit {
@@ -282,6 +313,7 @@ public final class SessionModel {
         case .usageChanged(let report): usage = report
         case .agentStateChanged(let state): agentState = state
         case .sessionInfoChanged(let info): sessionInfo = info
+        case .notice(let notice): notices.append(SessionNotice(notice: notice, arrivalTime: elapsedTime()))
         }
     }
 
@@ -352,6 +384,22 @@ public final class SessionModel {
             message,
             metadata: [ACPClientTelemetry.LogMetadataKey.sessionID: "\(sessionId.rawValue)"]
         )
+    }
+
+    // MARK: - Notices
+
+    /// Removes one notice from ``notices``, for example when the user closes
+    /// it. A call with an unknown or already dismissed id changes nothing.
+    ///
+    /// - Parameter id: The id of the notice.
+    public func dismissNotice(_ id: SessionNotice.ID) {
+        notices.removeAll { $0.id == id }
+    }
+
+    /// Removes each notice. A notice is a live event of one connection, so
+    /// the start of a resume and the close call this.
+    func clearNotices() {
+        notices.removeAll()
     }
 
     // MARK: - Prompt links

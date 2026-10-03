@@ -44,6 +44,11 @@ extension TranscriptEntry {
         if case .unknown(let object) = self { object } else { nil }
     }
 
+    /// The compaction object, or `nil` for another kind.
+    var compaction: CompactionEntry? {
+        if case .compaction(let object) = self { object } else { nil }
+    }
+
     /// The error object, or `nil` for another kind.
     var error: ErrorEntry? {
         if case .error(let object) = self { object } else { nil }

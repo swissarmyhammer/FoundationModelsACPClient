@@ -11,12 +11,13 @@ import Testing
 
 extension SessionMergeEngine.Change {
     /// The entry that this change added or changed, or `nil` for a change of
-    /// a last-value field.
+    /// a last-value field and for a notice.
     fileprivate var entry: FoundationModelsACP.SessionEntry? {
         switch self {
         case .entryAdded(_, let entry), .entryChanged(_, let entry):
             entry
-        case .availableCommandsChanged, .configOptionsChanged, .usageChanged, .agentStateChanged, .sessionInfoChanged:
+        case .availableCommandsChanged, .configOptionsChanged, .usageChanged, .agentStateChanged, .sessionInfoChanged,
+            .notice:
             nil
         }
     }
