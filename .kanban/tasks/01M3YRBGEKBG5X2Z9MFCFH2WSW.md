@@ -48,11 +48,27 @@ comments:
     - evidence: subject "feat(model): route permission and elicitation requests through ModelClient". Local commit. Not pushed. The sha is in the step block of the commit agent.
     - next: review
   timestamp: 2026-10-03T17:44:06.119465+00:00
+- actor: claude-code
+  id: 01m41e1kz8kep1tzqpwqb1xmwd
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (c983c6d); 5 files reviewed, 4 .kanban files not reviewed (.reviewignore); 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed.
+    - next: none. The task is in done.
+  timestamp: 2026-10-03T17:47:30.152899+00:00
+- actor: claude-code
+  id: 01m41e1tgx3gdqjax2eke28v49
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files (ModelClient.swift, ConnectionModel.swift, ConnectionModel+Elicitation.swift, PendingElicitation.swift, ModelClientTests.swift)
+    - test: green — swift test 451/451, IntegrationTests 103/103
+    - commit: c983c6d feat(model): route permission and elicitation requests through ModelClient
+    - review: clean — task moved to done
+  timestamp: 2026-10-03T17:47:36.861723+00:00
 depends_on:
 - 01M3YR1M92146TWJC24JGE1QVF
 - 01M3YR18MVWMMHJGQ69PFCG77P
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: c480
 title: 'Model: ModelClient routes permission and elicitation requests to the models, with fallbacks'
 ---
 ## What

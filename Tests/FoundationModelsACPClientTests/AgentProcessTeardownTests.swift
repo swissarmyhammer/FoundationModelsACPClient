@@ -11,11 +11,16 @@ import Testing
 // this test runner. Each test here spawns such a child, records it in an
 // `AgentProcessState` over a private registry, and runs the teardown.
 //
-// The children are the `StdioChild` commands, `/bin/cat` and `/bin/sleep`,
-// and not an ACP agent. The tests that spawn a real foreign agent over stdio
-// live in the nested `IntegrationTests` package.
+// The children are the `StdioChild` commands, `/bin/cat`, `/bin/sleep` and a
+// `/bin/sh` script, and not an ACP agent. The tests that spawn a real foreign
+// agent over stdio live in the nested `IntegrationTests` package.
 
-/// The time limits the teardown tests use.
+/// The time limits of the test whose child never exits.
+///
+/// The tests whose child exits do not use these limits. Their teardown waits
+/// for the exit of the child, and ``AgentProcessState/defaultReapTimeLimit``
+/// is only the bound that shows a hang. A short limit there is a guess of how
+/// fast the child exits, and a loaded machine makes that guess wrong.
 private enum TeardownTestDeadline {
     /// The number of milliseconds in ``reapTimeLimit``.
     private static let reapTimeLimitMilliseconds = 200
@@ -23,7 +28,8 @@ private enum TeardownTestDeadline {
     /// The number of seconds in ``slack``.
     private static let slackSeconds = 2
 
-    /// The longest time the teardown under test waits for the reap.
+    /// The longest time the teardown under test waits for a child that never
+    /// exits. The teardown waits all of it.
     static let reapTimeLimit: Duration = .milliseconds(reapTimeLimitMilliseconds)
 
     /// The extra time a teardown may take after ``reapTimeLimit`` before the
@@ -73,11 +79,21 @@ private func spawnInThisProcessGroup(
     posix_spawn_file_actions_addclose(&fileActions, readEnd)
     posix_spawn_file_actions_addclose(&fileActions, writeEnd)
 
+    // The flag above cannot close a race: a parallel test can open its pipe
+    // and spawn its child before it sets `FD_CLOEXEC`, and between those two
+    // calls this spawn gets a copy of that pipe. `POSIX_SPAWN_CLOEXEC_DEFAULT`
+    // closes every descriptor the file actions do not name, so the child of
+    // this spawn holds its own stdin and no descriptor of a parallel test.
+    var attributes: posix_spawnattr_t?
+    posix_spawnattr_init(&attributes)
+    defer { posix_spawnattr_destroy(&attributes) }
+    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT))
+
     let argv: [UnsafeMutablePointer<CChar>?] = ([command] + arguments).map { strdup($0) } + [nil]
     defer { for case let pointer? in argv { free(pointer) } }
 
     var pid: pid_t = 0
-    let spawnResult = posix_spawn(&pid, command, &fileActions, nil, argv, environ)
+    let spawnResult = posix_spawn(&pid, command, &fileActions, &attributes, argv, environ)
     close(readEnd)
     if spawnResult != 0 {
         close(writeEnd)
@@ -97,6 +113,31 @@ private func killAndReap(pid: pid_t) {
     _ = waitpid(pid, &status, 0)
 }
 
+/// Records `child` in an `AgentProcessState` with the production reap time
+/// limit, runs the teardown, and expects that the teardown reaped the child.
+///
+/// The teardown ends its wait on an event: the child exits, and `waitpid`
+/// collects it. The production limit is only the bound that shows a hang, so
+/// the result does not depend on how fast a loaded machine runs the child.
+///
+/// - Parameters:
+///   - child: A child that exits once its stdin closes.
+///   - sourceLocation: The location of the test that calls this helper.
+private func expectTeardownReaps(
+    _ child: GroupMemberChild, sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let registry = ProcessRegistry()
+    let state = AgentProcessState(registry: registry)
+    state.record(pid: child.pid, stdinWriteDescriptor: child.stdinWriteDescriptor)
+
+    let elapsed = ContinuousClock().measure { state.terminateCurrent() }
+
+    #expect(elapsed < AgentProcessState.defaultReapTimeLimit, sourceLocation: sourceLocation)
+    #expect(state.pid == nil, sourceLocation: sourceLocation)
+    #expect(registry.registeredPids.isEmpty, sourceLocation: sourceLocation)
+    #expect(!StdioChild.isInProcessTable(pid: child.pid), sourceLocation: sourceLocation)
+}
+
 /// The teardown scenarios in which the group kill reaches nothing.
 ///
 /// A teardown that blocks forever fails the time limit rather than hanging
@@ -114,18 +155,20 @@ struct AgentProcessTeardownTests {
         #expect(signalResult == -1)
         #expect(signalError == ESRCH)
 
-        let registry = ProcessRegistry()
-        let state = AgentProcessState(
-            registry: registry, reapTimeLimit: TeardownTestDeadline.reapTimeLimit
+        expectTeardownReaps(child)
+    }
+
+    /// A child can exit late after the teardown closes its stdin: a loaded
+    /// machine schedules it late, or a parallel spawn holds a copy of the
+    /// write end for a short time. The teardown must wait for the exit of
+    /// the child, and not for a guess of how fast the exit comes.
+    @Test func teardownReapsAnAgentThatExitsLateAfterItsStdinCloses() throws {
+        let child = try spawnInThisProcessGroup(
+            command: StdioChild.slowReadingCommand, arguments: StdioChild.slowReadingScript
         )
-        state.record(pid: child.pid, stdinWriteDescriptor: child.stdinWriteDescriptor)
+        defer { killAndReap(pid: child.pid) }
 
-        let elapsed = ContinuousClock().measure { state.terminateCurrent() }
-
-        #expect(elapsed < TeardownTestDeadline.reapTimeLimit + TeardownTestDeadline.slack)
-        #expect(state.pid == nil)
-        #expect(registry.registeredPids.isEmpty)
-        #expect(!StdioChild.isInProcessTable(pid: child.pid))
+        expectTeardownReaps(child)
     }
 
     /// A child that ignores its stdin outlives the teardown. The teardown must
