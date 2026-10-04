@@ -158,12 +158,28 @@ comments:
     - scope: Sources, Tests, IntegrationTests, README.md, plan.md and .kanban. Nothing under .build.
     - next: Review. The task did not move. Tests were green before this commit.
   timestamp: 2026-10-04T13:35:18.612897+00:00
+- actor: claude-code
+  id: 01m43jbk65s70z0efrwtkncwv5
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit a65af8a): 30 files reviewed, counts findings 0, confirmed 0, refuted 0. README.md and plan.md: no validator matches. The engine rule `code-hygiene/dead-code-swift` failed, because it writes to the damaged `.build` folder. I ran the same rule script by hand with `swift build --build-tests --scratch-path <scratchpad>/build` (build complete, only the accepted MLX "missing creator" warning) and `periphery scan --skip-build --index-store-path <scratchpad>/build/out`, with the test target `Tests/FoundationModelsACPClientTests` excluded as the rule does. The only results in product code are the three unused-module results in `Sources/FoundationModelsACPClient/Telemetry/ACPClientTelemetry.swift`. Commit a65af8a does not change that file, so these results are not on a changed line and are not findings of this diff review. The other `disallowed-constructs`, `function-length`, `idioms`, `magic-numbers` and `missing-docs` notes are about deleted files only. `.build` was not touched.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-04T13:41:20.197960+00:00
+- actor: claude-code
+  id: 01m43jbyk10f2er5m768fqzt9s
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 36 files (5 Sources and 7 Tests deleted, 21 new coverage tests, README.md, plan.md)
+    - test: green — swift test 485/485, IntegrationTests 103/103, no SessionUpdateAggregator / updates(for:) use and no deprecation warning (with --scratch-path)
+    - commit: a65af8a refactor!: remove ACPSessionState, SessionEntry and SwiftUIACPClient
+    - review: clean — task moved to done
+  timestamp: 2026-10-04T13:41:31.873571+00:00
 depends_on:
 - 01M3YRF6NEW4C85GZ34DENNHYK
 - 01M3YR27ERN3DKRHMA1C5TYWBR
 - 01M3YR6VEEG5QGMKHKQ7JPV3JX
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: d080
 title: Remove ACPSessionState, SessionEntry, and SwiftUIACPClient; update the docs
 ---
 ## What
