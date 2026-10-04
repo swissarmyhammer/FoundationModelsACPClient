@@ -5,6 +5,10 @@ import FoundationModelsACP
 // an open session. Each method makes, registers, or closes the `SessionModel`
 // of the session, so a host never subscribes to the updates of a session
 // itself.
+//
+// Each request goes out in a client request span, through
+// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
+// and the W3C trace context in the `_meta` of the request.
 
 extension ConnectionModel {
     // MARK: - New session
@@ -33,7 +37,7 @@ extension ConnectionModel {
     ///   error, the model registers no session.
     public func newSession(_ request: NewSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
-        let response = try await connection.newSession(request)
+        let response = try await ClientRequestSpan.send(request) { try await connection.newSession($0) }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         try register(session, openedOver: connection)
@@ -142,7 +146,7 @@ extension ConnectionModel {
         defer { resumeStarts.cancel() }
         let response: ResumeSessionResponse
         do {
-            response = try await connection.resumeSession(request)
+            response = try await ClientRequestSpan.send(request) { try await connection.resumeSession($0) }
         } catch {
             await endReplay(of: session, afterFailure: error)
             throw error
@@ -263,7 +267,10 @@ extension ConnectionModel {
     ///   connection is open, or the error of the agent or of the connection.
     public func close(_ session: SessionModel) async throws {
         try requireCapability(canCloseSessions, method: ClientRequestSpan.Method.closeSession)
-        _ = try await openConnection().closeSession(CloseSessionRequest(sessionId: session.sessionId))
+        let connection = try openConnection()
+        _ = try await ClientRequestSpan.send(CloseSessionRequest(sessionId: session.sessionId)) {
+            try await connection.closeSession($0)
+        }
         unregister(session.sessionId)
         session.markClosed()
     }

@@ -53,30 +53,6 @@ private let requestMethodsWithSessionID = [
     ClientRequestSpan.Method.closeSession,
 ]
 
-/// Gives the finished request spans of one ACP method.
-///
-/// - Parameters:
-///   - method: The ACP method.
-///   - context: The capture that holds the spans.
-/// - Returns: Each finished span whose name is the request span name and whose
-///   method attribute is `method`.
-private func requestSpans(of method: String, in context: TelemetryCapture.Context) -> [FinishedInMemorySpan] {
-    context.spans.filter { span in
-        span.operationName == ACPClientTelemetry.SpanName.request
-            && span.attributes.get(ACPClientTelemetry.AttributeKey.rpcMethod) == .string(method)
-    }
-}
-
-/// Reads the ids of the `traceparent` in one `_meta` value.
-///
-/// - Parameter meta: The `_meta` that the agent got.
-/// - Returns: The ids of the span that the `traceparent` names.
-/// - Throws: An issue when `meta` holds no valid `traceparent`.
-private func traceparentIdentity(in meta: JSONValue?) throws -> SpanIdentity {
-    let traceContext = try #require(TraceContextMeta.extract(from: meta), "The _meta holds no traceparent: \(String(describing: meta))")
-    return try #require(SpanIdentity(traceparent: traceContext.traceparent))
-}
-
 @Suite("client request span")
 struct ClientRequestSpanTests {
     /// Each request of one whole session gives exactly one finished span of
@@ -89,7 +65,7 @@ struct ClientRequestSpanTests {
             await harness.teardown()
 
             for method in sessionRequestMethods {
-                let spans = requestSpans(of: method, in: context)
+                let spans = context.requestSpans(of: method)
                 #expect(spans.count == 1, "\(method) gave \(spans.count) spans.")
                 #expect(spans.first?.kind == .client, "The span of \(method) is not of kind client.")
             }
@@ -105,7 +81,7 @@ struct ClientRequestSpanTests {
             await harness.teardown()
 
             for method in requestMethodsWithSessionID {
-                let span = try #require(requestSpans(of: method, in: context).first)
+                let span = try #require(context.requestSpans(of: method).first)
                 #expect(
                     span.attributes.get(ACPClientTelemetry.AttributeKey.sessionID) == .string(testSession.rawValue),
                     "The span of \(method) has no session id."
@@ -125,9 +101,9 @@ struct ClientRequestSpanTests {
             await harness.teardown()
 
             for method in sessionRequestMethods {
-                let span = try #require(requestSpans(of: method, in: context).first)
+                let span = try #require(context.requestSpans(of: method).first)
                 let meta = try #require(harness.receivedMeta(of: method).first, "The agent got no \(method).")
-                let identity = try traceparentIdentity(in: meta)
+                let identity = try RequestTelemetry.traceparentIdentity(in: meta)
                 #expect(identity.traceID == span.traceID, "The traceparent of \(method) names another trace.")
                 #expect(identity.spanID == span.spanID, "The traceparent of \(method) names another span.")
             }
@@ -175,15 +151,15 @@ struct ClientRequestSpanTests {
             harness.interrupt(.cancelTurn)
             #expect(try await turn.value == .stopped(.cancelled))
             #expect(
-                await eventually { !requestSpans(of: ClientRequestSpan.Method.cancelSession, in: context).isEmpty },
+                await eventually { !context.requestSpans(of: ClientRequestSpan.Method.cancelSession).isEmpty },
                 "The session/cancel span never ended."
             )
             await harness.teardown()
 
-            let promptSpan = try #require(requestSpans(of: ClientRequestSpan.Method.prompt, in: context).first)
-            let cancelSpan = try #require(requestSpans(of: ClientRequestSpan.Method.cancelSession, in: context).first)
+            let promptSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.prompt).first)
+            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
             let meta = try #require(harness.receivedMeta(of: ClientRequestSpan.Method.cancelSession).first)
-            let identity = try traceparentIdentity(in: meta)
+            let identity = try RequestTelemetry.traceparentIdentity(in: meta)
             #expect(identity.traceID == promptSpan.traceID)
             #expect(identity.spanID == cancelSpan.spanID)
             #expect(cancelSpan.parentSpanID == promptSpan.spanID)
@@ -202,7 +178,7 @@ struct ClientRequestSpanTests {
             await harness.session.closeSession(testSession)
             await harness.teardown()
 
-            let span = try #require(requestSpans(of: ClientRequestSpan.Method.closeSession, in: context).first)
+            let span = try #require(context.requestSpans(of: ClientRequestSpan.Method.closeSession).first)
             #expect(span.status?.code == .error)
             #expect(
                 span.attributes.get(ACPClientTelemetry.AttributeKey.errorCode)
@@ -221,7 +197,7 @@ struct ClientRequestSpanTests {
             _ = try await harness.session.initialize()
             await harness.teardown()
 
-            let span = try #require(requestSpans(of: ClientRequestSpan.Method.initialize, in: context).first)
+            let span = try #require(context.requestSpans(of: ClientRequestSpan.Method.initialize).first)
             #expect(span.status?.code != .error)
             #expect(span.attributes.get(ACPClientTelemetry.AttributeKey.errorCode) == nil)
         }
@@ -244,7 +220,7 @@ struct ClientRequestSpanTests {
                 meta
             }
 
-            let span = try #require(requestSpans(of: ClientRequestSpan.Method.prompt, in: context).first)
+            let span = try #require(context.requestSpans(of: ClientRequestSpan.Method.prompt).first)
             let identity = try #require(SpanIdentity(traceID: span.traceID, spanID: span.spanID))
             #expect(
                 sent == .object([

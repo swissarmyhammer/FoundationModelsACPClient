@@ -192,15 +192,15 @@ struct ConnectionModelInitializeTests {
     @Test func aMissingCapabilityThrowsUnsupported() {
         let model = ConnectionModel()
 
-        #expect(throws: ConnectionModelError.unsupported(method: ConnectionModel.WireMethod.logout)) {
-            try model.requireCapability(false, method: ConnectionModel.WireMethod.logout)
+        #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
+            try model.requireCapability(false, method: ClientRequestSpan.Method.logout)
         }
     }
 
     @Test func aPresentCapabilityThrowsNothing() throws {
         let model = ConnectionModel()
 
-        try model.requireCapability(true, method: ConnectionModel.WireMethod.logout)
+        try model.requireCapability(true, method: ClientRequestSpan.Method.logout)
     }
 
     // MARK: - Auth state
@@ -228,7 +228,7 @@ struct ConnectionModelInitializeTests {
         try await connected.model.login(InitializeFixtures.login)
 
         #expect(connected.model.authState == .authenticated(InitializeFixtures.agentMethodId))
-        #expect(connected.receivedMethods.contains(ConnectionModel.WireMethod.login))
+        #expect(connected.receivedMethods.contains(ClientRequestSpan.Method.login))
     }
 
     @Test func aRefusedLoginFailsWithTheErrorOfTheAgent() async throws {
@@ -253,14 +253,14 @@ struct ConnectionModelInitializeTests {
         try await connected.model.logout(LogoutAuthRequest())
 
         #expect(connected.model.authState == .required([InitializeFixtures.agentMethod]))
-        #expect(connected.receivedMethods.contains(ConnectionModel.WireMethod.logout))
+        #expect(connected.receivedMethods.contains(ClientRequestSpan.Method.logout))
     }
 
     @Test func aLogoutWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = await ConnectedModel()
         try await connected.initialize()
 
-        await #expect(throws: ConnectionModelError.unsupported(method: ConnectionModel.WireMethod.logout)) {
+        await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
             try await connected.model.logout(LogoutAuthRequest())
         }
         // A second initialize makes a round trip after the refused logout, so

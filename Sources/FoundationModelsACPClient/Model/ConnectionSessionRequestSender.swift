@@ -5,19 +5,36 @@ import FoundationModelsACP
 /// ``ConnectionModel`` gives this sender to each session model that it makes,
 /// so the prompt, the cancel, and the configuration change of the model go to
 /// the agent over the connection that opened the session.
+///
+/// Each request goes out in a client request span, through
+/// ``ClientRequestSpan/send(_:parent:through:)``: the span, the request
+/// metrics, and the W3C trace context in the `_meta` of the request. The
+/// `_meta` that the caller gives stays, and the trace context is added to it.
 struct ConnectionSessionRequestSender: SessionRequestSender {
     /// The connection that carries the requests.
     let connection: ClientSideConnection
 
     func prompt(_ request: PromptRequest) async throws -> PromptResponse {
-        try await connection.prompt(request)
+        try await ClientRequestSpan.send(request) { try await connection.prompt($0) }
     }
 
+    /// Sends the `session/cancel` notification in a client request span.
+    ///
+    /// When the `_meta` of the notification holds a W3C `traceparent`, for
+    /// example the `_meta` of the `session/prompt` of the turn, the span is a
+    /// child of the span that the `traceparent` names. The cancel then joins
+    /// the trace of the turn, also when it runs on another task.
+    ///
+    /// - Parameter notification: The cancel notification.
+    /// - Throws: `ConnectionError` after a disconnect.
     func cancel(_ notification: CancelSessionNotification) async throws {
-        try await connection.sessionCancel(notification)
+        try await ClientRequestSpan.send(
+            notification,
+            parent: ClientRequestSpan.ParentContext(extractingFrom: notification.meta)
+        ) { try await connection.sessionCancel($0) }
     }
 
     func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws {
-        _ = try await connection.setSessionConfigOption(request)
+        _ = try await ClientRequestSpan.send(request) { try await connection.setSessionConfigOption($0) }
     }
 }

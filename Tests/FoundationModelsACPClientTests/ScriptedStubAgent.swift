@@ -94,10 +94,6 @@ import Synchronization
 /// answer, when the test opens that step's gate. `TurnRunnerTests` uses it to
 /// prove that the turn outlives the acknowledgement.
 final class ScriptedStubAgent: Agent {
-    /// The ACP wire method of the set-config-option request, as the stub
-    /// records it.
-    static let setConfigOptionMethod = "session/set_config_option"
-
     /// The connection back to the client.
     private let connection: AgentSideConnection
 
@@ -128,6 +124,15 @@ final class ScriptedStubAgent: Agent {
     /// arrival order.
     var receivedMeta: [ReceivedMeta] {
         receivedMetaRecord.elements
+    }
+
+    /// Gives the `_meta` that this stub got for one method.
+    ///
+    /// - Parameter method: The ACP method.
+    /// - Returns: The `_meta` of each message of that method, in arrival
+    ///   order.
+    func receivedMeta(of method: String) -> [JSONValue?] {
+        receivedMeta.filter { $0.method == method }.map(\.meta)
     }
 
     /// The updates to send, in order, when a prompt arrives.
@@ -282,7 +287,7 @@ final class ScriptedStubAgent: Agent {
         elicitation: CreateElicitationRequest? = nil,
         permissionRequest: RequestPermissionRequest? = nil,
         promptError: RequestError? = nil,
-        closeSessionError: RequestError? = .methodNotFound("session/close"),
+        closeSessionError: RequestError? = .methodNotFound(ClientRequestSpan.Method.closeSession),
         newSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
         resumeSessionScript: [SessionUpdate] = [],
@@ -332,7 +337,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func loginAuth(_ params: LoginAuthRequest) async throws -> LoginAuthResponse {
-        record(params.meta, of: ConnectionModel.WireMethod.login)
+        record(params.meta, of: ClientRequestSpan.Method.login)
         await loginGate?.wait()
         if let loginError {
             throw loginError
@@ -341,7 +346,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func logoutAuth(_ params: LogoutAuthRequest) async throws -> LogoutAuthResponse {
-        record(params.meta, of: ConnectionModel.WireMethod.logout)
+        record(params.meta, of: ClientRequestSpan.Method.logout)
         return LogoutAuthResponse()
     }
 
@@ -356,7 +361,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        record(params.meta, of: ConnectionModel.WireMethod.listSessions)
+        record(params.meta, of: ClientRequestSpan.Method.listSessions)
         listRequestRecord.append(params)
         await sessionListGates[params.cursor]?.wait()
         guard let page = sessionListPages[params.cursor] else {
@@ -366,7 +371,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
-        record(params.meta, of: ConnectionModel.WireMethod.deleteSession)
+        record(params.meta, of: ClientRequestSpan.Method.deleteSession)
         deleteRequestRecord.append(params)
         return DeleteSessionResponse()
     }
@@ -392,7 +397,7 @@ final class ScriptedStubAgent: Agent {
     }
 
     func setSessionConfigOption(_ params: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse {
-        record(params.meta, of: Self.setConfigOptionMethod)
+        record(params.meta, of: ClientRequestSpan.Method.setConfigOption)
         return SetSessionConfigOptionResponse(configOptions: [])
     }
 

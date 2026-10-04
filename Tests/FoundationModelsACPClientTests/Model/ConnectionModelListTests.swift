@@ -54,10 +54,10 @@ private enum SessionListFixtures {
     static let titleClear = SessionUpdate.sessionInfoUpdate(SessionInfoUpdate(title: .cleared))
 
     /// The error of a list that the agent does not advertise.
-    static let listUnsupported = ConnectionModelError.unsupported(method: ConnectionModel.WireMethod.listSessions)
+    static let listUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.listSessions)
 
     /// The error of a delete that the agent does not advertise.
-    static let deleteUnsupported = ConnectionModelError.unsupported(method: ConnectionModel.WireMethod.deleteSession)
+    static let deleteUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.deleteSession)
 
     /// The number of list requests that a refresh and one load of more
     /// sessions send.
@@ -66,7 +66,7 @@ private enum SessionListFixtures {
     /// The methods that a delete of an open session sends, in order.
     static let closeThenDelete = [
         ClientRequestSpan.Method.closeSession,
-        ConnectionModel.WireMethod.deleteSession,
+        ClientRequestSpan.Method.deleteSession,
     ]
 
     /// Connects a model that applies each chunk at once to a stub agent that

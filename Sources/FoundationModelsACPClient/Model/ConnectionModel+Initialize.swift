@@ -14,18 +14,12 @@ import FoundationModelsACP
 // - An `authMethods` entry that is not a `terminal` method advertises
 //   `auth/login` and `auth/logout`. The client runs a `terminal` method as a
 //   separate process and never sends it to `auth/login`.
+//
+// Each request goes out in a client request span, through
+// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
+// and the W3C trace context in the `_meta` of the request.
 
 extension ConnectionModel {
-    /// The ACP wire names of the methods that this part of the model sends
-    /// and gates.
-    enum WireMethod {
-        /// The request that logs in with an auth method.
-        static let login = "auth/login"
-
-        /// The request that logs out.
-        static let logout = "auth/logout"
-    }
-
     // MARK: - Capabilities
 
     /// The capabilities of the agent, or `nil` before ``initialize(_:)``
@@ -104,7 +98,8 @@ extension ConnectionModel {
     /// - Throws: `ConnectionError.closed` when no connection is open, or the
     ///   error of the connection.
     public func initialize(_ request: InitializeRequest) async throws -> InitializeResponse {
-        let response = try await openConnection().initialize(request)
+        let connection = try openConnection()
+        let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
         initializeResponse = response
         authState = AuthState(advertising: authMethods)
         return response
@@ -125,7 +120,7 @@ extension ConnectionModel {
     public func login(_ request: LoginAuthRequest) async throws {
         let connection = try openConnection()
         do {
-            _ = try await connection.loginAuth(request)
+            _ = try await ClientRequestSpan.send(request) { try await connection.loginAuth($0) }
         } catch let refusal as RequestError {
             authState = .failed(refusal)
             throw refusal
@@ -144,8 +139,9 @@ extension ConnectionModel {
     ///   ``canLogout`` is `false`, `ConnectionError.closed` when no connection
     ///   is open, or the error of the agent or of the connection.
     public func logout(_ request: LogoutAuthRequest) async throws {
-        try requireCapability(canLogout, method: WireMethod.logout)
-        _ = try await openConnection().logoutAuth(request)
+        try requireCapability(canLogout, method: ClientRequestSpan.Method.logout)
+        let connection = try openConnection()
+        _ = try await ClientRequestSpan.send(request) { try await connection.logoutAuth($0) }
         authState = .required(authMethods)
     }
 

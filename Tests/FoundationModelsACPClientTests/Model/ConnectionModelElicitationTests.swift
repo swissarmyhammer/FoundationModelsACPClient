@@ -77,7 +77,7 @@ private struct LoginHarness {
     /// - Returns: The wire id of the login request, or `nil` when the stream
     ///   ended first.
     private func loginRequestId() async -> RequestId? {
-        for await case .started(let id, let method) in requestEvents where method == ConnectionModel.WireMethod.login {
+        for await case .started(let id, let method) in requestEvents where method == ClientRequestSpan.Method.login {
             return id
         }
         return nil
@@ -134,7 +134,7 @@ struct ConnectionModelElicitationTests {
         let pending = try #require(harness.model.pendingElicitations.first)
         #expect(harness.model.pendingElicitations.count == 1)
         #expect(pending.requestId == requestId)
-        #expect(pending.requestMethod == ConnectionModel.WireMethod.login)
+        #expect(pending.requestMethod == ClientRequestSpan.Method.login)
         #expect(pending.sessionId == nil)
         harness.model.cancelElicitation(pending.id)
         #expect(try await call.value == ElicitationResponseWire.cancelResponse)

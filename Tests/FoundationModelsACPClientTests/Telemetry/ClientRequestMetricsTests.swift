@@ -20,14 +20,6 @@ import Testing
 // and the error code only. It never holds a session id, a prompt or error
 // message text.
 
-/// The dimension that names one ACP method.
-///
-/// - Parameter method: The ACP method.
-/// - Returns: The method, with the method attribute key as the dimension name.
-private func methodDimension(_ method: String) -> (String, String) {
-    (ACPClientTelemetry.AttributeKey.rpcMethod, method)
-}
-
 /// The dimensions of the error counter of one ACP method and one error code.
 ///
 /// - Parameters:
@@ -36,7 +28,7 @@ private func methodDimension(_ method: String) -> (String, String) {
 /// - Returns: The method and the error code, with the attribute keys as the
 ///   dimension names.
 private func errorDimensions(method: String, errorCode: String) -> [(String, String)] {
-    [methodDimension(method), (ACPClientTelemetry.AttributeKey.errorCode, errorCode)]
+    [RequestTelemetry.methodDimension(method), (ACPClientTelemetry.AttributeKey.errorCode, errorCode)]
 }
 
 /// Gives the error counters of one ACP method.
@@ -48,7 +40,7 @@ private func errorDimensions(method: String, errorCode: String) -> [(String, Str
 private func errorCounters(of method: String, in factory: TestMetrics) -> [TestCounter] {
     factory.counters.filter { counter in
         counter.label == ACPClientTelemetry.MetricName.requestErrors
-            && counter.dimensions.contains { $0 == methodDimension(method) }
+            && counter.dimensions.contains { $0 == RequestTelemetry.methodDimension(method) }
     }
 }
 
@@ -81,7 +73,7 @@ struct ClientRequestMetricsTests {
             let turn = Task { @MainActor in
                 try await harness.runner.run()
             }
-            let dimensions = [methodDimension(ClientRequestSpan.Method.prompt)]
+            let dimensions = [RequestTelemetry.methodDimension(ClientRequestSpan.Method.prompt)]
 
             // The turn ends on `idle` and cancels a prompt that is still in
             // flight. The agent sends `idle` only after the prompt answer
@@ -177,7 +169,7 @@ struct ClientRequestMetricsTests {
             )
             let requests = try factory.expectCounter(
                 ACPClientTelemetry.MetricName.requests,
-                [methodDimension(ClientRequestSpan.Method.prompt)]
+                [RequestTelemetry.methodDimension(ClientRequestSpan.Method.prompt)]
             )
             #expect(errors.totalValue == 1)
             #expect(requests.totalValue == 1)

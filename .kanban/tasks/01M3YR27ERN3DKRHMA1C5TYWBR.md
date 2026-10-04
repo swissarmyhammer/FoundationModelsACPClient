@@ -127,11 +127,28 @@ comments:
     - evidence: one local commit "refactor(model): keep one PatchField.applied for all session info patches"
     - next: review
   timestamp: 2026-10-04T12:03:16.024524+00:00
+- actor: claude-code
+  id: 01m43d165vpwqbmmewgzt070qk
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (3891a75): 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. The prior finding at `ConnectionModel+List.swift:154` is checked.
+    - note: the engine tool rule `code-hygiene/dead-code-swift` failed because `.build/checkouts` is damaged. The same rule script ran again with `--scratch-path` in the session scratchpad (`.build` not touched). Periphery reported 0 findings in the 5 changed Swift files. Its 3 findings in this package are all in `Telemetry/ACPClientTelemetry.swift`, which this commit does not change.
+    - next: none. The task moves to done.
+  timestamp: 2026-10-04T12:08:16.315954+00:00
+- actor: claude-code
+  id: 01m43d1ffkbkh13ej5m0b1sdmx
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: changed — 5 files (PatchField+Applied.swift new, ConnectionModel+List.swift, TranscriptEntry.swift, ACPSessionState.swift, PatchFieldAppliedTests.swift new)
+    - test: green — swift test 517/517, IntegrationTests 103/103 (with --scratch-path, because .build is damaged)
+    - commit: 3891a75 refactor(model): keep one PatchField.applied for all session info patches
+    - review: clean — prior finding checked; task moved to done
+  timestamp: 2026-10-04T12:08:25.843684+00:00
 depends_on:
 - 01M3YR1XW7S2KVG2ABV6NP8VDV
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: cc80
 title: 'Model: ConnectionModel session list and deleteSession'
 ---
 ## What

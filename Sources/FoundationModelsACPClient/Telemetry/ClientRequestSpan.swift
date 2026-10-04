@@ -71,8 +71,9 @@ import Tracing
 /// keeps the factory of the time that it was made, so a metric in a stored
 /// value would not see a factory that a test or a host binds later.
 public enum ClientRequestSpan {
-    /// The ACP wire method names that the `acp-client` binary sends. A host
-    /// can give each of these, or another ACP method name, as the `method` of
+    /// The ACP wire method names that the `acp-client` binary and the models
+    /// send. A host can give each of these, or another ACP method name, as
+    /// the `method` of
     /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
     public enum Method {
         /// The `initialize` request.
@@ -85,6 +86,13 @@ public enum ClientRequestSpan {
         /// its history.
         public static let resumeSession = "session/resume"
 
+        /// The request that lists the sessions of the agent, one page at a
+        /// time.
+        public static let listSessions = "session/list"
+
+        /// The request that deletes a session from the list of the agent.
+        public static let deleteSession = "session/delete"
+
         /// The request that sends one prompt.
         public static let prompt = "session/prompt"
 
@@ -93,6 +101,15 @@ public enum ClientRequestSpan {
 
         /// The notification that cancels the turn of a session.
         public static let cancelSession = "session/cancel"
+
+        /// The request that changes one configuration option of a session.
+        public static let setConfigOption = "session/set_config_option"
+
+        /// The request that logs in with an auth method.
+        public static let login = "auth/login"
+
+        /// The request that logs out.
+        public static let logout = "auth/logout"
     }
 
     /// The trace context that a request span starts in.

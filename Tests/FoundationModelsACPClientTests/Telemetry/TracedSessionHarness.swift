@@ -40,11 +40,6 @@ struct TracedSessionHarness {
     /// Where a test puts the interrupts of the running turn.
     private let interruptFeed: AsyncStream<TurnInterrupt>.Continuation
 
-    /// The `_meta` of each message that the agent got, in arrival order.
-    var receivedMeta: [ReceivedMeta] {
-        builtAgents.elements.last?.receivedMeta ?? []
-    }
-
     /// Builds the seam and the turn over a new pair and a new stub.
     ///
     /// - Parameters:
@@ -121,7 +116,7 @@ struct TracedSessionHarness {
     /// - Returns: The `_meta` of each message of that method, in arrival
     ///   order.
     func receivedMeta(of method: String) -> [JSONValue?] {
-        receivedMeta.filter { $0.method == method }.map(\.meta)
+        builtAgents.elements.last?.receivedMeta(of: method) ?? []
     }
 
     /// Sends one interrupt into the running turn, as a `Ctrl-C` does.

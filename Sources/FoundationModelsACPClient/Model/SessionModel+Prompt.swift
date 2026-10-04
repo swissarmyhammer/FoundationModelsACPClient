@@ -61,6 +61,11 @@ extension SessionModel {
     /// The agent confirms the cancellation with an idle `state_update` that
     /// has the `cancelled` stop reason, and not with this call.
     ///
+    /// When `meta` holds a W3C `traceparent`, for example the `_meta` that
+    /// the `session/prompt` of the turn sent, the `session/cancel` span is a
+    /// child of the span that the `traceparent` names, so the cancel joins
+    /// the trace of the turn.
+    ///
     /// - Parameter meta: The `_meta` field of the notification, for example
     ///   the trace parent, or `nil`.
     /// - Throws: The error of the sender: `ConnectionError` after a

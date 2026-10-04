@@ -3,14 +3,10 @@ import FoundationModelsACP
 // The session list of `ConnectionModel`: the pages of `session/list`, the
 // patch of a listed session from the `session_info_update` of its open
 // model, and `session/delete`.
-
-extension ConnectionModel.WireMethod {
-    /// The request that lists the sessions of the agent, one page at a time.
-    static let listSessions = "session/list"
-
-    /// The request that deletes a session from the list of the agent.
-    static let deleteSession = "session/delete"
-}
+//
+// Each request goes out in a client request span, through
+// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
+// and the W3C trace context in the `_meta` of the request.
 
 extension ConnectionModel {
     /// How a page of `session/list` changes ``sessions``.
@@ -47,7 +43,7 @@ extension ConnectionModel {
     ///   the agent or of the connection. On an error, ``sessions`` does not
     ///   change.
     public func refreshSessions(cwd: AbsolutePath? = nil) async throws {
-        try requireCapability(canListSessions, method: WireMethod.listSessions)
+        try requireCapability(canListSessions, method: ClientRequestSpan.Method.listSessions)
         let connection = try openConnection()
         sessionListGeneration += 1
         sessionListWorkingDirectory = cwd
@@ -69,7 +65,7 @@ extension ConnectionModel {
     ///   the agent or of the connection. On an error, ``sessions`` does not
     ///   change.
     public func loadMoreSessions() async throws {
-        try requireCapability(canListSessions, method: WireMethod.listSessions)
+        try requireCapability(canListSessions, method: ClientRequestSpan.Method.listSessions)
         guard let cursor = sessionListCursor else { return }
         let request = ListSessionsRequest(cursor: cursor, cwd: sessionListWorkingDirectory)
         try await loadSessionPage(request, over: try openConnection(), merge: .append)
@@ -89,7 +85,7 @@ extension ConnectionModel {
         merge: SessionPageMerge
     ) async throws {
         let generation = sessionListGeneration
-        let page = try await connection.listSessions(request)
+        let page = try await ClientRequestSpan.send(request) { try await connection.listSessions($0) }
         guard generation == sessionListGeneration else { return }
         sessionListGeneration += 1
         switch merge {
@@ -128,12 +124,14 @@ extension ConnectionModel {
     ///   the agent or of the connection. On an error, the item stays in
     ///   ``sessions``.
     public func deleteSession(_ sessionId: SessionId) async throws {
-        try requireCapability(canDeleteSessions, method: WireMethod.deleteSession)
+        try requireCapability(canDeleteSessions, method: ClientRequestSpan.Method.deleteSession)
         let connection = try openConnection()
         if let open = openSessions[sessionId] {
             try await close(open)
         }
-        _ = try await connection.deleteSession(DeleteSessionRequest(sessionId: sessionId))
+        _ = try await ClientRequestSpan.send(DeleteSessionRequest(sessionId: sessionId)) {
+            try await connection.deleteSession($0)
+        }
         sessions.removeAll { $0.sessionId == sessionId }
     }
 }

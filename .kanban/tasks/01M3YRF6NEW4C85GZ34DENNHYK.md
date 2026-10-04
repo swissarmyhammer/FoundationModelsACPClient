@@ -1,6 +1,11 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m43dq524s7draqvc75gcemwy
+  text: 'Note from ^8xpjbw9 (implement): `SessionModel.cancel(meta:)` now uses a W3C `traceparent` in the given `meta` as the parent of the `session/cancel` span (`ClientRequestSpan.ParentContext(extractingFrom:)` in `ConnectionSessionRequestSender.cancel`). But `SessionModel.prompt(_:meta:)` opens the prompt span inside the sender, so `TurnRunner` can no longer record `ParentContext.current` inside the span closure as it does now. This task must find a way to give the cancel the traceparent of the sent prompt. The ^8xpjbw9 test reads it from the `_meta` that the stub agent received.'
+  timestamp: 2026-10-04T12:20:16.068530+00:00
 depends_on:
 - 01M3YR2H3Y0P7AHWS91HVQK65A
 position_column: todo

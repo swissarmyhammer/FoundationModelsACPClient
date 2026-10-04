@@ -29,6 +29,15 @@ struct ConnectedModel {
         (builtAgents.elements.last?.receivedMeta ?? []).map(\.method)
     }
 
+    /// Gives the `_meta` that the agent got for one method.
+    ///
+    /// - Parameter method: The ACP method.
+    /// - Returns: The `_meta` of each message of that method, in arrival
+    ///   order.
+    func receivedMeta(of method: String) -> [JSONValue?] {
+        builtAgents.elements.last?.receivedMeta(of: method) ?? []
+    }
+
     /// Each `session/list` request that the agent got, in arrival order.
     var listRequests: [ListSessionsRequest] {
         builtAgents.elements.last?.listRequests ?? []

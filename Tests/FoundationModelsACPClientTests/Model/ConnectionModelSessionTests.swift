@@ -707,7 +707,7 @@ struct ConnectionModelSessionTests {
 
         try await session.setConfigOption(SessionFactoryFixtures.setModeRequest)
 
-        #expect(connected.receivedMethods.last == ScriptedStubAgent.setConfigOptionMethod)
+        #expect(connected.receivedMethods.last == ClientRequestSpan.Method.setConfigOption)
     }
 
     // MARK: - close

@@ -150,7 +150,7 @@ struct ContentSafetyTests {
             try await harness.runWholeSession()
             await harness.teardown()
 
-            Self.expectEachSignal(in: context)
+            context.expectEachSignal()
         }
     }
 
@@ -171,25 +171,7 @@ struct ContentSafetyTests {
             await harness.session.closeSession(testSession)
             await harness.teardown()
 
-            Self.expectEachSignal(in: context)
+            context.expectEachSignal()
         }
-    }
-
-    /// Records an issue for each signal that the capture did not see: a
-    /// span, a log record or a metric.
-    ///
-    /// A leak check over empty telemetry finds no leak. This check makes sure
-    /// that the leak check read real records.
-    ///
-    /// - Parameters:
-    ///   - context: The capture of the turn.
-    ///   - sourceLocation: The source location that each issue names.
-    private static func expectEachSignal(
-        in context: TelemetryCapture.Context,
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) {
-        #expect(!context.spans.isEmpty, "The capture saw no span.", sourceLocation: sourceLocation)
-        #expect(!context.logRecords.isEmpty, "The capture saw no log record.", sourceLocation: sourceLocation)
-        #expect(!context.metricRecords.isEmpty, "The capture saw no metric.", sourceLocation: sourceLocation)
     }
 }
