@@ -225,14 +225,14 @@ struct StubAgentTests {
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
-        let client = SwiftUIACPClient()
-        let connection = await client.connect(over: process.transport)
-        let initialized = try await connection.initialize(makeInitializeRequest())
+        let model = ConnectionModel()
+        let connection = await model.connect(over: process.transport)
+        let initialized = try await model.initialize(makeInitializeRequest())
         #expect(initialized.protocolVersion == ACPClient.supportedProtocolVersion)
         #expect(initialized.info.name == stubAgentName)
 
         let cwd = AbsolutePath(rawValue: "/")
-        let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
+        let session = try await model.newSession(NewSessionRequest(cwd: cwd))
         #expect(session.sessionId == stubAgentSessionID)
 
         await connection.close()
@@ -249,20 +249,18 @@ struct StubAgentTests {
         let process = try AgentProcess(command: stubAgentShellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
-        let client = SwiftUIACPClient()
-        let connection = try await initializedConnection(for: client, over: process.transport)
+        let model = ConnectionModel()
+        let connection = try await initializedConnection(for: model, over: process.transport)
         let cwd = AbsolutePath(rawValue: "/")
-        let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
+        let session = try await model.newSession(NewSessionRequest(cwd: cwd))
 
         let replyLanded = try await promptTurnLandsReply(
-            over: connection,
-            client: client,
-            sessionId: session.sessionId,
+            in: session,
             messageID: stubAgentMessageID,
             expectedText: Self.chosenAnswer
         )
         #expect(replyLanded)
-        #expect(client.session(for: session.sessionId).lastStopReason == .maxTokens)
+        #expect(idleStopReason(of: session) == .maxTokens)
 
         await connection.close()
         #expect(await eventually { !processExists(pid) })

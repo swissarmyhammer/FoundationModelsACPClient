@@ -1,6 +1,6 @@
 // `AgentSession` — the four steps `run`, `probe` and `doctor` all take before
 // they diverge: connect over a transport, run `initialize`, open a session,
-// and give back the session's update stream.
+// and give back the model of that session.
 //
 // The transport is injected, and this type starts nothing. The caller owns
 // the agent process, so `RunCommand` hands over the agent's stdio while a
@@ -8,17 +8,23 @@
 // whole reason the seam is unit-testable: no binary is started, and no test
 // waits on a pipe.
 //
+// The seam drives the agent through one `ConnectionModel`. The model sends
+// `initialize`, `session/new` and `session/close`, and it opens the client
+// request span of each one, so this file opens no span of its own.
+//
 // Two decisions in this file are not free choices.
 //
-// 1. The container is built with a `.zero` coalescing cadence. `cli-plan.md`
-//    §8 wants each `agent_message_chunk` written to stdout as it arrives, and
-//    the default cadence holds a chunk back for one display frame. That
-//    default exists so a SwiftUI view does not thrash; a byte stream has no
-//    such problem, and a delayed chunk is a delayed byte.
-// 2. ``openSession()`` subscribes to the session's updates before it returns.
-//    The wire package keeps the updates of a session with no subscriber in
-//    a buffer of limited size, and a full buffer discards them, so a
-//    subscription taken after a long prompt could lose chunks.
+// 1. The connection model is built with a `.zero` coalescing cadence.
+//    `cli-plan.md` §8 wants each `agent_message_chunk` written to stdout as it
+//    arrives, and the default cadence holds a chunk back for one display
+//    frame. That default exists so a SwiftUI view does not thrash; a byte
+//    stream has no such problem, and a delayed chunk is a delayed byte.
+// 2. ``openSession()`` gives the `SessionModel` that the connection model
+//    opened. That model subscribes to the updates of its session before
+//    `newSession` returns. The wire package keeps the updates of a session
+//    with no subscriber in a buffer of limited size, and a full buffer
+//    discards them, so a subscription taken after a long prompt could lose
+//    chunks.
 //
 // `--cwd` is the **session's** working directory, and never this binary's.
 // The value reaches the agent as `NewSessionRequest.cwd` exactly as typed:
@@ -45,13 +51,12 @@ import FoundationModelsACPClient
 /// and run ``teardown()`` on every exit path.
 @MainActor
 struct AgentSession {
-    /// The observable container the connection serves behind the declining
+    /// The observable model of the connection, served behind the declining
     /// wrapper.
     ///
-    /// A caller reads the streamed answer off the session state this
-    /// container holds, and reads ``SwiftUIACPClient/connectionState`` to
-    /// learn that the agent went away.
-    let container: SwiftUIACPClient
+    /// A caller reads the open session models off this model, and reads
+    /// ``ConnectionModel/state`` to learn that the agent went away.
+    let model: ConnectionModel
 
     /// The connection that drives the agent.
     let connection: ClientSideConnection
@@ -73,6 +78,14 @@ struct AgentSession {
     /// directory the whole test process runs in.
     private let processWorkingDirectory: () -> String
 
+    /// The text that starts the event line of a `session/close` that got no
+    /// answer of the agent's own.
+    private static let unansweredCloseLine = "session/close was not answered"
+
+    /// The text that starts the event line of a `session/close` the agent
+    /// answered with an error, or that failed on the way.
+    private static let failedCloseLine = "session/close failed"
+
     /// Connects over `transport` and builds the seam around the connection.
     ///
     /// The initializer is `async` because connecting is the first of the four
@@ -88,8 +101,9 @@ struct AgentSession {
     ///     directory.
     ///   - processWorkingDirectory: What this seam reads as the working
     ///     directory of this process. The default reads the real one.
-    ///   - clock: The clock that schedules the container's coalesced flushes.
-    ///     A test injects a manual clock, so it reads no wall clock.
+    ///   - clock: The clock that schedules the coalesced flushes of the
+    ///     session models. A test injects a manual clock, so it reads no wall
+    ///     clock.
     init(
         over transport: any ACPTransport,
         terminal: TerminalOutput,
@@ -97,24 +111,24 @@ struct AgentSession {
         processWorkingDirectory: @escaping () -> String = { FileManager.default.currentDirectoryPath },
         clock: any Clock<Duration> = ContinuousClock()
     ) async {
-        let (container, connection) = await Self.connect(
+        let (model, connection) = await Self.connect(
             over: transport,
             terminal: terminal,
             clock: clock
         )
-        self.container = container
+        self.model = model
         self.connection = connection
         output = terminal
         requestedWorkingDirectory = cwd
         self.processWorkingDirectory = processWorkingDirectory
     }
 
-    /// Connects one observable container over `transport`, behind the
-    /// headless client.
+    /// Connects one connection model over `transport`, behind the headless
+    /// client.
     ///
-    /// The connection serves a ``DecliningClient`` wrapping the container, so
-    /// every request that waits on a person is refused at once and every
-    /// notification still reaches the container.
+    /// The connection serves a ``DecliningClient`` in front of the router of
+    /// the model, so every request that waits on a person is refused at once
+    /// and every notification still reaches the models.
     ///
     /// The connection's diagnostics go to ``TerminalOutput/event(_:)``, which
     /// writes to standard error behind `--verbose`. Nothing here can reach
@@ -124,28 +138,29 @@ struct AgentSession {
     ///   - transport: The bidirectional transport to run over.
     ///   - terminal: The layer that receives the diagnostics and the
     ///     refusals.
-    ///   - clock: The clock that schedules the container's coalesced flushes.
-    ///     A test injects a manual clock, so it reads no wall clock.
-    /// - Returns: The container and the connection that drives the agent.
+    ///   - clock: The clock that schedules the coalesced flushes of the
+    ///     session models. A test injects a manual clock, so it reads no wall
+    ///     clock.
+    /// - Returns: The connection model and the connection that drives the
+    ///   agent.
     static func connect(
         over transport: any ACPTransport,
         terminal: TerminalOutput,
         clock: any Clock<Duration> = ContinuousClock()
-    ) async -> (SwiftUIACPClient, ClientSideConnection) {
+    ) async -> (ConnectionModel, ClientSideConnection) {
         // A zero cadence, because §8 writes each chunk as it arrives.
-        let container = SwiftUIACPClient(coalescingCadence: .zero, clock: clock)
-        let connection = await container.connect(over: transport, logger: terminal.logger) {
-            served in
-            DecliningClient(container: served, output: terminal)
+        let model = ConnectionModel(coalescingCadence: .zero, clock: clock)
+        let connection = await model.connect(over: transport, logger: terminal.logger) { router in
+            DecliningClient(inner: router, output: terminal)
         }
-        return (container, connection)
+        return (model, connection)
     }
 
     /// Negotiates the protocol version and the capabilities with the agent.
     ///
     /// The request carries ``ACPClient/supportedProtocolVersion`` and
     /// ``ACPClient/advertisedCapabilities``, so this binary advertises exactly
-    /// what the container implements and nothing more.
+    /// what the models implement and nothing more.
     ///
     /// The answer is the first session event `cli-plan.md` §8 gives
     /// `--verbose`: it says who is on the far end of the transport, and which
@@ -159,22 +174,16 @@ struct AgentSession {
     ///   agent went away, or `ProtocolVersionMismatchError` when the agent
     ///   answered with a version other than the one sent.
     func initialize() async throws -> InitializeResponse {
-        let response = try await ClientRequestSpan.run(
-            method: ClientRequestSpan.Method.initialize,
-            sessionId: nil
-        ) { meta in
-            try await connection.initialize(
-                InitializeRequest(
-                    info: Implementation(
-                        name: AcpClient.commandName,
-                        version: AcpClientVersion.current
-                    ),
-                    protocolVersion: ACPClient.supportedProtocolVersion,
-                    capabilities: ACPClient.advertisedCapabilities,
-                    meta: meta
-                )
+        let response = try await model.initialize(
+            InitializeRequest(
+                info: Implementation(
+                    name: AcpClient.commandName,
+                    version: AcpClientVersion.current
+                ),
+                protocolVersion: ACPClient.supportedProtocolVersion,
+                capabilities: ACPClient.advertisedCapabilities
             )
-        }
+        )
         output.event(
             """
             initialize answered by \(response.info.name) \(response.info.version), \
@@ -184,13 +193,11 @@ struct AgentSession {
         return response
     }
 
-    /// Opens one session and subscribes to its updates.
+    /// Opens one session, and gives its model.
     ///
-    /// The subscription is live before this call returns. The wire package
-    /// keeps the updates of a session with no subscriber in a buffer of
-    /// limited size, and gives them to the first subscriber. A full buffer
-    /// discards its updates, so the subscription starts here, before any
-    /// turn can fill it.
+    /// The model is subscribed to the updates of the session before this call
+    /// returns, so an update the agent sends at once is in the model. Decision
+    /// 2 at the head of this file states why.
     ///
     /// The session that opens is a session event of §8, and the line carries
     /// the working directory beside the id, so a person reads what the agent
@@ -198,26 +205,17 @@ struct AgentSession {
     /// the path answers a `RequestError`, which is the protocol-failure row
     /// of §9.
     ///
-    /// - Returns: The session the agent opened, and its event stream: the
-    ///   updates of the session and the marker of each finished request of
-    ///   the session, in wire order.
+    /// - Returns: The model of the session the agent opened.
     /// - Throws: ``ProcessWorkingDirectoryError`` when `--cwd` is absent and
     ///   this process has no working directory, `RequestError` on a peer
     ///   error, or `ConnectionError` when the agent went away.
-    func openSession() async throws -> (SessionId, AsyncStream<SessionStreamEvent>) {
+    func openSession() async throws -> SessionModel {
         let cwd = AbsolutePath(rawValue: try workingDirectoryToSend())
-        // The session id is not known until the agent answers, so the span
-        // of this request names no session.
-        let response = try await ClientRequestSpan.run(
-            method: ClientRequestSpan.Method.newSession,
-            sessionId: nil
-        ) { meta in
-            try await connection.newSession(NewSessionRequest(cwd: cwd, meta: meta))
-        }
+        let session = try await model.newSession(NewSessionRequest(cwd: cwd))
         output.event(
-            "session/new opened \(response.sessionId.rawValue) in \(cwd.rawValue)"
+            "session/new opened \(session.sessionId.rawValue) in \(cwd.rawValue)"
         )
-        return (response.sessionId, connection.subscribe(to: response.sessionId).updates)
+        return session
     }
 
     /// Returns the `cwd` to send: `--cwd` as typed, or the working directory
@@ -242,39 +240,57 @@ struct AgentSession {
     ///
     /// The binary already has the answer it ran for by the time it closes, so
     /// nothing that happens here changes an exit code, and a dead agent stays
-    /// visible on ``SwiftUIACPClient/connectionState``. What happens here is
-    /// one event line, which `--verbose` shows.
+    /// visible on ``ConnectionModel/state``. What happens here is one event
+    /// line, which `--verbose` shows.
     ///
     /// The two lines are not one line. `session/close` is optional on the
-    /// wire, and an agent that does not implement it answers `methodNotFound`:
-    /// that agent gave the call no answer of its own, and the line says so.
-    /// Every other error is a different fact — an `invalidParams` or
+    /// wire. An agent that does not advertise the session baseline has no
+    /// `session/close`, so the connection model sends none; an agent that
+    /// advertises it and does not implement it answers `methodNotFound`. In
+    /// both cases the agent gave the call no answer of its own, and the line
+    /// says so. Every other error is a different fact — an `invalidParams` or
     /// `internalError` answer IS an answer, a `ConnectionError` means the
     /// agent went away, and a `CancellationError` means this binary is on its
     /// way out — so each of those is reported as a failed call that names the
     /// error.
     ///
-    /// - Parameter sessionId: The session to close.
-    func closeSession(_ sessionId: SessionId) async {
+    /// - Parameter session: The model of the session to close.
+    func closeSession(_ session: SessionModel) async {
         do {
-            _ = try await ClientRequestSpan.run(
-                method: ClientRequestSpan.Method.closeSession,
-                sessionId: sessionId
-            ) { meta in
-                try await connection.closeSession(CloseSessionRequest(sessionId: sessionId, meta: meta))
-            }
-        } catch let error as RequestError where error.code == .methodNotFound {
-            output.event("session/close was not answered: \(error)")
+            try await model.close(session)
+        } catch where Self.isUnanswered(error) {
+            output.event("\(Self.unansweredCloseLine): \(error)")
         } catch {
-            output.event("session/close failed: \(error)")
+            output.event("\(Self.failedCloseLine): \(error)")
+        }
+    }
+
+    /// Tells whether a `session/close` error means the agent gave the call no
+    /// answer of its own.
+    ///
+    /// - Parameter error: The error the close threw.
+    /// - Returns: `true` for a `methodNotFound` answer, and for the connection
+    ///   model's refusal to send a close the agent does not advertise.
+    private static func isUnanswered(_ error: any Error) -> Bool {
+        switch error {
+        case let refusal as RequestError:
+            refusal.code == .methodNotFound
+        case let unsent as ConnectionModelError:
+            switch unsent {
+            case .unsupported:
+                true
+            }
+        default:
+            false
         }
     }
 
     /// Closes the connection.
     ///
     /// The caller runs this on every exit path. Closing rejects every pending
-    /// request, ends the transport, and flushes the container's buffered
-    /// chunks, so nothing the agent already sent is left unwritten.
+    /// request, ends the transport, and closes each open session model, which
+    /// folds its buffered chunks, so nothing the agent already sent is left
+    /// unapplied.
     func teardown() async {
         await connection.close()
     }

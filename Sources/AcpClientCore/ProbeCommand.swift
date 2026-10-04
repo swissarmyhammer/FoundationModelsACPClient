@@ -24,13 +24,11 @@ import FoundationModelsACPClient
 //    arrive as an `available_commands_update` session update, so the only way
 //    to read them is to open a session and wait. The session closes again, and
 //    the agent is never prompted.
-// 3. **The commands are read off the observable container, not off the update
-//    stream.** The subscription cannot exist before the `session/new` answer
-//    names the session, so an agent that reports its commands right after
-//    that answer reaches `SessionUpdateRouter` first. The router keeps such an
-//    update only in a buffer of limited size, and a full buffer discards it.
-//    The container has no such limit: the connection calls the client for
-//    every notification it decodes.
+// 3. **The commands are read off the session model, not off an update tap.**
+//    An agent can report its commands before or right after the `session/new`
+//    answer. The session model gets each of them: it takes the updates that
+//    the connection kept for the session before the answer, and each update
+//    after it. A tap gives only the updates that arrive after the tap is made.
 //
 // One name to watch. `FoundationModelsACP` exports a `TerminalOutput` of its
 // own — the ACP model of what an agent-owned terminal printed. Inside this
@@ -199,12 +197,12 @@ struct ProbeCommand: AsyncParsableCommand {
     @MainActor
     private static func buildReport(with session: AgentSession) async throws -> ProbeReport {
         let initialized = try await session.initialize()
-        // The update stream is not read. Decision 3 at the head of this file
-        // states why: the container sees every update, and the stream can miss
-        // the one this report needs.
-        let (sessionId, _) = try await session.openSession()
-        let commands = await slashCommands(in: session.container, for: sessionId)
-        await session.closeSession(sessionId)
+        // No update tap is read. Decision 3 at the head of this file states
+        // why: the session model sees every update, and a tap can miss the one
+        // this report needs.
+        let opened = try await session.openSession()
+        let commands = await slashCommands(in: opened)
+        await session.closeSession(opened)
         return ProbeReport(
             protocolVersion: initialized.protocolVersion,
             capabilities: initialized.capabilities,
@@ -216,31 +214,23 @@ struct ProbeCommand: AsyncParsableCommand {
     }
 
     /// Waits a bounded interval for the agent's command list, and reads it off
-    /// the observable container.
+    /// the session model.
     ///
-    /// ``ACPSessionState/hasReportedAvailableCommands`` is what makes the three
-    /// states of `cli-plan.md` §6 tellable apart: an agent that reported an
-    /// empty list and an agent that reported nothing both leave
-    /// ``ACPSessionState/availableCommands`` empty, and only that member says
-    /// which of the two happened.
+    /// ``SessionModel/availableCommands`` is an optional, and that is what
+    /// makes the three states of `cli-plan.md` §6 tellable apart: `nil` says
+    /// the agent reported no list, and an empty list says it reported one
+    /// with no command in it.
     ///
-    /// - Parameters:
-    ///   - container: The observable container behind the connection.
-    ///   - sessionId: The session the agent opened.
+    /// - Parameter session: The model of the session the agent opened.
     /// - Returns: The commands, or the reason there are none to report.
     @MainActor
-    private static func slashCommands(
-        in container: SwiftUIACPClient,
-        for sessionId: SessionId
-    ) async -> ProbeSlashCommands {
-        let state = container.session(for: sessionId)
+    private static func slashCommands(in session: SessionModel) async -> ProbeSlashCommands {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: commandWait)
-        while !state.hasReportedAvailableCommands && clock.now < deadline {
+        while session.availableCommands == nil && clock.now < deadline {
             try? await Task.sleep(for: commandPollInterval)
         }
-        guard state.hasReportedAvailableCommands else { return .waitEndedFirst }
-        return .reported(state.availableCommands)
+        return .reported(session.availableCommands)
     }
 
     /// Writes one report to standard output.

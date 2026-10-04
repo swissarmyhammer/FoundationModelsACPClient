@@ -3,7 +3,7 @@
 // can see what an agent sent."
 //
 // It is a pass-through wrapper and nothing more. `AgentProcess` vends its
-// transport as `any ACPTransport`, and `SwiftUIACPClient.connect(over:)` takes
+// transport as `any ACPTransport`, and `ConnectionModel.connect(over:)` takes
 // any transport, so the tee slots between the two and needs no change in the
 // wire package and no change in this package's library. The shape is a
 // forwarding task over the inner stream, a `write(_:)` that goes straight to

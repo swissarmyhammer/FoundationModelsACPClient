@@ -37,12 +37,28 @@ comments:
     - evidence: local commit "feat(telemetry): trace every request that the models send" (sha is in git log; no push)
     - next: review
   timestamp: 2026-10-04T12:22:52.862235+00:00
+- actor: claude-code
+  id: 01m43e9mwzmad3mkydq25ag8st
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 67bb8ab): 0 findings, 0 confirmed, 0 refuted; 19 files reviewed, 6 `.kanban/` files excluded by `.reviewignore`. The engine run of the tool rule `code-hygiene/dead-code-swift` failed because the `.build` folder is damaged (no permission to remove `.build/checkouts/FoundationModelsExtras`). I ran the same rule commands manually with `swift build --build-tests --scratch-path <scratchpad>/build` (build complete) and `periphery scan` (3.8.0) with the rule flags on that index store. Periphery reports 3 results in this repository: `Sources/FoundationModelsACPClient/Telemetry/ACPClientTelemetry.swift` imports `Logging`, `Metrics`, `Tracing`. This commit does not change that file, so these results are not on the diff and are not findings of this review. No earlier `## Review Findings` sections.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-04T12:30:22.111209+00:00
+- actor: claude-code
+  id: 01m43e9yja8kk067v7gxhanbs3
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 19 files (TracedClientMessage.swift new, ClientRequestSpan.send, model request paths, ModelRequestSpanTests new, RequestTelemetryQueries shared)
+    - test: green — swift test 523/523, IntegrationTests 103/103 (with --scratch-path)
+    - commit: 67bb8ab feat(telemetry): trace every request that the models send
+    - review: clean — task moved to done
+  timestamp: 2026-10-04T12:30:32.010373+00:00
 depends_on:
 - 01M3YR1XW7S2KVG2ABV6NP8VDV
 - 01M3YR27ERN3DKRHMA1C5TYWBR
 - 01M3YRB9RRT2GXY0Q47K0BRVV6
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: cd80
 title: 'Telemetry: every request that the models send gets a client span, metrics, and trace _meta'
 ---
 ## What

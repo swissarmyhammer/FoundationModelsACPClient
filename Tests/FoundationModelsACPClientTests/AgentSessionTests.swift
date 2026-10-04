@@ -62,6 +62,19 @@ private let replyChunkAlone: [SessionUpdate] = [stubReplyChunk]
 /// diagnostic through the logger this seam gave it.
 private let malformedLine = Data("this is not json\n".utf8)
 
+/// The capabilities of an agent that serves the session baseline, which holds
+/// `session/close`. The connection model sends `session/close` only to such an
+/// agent.
+private let sessionBaselineCapabilities = AgentCapabilities(session: SessionCapabilities())
+
+/// The text that starts the event line of a `session/close` that got no answer
+/// of the agent's own.
+private let unansweredCloseLine = "session/close was not answered"
+
+/// The text that starts the event line of a `session/close` the agent
+/// answered with an error of its own.
+private let failedCloseLine = "session/close failed"
+
 /// An ``AgentSession`` over one end of an in-memory pair, with a
 /// ``ScriptedStubAgent`` on the other end and a buffer standing for standard
 /// error.
@@ -103,14 +116,18 @@ private struct AgentSessionHarness {
     ///   - verbosity: The verbosity to build the terminal layer with.
     ///   - closeSessionError: The error the stub answers `session/close`
     ///     with.
-    ///   - clock: The clock that schedules the container's coalesced flushes.
+    ///   - capabilities: The capabilities the stub answers `initialize` with.
+    ///     The default serves the session baseline, so a close goes out.
+    ///   - clock: The clock that schedules the coalesced flushes of the
+    ///     session models.
     init(
         script: [SessionUpdate] = [],
         elicitation: CreateElicitationRequest? = nil,
         cwd: String? = nil,
         processWorkingDirectory: @escaping () -> String = { FileManager.default.currentDirectoryPath },
         verbosity: TerminalVerbosity = .normal,
-        closeSessionError: RequestError = .methodNotFound("session/close"),
+        closeSessionError: RequestError = .methodNotFound(ClientRequestSpan.Method.closeSession),
+        capabilities: AgentCapabilities = sessionBaselineCapabilities,
         clock: any Clock<Duration> = ContinuousClock()
     ) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -122,7 +139,8 @@ private struct AgentSessionHarness {
                 session: testSession,
                 script: script,
                 elicitation: elicitation,
-                closeSessionError: closeSessionError
+                closeSessionError: closeSessionError,
+                capabilities: capabilities
             )
             builtAgents.append(stub)
             return stub
@@ -145,9 +163,9 @@ private struct AgentSessionHarness {
     /// Runs `initialize` and opens the session, which is what every caller of
     /// this seam does before it drives a turn.
     ///
-    /// - Returns: The session id and its event stream.
+    /// - Returns: The model of the session the agent opened.
     /// - Throws: Whatever the seam threw.
-    func openedSession() async throws -> (SessionId, AsyncStream<SessionStreamEvent>) {
+    func openedSession() async throws -> SessionModel {
         _ = try await session.initialize()
         return try await session.openSession()
     }
@@ -160,6 +178,11 @@ private struct AgentSessionHarness {
         _ = try await session.connection.prompt(
             PromptRequest(prompt: [textBlock("go")], sessionId: sessionId)
         )
+    }
+
+    /// The ACP method of each request the stub agent got, in arrival order.
+    var receivedMethods: [String] {
+        (agent?.receivedMeta ?? []).map(\.method)
     }
 
     /// Tears the connection down, as every exit path of the binary does.
@@ -251,72 +274,91 @@ struct AgentSessionSpawnTests {
     }
 }
 
-/// §8 wants each chunk written as it arrives, so the container this seam
-/// builds coalesces nothing, and one streamed chunk lands in the container
-/// with no flush of the test's own.
+/// The session the seam opens is the model the connection model holds open,
+/// so every request the agent sends for it reaches that one model.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func openSessionGivesTheModelTheConnectionModelHoldsOpen() async throws {
+    let harness = await AgentSessionHarness()
+
+    let opened = try await harness.openedSession()
+
+    #expect(opened.sessionId == testSession)
+    #expect(harness.session.model.session(for: testSession) === opened)
+    await harness.teardown()
+}
+
+/// `initialize` goes through the connection model, so the model keeps the
+/// answer and reads the capability flags of the agent off it.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func initializeSetsTheCapabilityFlagsOfTheConnectionModel() async throws {
+    let harness = await AgentSessionHarness()
+
+    _ = try await harness.session.initialize()
+
+    #expect(harness.session.model.state == .connected)
+    #expect(harness.session.model.canCloseSessions)
+    await harness.teardown()
+}
+
+/// §8 wants each chunk written as it arrives, so the session model this seam
+/// opens coalesces nothing: the chunk is in the transcript when the update
+/// tap gives it, with no flush of the test's own.
 ///
 /// The manual clock is what makes the cadence observable with no wall-clock
-/// reading. `ManualClock.sleep(until:tolerance:)` resumes at once when the
-/// deadline is not later than the current time, so the scheduled flush of a
-/// `.zero` cadence runs against a clock this test never moves forward, and
-/// the flush of the 33 ms default never runs. The test therefore has no time
-/// bound to tune and cannot be flaky.
+/// reading. Under the 33 ms default, the chunk would wait in the buffer for a
+/// flush on a clock this test never moves forward. The test therefore has no
+/// time bound to tune and cannot be flaky.
 @MainActor @Test(.timeLimit(.minutes(1)))
-func aStreamedChunkLandsInTheContainerWithNoFlush() async throws {
+func aStreamedChunkLandsInTheSessionModelWithNoFlush() async throws {
     let harness = await AgentSessionHarness(script: replyChunkAlone, clock: ManualClock())
+    let opened = try await harness.openedSession()
+    var updates = opened.updateTap().makeAsyncIterator()
 
-    let (sessionId, _) = try await harness.openedSession()
-    try await harness.prompt(sessionId)
+    try await harness.prompt(opened.sessionId)
 
-    let state = harness.session.container.session(for: sessionId)
-    #expect(
-        await eventually {
-            state.messageContent(for: stubMessageID) == [textBlock(stubReplyText)]
-        }
-    )
+    #expect(await updates.next() == stubReplyChunk)
+    #expect(opened.transcript.compactMap(\.agentMessage).map(\.content) == [[textBlock(stubReplyText)]])
     await harness.teardown()
 }
 
 /// The connection serves the declining wrapper, so an elicitation is refused
 /// at once and says so on standard error, and the streamed update still
-/// reaches the container behind the wrapper.
+/// reaches the session model behind the wrapper.
 @MainActor @Test(.timeLimit(.minutes(1)))
-func theServedClientDeclinesAndTheUpdateStillReachesTheContainer() async throws {
+func theServedClientDeclinesAndTheUpdateStillReachesTheSessionModel() async throws {
     let harness = await AgentSessionHarness(
         script: replyThenIdle,
         elicitation: ElicitationFixtures.formRequest(
             scope: .session(ElicitationFixtures.sessionScope)
         )
     )
+    let opened = try await harness.openedSession()
+    let updates = opened.updateTap()
 
-    let (sessionId, _) = try await harness.openedSession()
-    try await harness.prompt(sessionId)
+    try await harness.prompt(opened.sessionId)
 
     #expect(harness.buffer.text == "declined elicitation/create for form mode\n")
-    let state = harness.session.container.session(for: sessionId)
-    #expect(
-        await eventually {
-            state.flushPendingChunks()
-            return state.messageContent(for: stubMessageID) == [textBlock(stubReplyText)]
-        }
-    )
+    for await update in updates where update == idleState(stopReason: .endTurn) {
+        break
+    }
+    #expect(opened.transcript.compactMap(\.agentMessage).map(\.content) == [[textBlock(stubReplyText)]])
+    #expect(opened.pendingElicitations.isEmpty)
     await harness.teardown()
 }
 
-/// The wire package keeps the updates of a session with no subscriber only in
-/// a buffer of limited size, so the subscription is live before
-/// `openSession()` returns. A chunk the agent sends the moment the prompt
-/// lands therefore reaches the returned stream.
+/// The session model subscribes to the updates of its session before
+/// `openSession()` returns, and the tap taken at once gives every later
+/// update. A chunk the agent sends the moment the prompt lands therefore
+/// reaches the tap.
 @MainActor @Test(.timeLimit(.minutes(1)))
-func aChunkSentAsSoonAsThePromptLandsReachesTheReturnedStream() async throws {
+func aChunkSentAsSoonAsThePromptLandsReachesTheUpdateTap() async throws {
     let harness = await AgentSessionHarness(script: replyThenIdle)
+    let opened = try await harness.openedSession()
+    var updates = opened.updateTap().makeAsyncIterator()
 
-    let (sessionId, events) = try await harness.openedSession()
-    try await harness.prompt(sessionId)
+    try await harness.prompt(opened.sessionId)
 
-    var iterator = events.makeAsyncIterator()
-    let first = try #require(await iterator.next())
-    #expect(first == .update(agentChunk(text: stubReplyText, message: stubMessageID.rawValue)))
+    #expect(await updates.next() == stubReplyChunk)
     await harness.teardown()
 }
 
@@ -420,11 +462,29 @@ func theLoggerWritesToTheTerminalLayerAndNeverToStandardOutput() async throws {
 @MainActor @Test(.timeLimit(.minutes(1)))
 func aMethodNotFoundCloseIsReportedAsUnanswered() async throws {
     let harness = await AgentSessionHarness(verbosity: .verbose)
-    let (sessionId, _) = try await harness.openedSession()
+    let opened = try await harness.openedSession()
 
-    await harness.session.closeSession(sessionId)
+    await harness.session.closeSession(opened)
 
-    #expect(harness.buffer.text.contains("session/close was not answered"))
+    #expect(harness.receivedMethods.contains(ClientRequestSpan.Method.closeSession))
+    #expect(harness.buffer.text.contains(unansweredCloseLine))
+    await harness.teardown()
+}
+
+/// An agent that advertises no session baseline has no `session/close`, so
+/// the connection model sends none. That is the same fact as a
+/// `methodNotFound` answer — the agent gives the call no answer of its own —
+/// so it writes the same event line and raises nothing.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func aCloseTheAgentDoesNotAdvertiseIsReportedAsUnanswered() async throws {
+    let harness = await AgentSessionHarness(verbosity: .verbose, capabilities: AgentCapabilities())
+    let opened = try await harness.openedSession()
+
+    await harness.session.closeSession(opened)
+
+    #expect(!harness.receivedMethods.contains(ClientRequestSpan.Method.closeSession))
+    #expect(harness.buffer.text.contains(unansweredCloseLine))
+    #expect(!harness.buffer.text.contains(failedCloseLine))
     await harness.teardown()
 }
 
@@ -437,11 +497,11 @@ func anyOtherCloseErrorIsReportedAsAFailure() async throws {
         verbosity: .verbose,
         closeSessionError: .invalidParams
     )
-    let (sessionId, _) = try await harness.openedSession()
+    let opened = try await harness.openedSession()
 
-    await harness.session.closeSession(sessionId)
+    await harness.session.closeSession(opened)
 
-    #expect(harness.buffer.text.contains("session/close failed"))
-    #expect(!harness.buffer.text.contains("was not answered"))
+    #expect(harness.buffer.text.contains(failedCloseLine))
+    #expect(!harness.buffer.text.contains(unansweredCloseLine))
     await harness.teardown()
 }

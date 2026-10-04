@@ -5,16 +5,17 @@
 // The binary sends `ACPClient.advertisedCapabilities`, which advertises
 // elicitation in both modes, so a foreign agent may send
 // `session/request_permission` or `elicitation/create` in the middle of the
-// one turn. `SwiftUIACPClient` answers both by holding the request as
-// observable pending state until a UI resolves it, and there is no UI here.
-// A container left to answer would therefore hang the turn for ever.
+// one turn. The router of `ConnectionModel` answers both by holding the
+// request as observable pending state in a model until a UI resolves it, and
+// there is no UI here. A router left to answer would therefore hang the turn
+// for ever.
 //
-// So this file stands one `Client` in front of the container, through the
-// `connect(over:logger:client:)` seam. The two notifications forward
-// unchanged, because the connection delivers each of them one time and a
-// wrapper that swallows either one leaves the container's observable state
-// stale. The two requests never reach the container at all: they are refused
-// here and answered at once.
+// So this file stands one `Client` in front of the inner client that
+// `ConnectionModel.connect(over:logger:bufferLimits:client:)` gives its wrap
+// closure. The two notifications forward unchanged, because the connection
+// delivers each of them one time and a wrapper that swallows either one
+// leaves the observable models stale. The two requests never reach the inner
+// client at all: they are refused here and answered at once.
 //
 // Each refusal writes one line through `TerminalOutput.error(_:)`, so
 // `--quiet` shows it too. That is a deliberate exception to §8's "a default
@@ -30,11 +31,10 @@
 import FoundationModelsACP
 import FoundationModelsACPClient
 
-/// The `Client` a headless run serves, standing in front of the observable
-/// container.
+/// The `Client` a headless run serves, standing in front of an inner client.
 ///
-/// ``sessionUpdate(_:)`` and ``elicitationComplete(_:)`` forward to the
-/// container unchanged, so the observable state is exactly what it would be
+/// ``sessionUpdate(_:)`` and ``elicitationComplete(_:)`` forward to the inner
+/// client unchanged, so the observable models are exactly what they would be
 /// with no wrapper at all.
 ///
 /// ``requestPermission(_:)`` and ``createElicitation(_:)`` never forward.
@@ -43,8 +43,9 @@ import FoundationModelsACPClient
 /// person did not see.
 @MainActor
 final class DecliningClient: Client {
-    /// The observable container this client stands in front of.
-    private let container: SwiftUIACPClient
+    /// The client this client stands in front of: the router of the
+    /// connection model in production.
+    private let inner: any Client
 
     /// The terminal layer that receives the refusal lines.
     private let output: TerminalOutput
@@ -75,24 +76,24 @@ final class DecliningClient: Client {
     /// Creates the headless client.
     ///
     /// - Parameters:
-    ///   - container: The observable container to stand in front of.
+    ///   - inner: The client to stand in front of.
     ///   - output: The terminal layer that receives the refusal lines.
-    init(container: SwiftUIACPClient, output: TerminalOutput) {
-        self.container = container
+    init(inner: any Client, output: TerminalOutput) {
+        self.inner = inner
         self.output = output
     }
 
-    /// Forwards one streamed session update to the container.
+    /// Forwards one streamed session update to the inner client.
     ///
     /// - Parameter notification: The session-update notification.
     func sessionUpdate(_ notification: UpdateSessionNotification) async {
-        await container.sessionUpdate(notification)
+        await inner.sessionUpdate(notification)
     }
 
     /// Refuses the agent's permission request, and says so on standard
     /// error.
     ///
-    /// The request never reaches the container. The answer is the request's
+    /// The request never reaches the inner client. The answer is the request's
     /// own rejection option when it offers one, and the `cancelled` outcome
     /// when it offers none — that outcome is the spec's result for a request
     /// the user did not decide.
@@ -115,7 +116,7 @@ final class DecliningClient: Client {
 
     /// Refuses the agent's elicitation, and says so on standard error.
     ///
-    /// The elicitation never reaches the container, in form mode and in url
+    /// The elicitation never reaches the inner client, in form mode and in url
     /// mode alike. A url-mode elicitation is refused without navigating: no
     /// URL is opened, and no credential goes back over ACP.
     ///
@@ -130,11 +131,11 @@ final class DecliningClient: Client {
         return Self.declineResponse
     }
 
-    /// Forwards the agent's elicitation-completion notice to the container.
+    /// Forwards the agent's elicitation-completion notice to the inner client.
     ///
     /// - Parameter notification: The completion notification.
     func elicitationComplete(_ notification: CompleteElicitationNotification) async {
-        await container.elicitationComplete(notification)
+        await inner.elicitationComplete(notification)
     }
 
     /// Builds the one line a refusal writes.

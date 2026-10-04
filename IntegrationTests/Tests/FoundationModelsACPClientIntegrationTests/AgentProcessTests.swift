@@ -90,30 +90,28 @@ struct AgentProcessTests {
         let process = try AgentProcess(command: shellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
-        let client = SwiftUIACPClient()
-        let connection = await client.connect(over: process.transport)
-        #expect(client.connectionState == .connected)
+        let model = ConnectionModel()
+        let connection = await model.connect(over: process.transport)
+        #expect(model.state == .connected)
 
-        let initialized = try await connection.initialize(makeInitializeRequest())
+        let initialized = try await model.initialize(makeInitializeRequest())
         #expect(initialized.protocolVersion == ACPClient.supportedProtocolVersion)
         #expect(initialized.info.name == "foreign-agent")
 
         let cwd = AbsolutePath(rawValue: "/")
-        let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
+        let session = try await model.newSession(NewSessionRequest(cwd: cwd))
         #expect(session.sessionId == foreignSessionID)
 
         let replyLanded = try await promptTurnLandsReply(
-            over: connection,
-            client: client,
-            sessionId: session.sessionId,
+            in: session,
             messageID: foreignMessageID,
             expectedText: foreignReplyText
         )
         #expect(replyLanded)
-        #expect(client.session(for: session.sessionId).lastStopReason == .endTurn)
+        #expect(idleStopReason(of: session) == .endTurn)
 
         await connection.close()
-        #expect(await eventually { client.connectionState == .disconnected })
+        #expect(await eventually { model.state == .disconnected })
         #expect(await eventually { !processExists(pid) })
     }
 
@@ -126,11 +124,11 @@ struct AgentProcessTests {
         let process = try AgentProcess(command: shellCommand, arguments: [script])
         let pid = try #require(process.processIdentifier)
 
-        let client = SwiftUIACPClient()
-        let connection = try await initializedConnection(for: client, over: process.transport)
+        let model = ConnectionModel()
+        let connection = try await initializedConnection(for: model, over: process.transport)
 
         kill(pid, SIGKILL)
-        #expect(await eventually { client.connectionState == .disconnected })
+        #expect(await eventually { model.state == .disconnected })
         #expect(await eventually { !processExists(pid) })
         await connection.close()
     }
@@ -145,8 +143,8 @@ struct AgentProcessTests {
         let pid = try #require(process.processIdentifier)
         #expect(processExists(pid))
 
-        let client = SwiftUIACPClient()
-        let connection = try await initializedConnection(for: client, over: process.transport)
+        let model = ConnectionModel()
+        let connection = try await initializedConnection(for: model, over: process.transport)
 
         await connection.close()
         #expect(await eventually { !processExists(pid) })

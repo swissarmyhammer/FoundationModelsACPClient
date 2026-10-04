@@ -168,7 +168,7 @@ struct ContentSafetyTests {
             await #expect(throws: Self.refusal) {
                 try await harness.runner.run()
             }
-            await harness.session.closeSession(testSession)
+            try await harness.closeTheTurnSession()
             await harness.teardown()
 
             context.expectEachSignal()

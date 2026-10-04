@@ -196,4 +196,12 @@ struct ProbeReportTests {
         #expect(ProbeSlashCommands.reported([]) == .reportedNone)
         #expect(ProbeSlashCommands.reported(probedCommands) == .listed(probedCommands))
     }
+
+    /// A session model reads `nil` for an agent that reported no command
+    /// list, so a list still `nil` when the bounded wait ends is the
+    /// wait-ended-first state, and never an empty list.
+    @Test("a command list the agent never reported is the wait-ended-first state")
+    func aCommandListNeverReportedIsTheWaitEndedFirstState() {
+        #expect(ProbeSlashCommands.reported(nil) == .waitEndedFirst)
+    }
 }

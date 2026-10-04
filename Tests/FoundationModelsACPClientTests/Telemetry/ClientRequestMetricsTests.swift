@@ -105,7 +105,7 @@ struct ClientRequestMetricsTests {
         let refusal = RequestError.invalidParams
         try await TelemetryCapture.run(forbidding: [refusal.message]) { context in
             let harness = await TracedSessionHarness(closeSessionError: refusal)
-            await harness.session.closeSession(testSession)
+            try await harness.openAndCloseOneSession()
             await harness.teardown()
 
             let errors = try context.metricsFactory.expectCounter(

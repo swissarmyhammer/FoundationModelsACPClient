@@ -13,7 +13,8 @@ import FoundationModelsACP
 //    an agent that runs no command both leave the list empty, and a report that
 //    printed one text for both would state something the run never learned.
 //    ``ProbeSlashCommands`` is that distinction, and ``ProbeSlashCommands/
-//    reported(_:)`` is the one place an empty list becomes the second state.
+//    reported(_:)`` is the one place an empty list becomes the second state
+//    and a missing list becomes the third.
 // 2. **The plain form writes no JSON.** §6.1 gives `--json` its own flag, so a
 //    reader who did not ask for JSON reads labelled sections, and a script that
 //    did gets the whole report as one object.
@@ -43,16 +44,21 @@ enum ProbeSlashCommands: Codable, Hashable, Sendable {
     /// and `probe` still exits 0, because the agent answered.
     case waitEndedFirst
 
-    /// Reads the state of a command list the agent reported.
+    /// Reads the state of the command list a session model holds when the
+    /// bounded wait ends.
     ///
-    /// This is the one place an empty report becomes ``reportedNone``, so no
-    /// caller can build a ``listed(_:)`` that carries nothing.
+    /// This is the one place an empty report becomes ``reportedNone`` and a
+    /// missing report becomes ``waitEndedFirst``, so no caller can build a
+    /// ``listed(_:)`` that carries nothing.
     ///
-    /// - Parameter commands: The commands the agent reported.
-    /// - Returns: ``listed(_:)`` for a list that holds a command, and
-    ///   ``reportedNone`` for one that holds none.
-    static func reported(_ commands: [AvailableCommand]) -> ProbeSlashCommands {
-        commands.isEmpty ? .reportedNone : .listed(commands)
+    /// - Parameter commands: The commands the agent reported, or `nil` when
+    ///   the agent reported no command list.
+    /// - Returns: ``listed(_:)`` for a list that holds a command,
+    ///   ``reportedNone`` for one that holds none, and ``waitEndedFirst`` for
+    ///   no list.
+    static func reported(_ commands: [AvailableCommand]?) -> ProbeSlashCommands {
+        guard let commands else { return .waitEndedFirst }
+        return commands.isEmpty ? .reportedNone : .listed(commands)
     }
 
     /// The members of the JSON form of this value.

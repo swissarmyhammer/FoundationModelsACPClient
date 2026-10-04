@@ -59,9 +59,6 @@ private enum TurnText {
     /// The text of the thought chunk one test scripts beside the answer.
     static let thought = "the agent is thinking"
 
-    /// The message id ``SessionUpdateFixtures`` stamps on a thought chunk.
-    static let thoughtMessageID = MessageId(rawValue: "thought-1")
-
     /// The title of the tool call that runs BEFORE the first answer chunk.
     static let earlyToolName = "reading the early file"
 
@@ -153,7 +150,7 @@ private struct TurnRunnerHarness {
     /// The value under test.
     let runner: TurnRunner
 
-    /// The connected seam, held so a test can read the observable container.
+    /// The connected seam, held so a test can read the observable models.
     let session: AgentSession
 
     /// The agent-side connection. A test holds it so the far end of the pair
@@ -334,10 +331,10 @@ struct TurnRunnerTests {
     }
 
     /// A thought chunk is the agent's reasoning and not its answer, so §8
-    /// keeps it off standard output. It still reaches the observable
-    /// container behind the connection, which is where a UI reads it.
-    @MainActor @Test("a thought chunk reaches the container and never the sink", .timeLimit(.minutes(1)))
-    func aThoughtChunkReachesTheContainerAndNeverTheSink() async throws {
+    /// keeps it off standard output. It still reaches the observable session
+    /// model behind the connection, which is where a UI reads it.
+    @MainActor @Test("a thought chunk reaches the session model and never the sink", .timeLimit(.minutes(1)))
+    func aThoughtChunkReachesTheSessionModelAndNeverTheSink() async throws {
         let harness = try await TurnRunnerHarness(script: [
             thoughtChunk(text: TurnText.thought),
             agentChunk(text: TurnText.firstAnswerHalf),
@@ -347,14 +344,10 @@ struct TurnRunnerTests {
         _ = try await harness.runner.run()
 
         #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
-        let state = harness.session.container.session(for: testSession)
-        #expect(
-            await eventually {
-                state.flushPendingChunks()
-                return state.messageContent(for: TurnText.thoughtMessageID)
-                    == [textBlock(TurnText.thought)]
-            }
-        )
+        // The idle update ended the turn, and the model folded every update
+        // before it, so the thought is in the transcript with no wait.
+        let opened = try #require(harness.session.model.session(for: testSession))
+        #expect(opened.transcript.compactMap(\.thought).map(\.content) == [[textBlock(TurnText.thought)]])
         await harness.teardown()
     }
 

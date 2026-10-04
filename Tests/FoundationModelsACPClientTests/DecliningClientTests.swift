@@ -20,7 +20,7 @@ import Testing
 // error.
 //
 // The elicitation requests come from `ElicitationFixtures`, which the
-// container's own elicitation tests share.
+// elicitation tests of the models share.
 
 /// The "allow" option that the permission requests here offer.
 private let allowOption = PermissionOption(
@@ -98,7 +98,87 @@ private func elicitationRefusalLine(mode: String) -> String {
     "declined elicitation/create for \(mode) mode\n"
 }
 
-/// A ``DecliningClient`` over a real container and a buffer sink.
+/// The `Client` a ``DecliningClient`` stands in front of in these tests.
+///
+/// It records each call that reaches it. A permission request or an
+/// elicitation that reached it gets an answer that grants, so a wrapper that
+/// forwarded one would give the agent something no person saw, and the
+/// assertions on the refusal would fail.
+private struct RecordingInnerClient: Client {
+    /// Each session update that reached this client, in arrival order.
+    let sessionUpdates = ThreadSafeBuffer<UpdateSessionNotification>()
+
+    /// The id of each elicitation-completion notice that reached this client,
+    /// in arrival order.
+    let completedElicitations = ThreadSafeBuffer<ElicitationId>()
+
+    /// The wire method of each request that reached this client, in arrival
+    /// order.
+    let requests = ThreadSafeBuffer<String>()
+
+    /// Records the update.
+    ///
+    /// - Parameter notification: The session-update notification.
+    func sessionUpdate(_ notification: UpdateSessionNotification) async {
+        sessionUpdates.append(notification)
+    }
+
+    /// Records the request and grants it with the allow option.
+    ///
+    /// - Parameter params: The permission request.
+    /// - Returns: The allow outcome.
+    func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
+        requests.append(ClientMethodName.requestPermission)
+        return RequestPermissionResponse(
+            outcome: .selected(SelectedPermissionOutcome(optionId: allowOption.optionId))
+        )
+    }
+
+    /// Records the request and accepts it.
+    ///
+    /// - Parameter params: The elicitation request.
+    /// - Returns: The accept action.
+    func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
+        requests.append(ClientMethodName.createElicitation)
+        return .object(["action": .string("accept")])
+    }
+
+    /// Records the id of the finished elicitation.
+    ///
+    /// - Parameter notification: The completion notification.
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {
+        completedElicitations.append(notification.elicitationId)
+    }
+}
+
+/// The wire names of the two requests ``RecordingInnerClient`` records.
+private enum ClientMethodName {
+    /// The permission request.
+    static let requestPermission = "session/request_permission"
+
+    /// The elicitation request.
+    static let createElicitation = "elicitation/create"
+}
+
+/// Builds the terminal layer of a test over a buffer sink.
+///
+/// - Parameters:
+///   - verbosity: The verbosity to build the layer with.
+///   - buffer: The buffer that stands for standard error.
+/// - Returns: The layer.
+private func bufferedTerminal(
+    verbosity: TerminalVerbosity,
+    into buffer: ThreadSafeBuffer<String>
+) -> AcpClientCore.TerminalOutput {
+    AcpClientCore.TerminalOutput(
+        verbosity: verbosity,
+        isStandardErrorATerminal: { false },
+        sink: { buffer.append($0) }
+    )
+}
+
+/// A ``DecliningClient`` in front of a recording client and over a buffer
+/// sink.
 ///
 /// The buffer stands for standard error, so the assertions read bytes. The
 /// injected terminal reading is always `false`: a test process cannot make
@@ -106,31 +186,21 @@ private func elicitationRefusalLine(mode: String) -> String {
 /// that reading.
 @MainActor
 private struct DecliningClientHarness {
-    /// The container the client stands in front of.
-    let container: SwiftUIACPClient
+    /// The client the declining client stands in front of.
+    let inner = RecordingInnerClient()
 
     /// Everything the terminal layer wrote, in the chunks the sink received.
-    let buffer: ThreadSafeBuffer<String>
+    let buffer = ThreadSafeBuffer<String>()
 
     /// The value under test.
     let client: DecliningClient
 
-    /// Builds the client over a fresh container and a fresh buffer.
+    /// Builds the client in front of a fresh recording client and over a
+    /// fresh buffer.
     ///
     /// - Parameter verbosity: The verbosity to build the terminal layer with.
     init(verbosity: TerminalVerbosity = .normal) {
-        let buffer = ThreadSafeBuffer<String>()
-        let container = SwiftUIACPClient()
-        self.buffer = buffer
-        self.container = container
-        client = DecliningClient(
-            container: container,
-            output: AcpClientCore.TerminalOutput(
-                verbosity: verbosity,
-                isStandardErrorATerminal: { false },
-                sink: { buffer.append($0) }
-            )
-        )
+        client = DecliningClient(inner: inner, output: bufferedTerminal(verbosity: verbosity, into: buffer))
     }
 }
 
@@ -145,9 +215,9 @@ func aPermissionRequestWithARejectOptionIsAnsweredWithThatOption() async throws 
     #expect(
         response.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOnceOption.optionId))
     )
-    // The request never reached the container, so no prompt waits for a
+    // The request never reached the inner client, so no prompt waits for a
     // person who is not there.
-    #expect(harness.container.session(for: testSession).pendingPermissionRequests.isEmpty)
+    #expect(harness.inner.requests.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
@@ -159,7 +229,7 @@ func aPermissionRequestWithNoRejectOptionIsAnsweredCancelled() async throws {
     )
 
     #expect(response.outcome == .cancelled)
-    #expect(harness.container.session(for: testSession).pendingPermissionRequests.isEmpty)
+    #expect(harness.inner.requests.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
@@ -227,9 +297,9 @@ func aFormElicitationIsDeclinedAtOnce() async throws {
 
     #expect(response == declineResponse)
     #expect(harness.buffer.text == elicitationRefusalLine(mode: formModeText))
-    // The elicitation never reached the container, so no prompt waits for a
-    // person who is not there.
-    #expect(harness.container.pendingElicitations.isEmpty)
+    // The elicitation never reached the inner client, so no prompt waits for
+    // a person who is not there.
+    #expect(harness.inner.requests.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
@@ -243,47 +313,32 @@ func aUrlElicitationIsDeclinedWithNoURLOpenedAndNoValueSentBack() async throws {
     // member, so no credential goes back over ACP.
     #expect(response == declineResponse)
     #expect(harness.buffer.text == elicitationRefusalLine(mode: urlModeText))
-    #expect(harness.container.pendingElicitations.isEmpty)
+    #expect(harness.inner.requests.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
-func aForwardedSessionUpdateLandsInTheContainersSessionState() async throws {
+func aSessionUpdateIsForwardedToTheInnerClient() async throws {
     let harness = DecliningClientHarness()
-    let messageID = MessageId(rawValue: "declining-agent-msg-1")
-    let replyText = "Hello from the agent."
+    let update = agentChunk(text: "Hello from the agent.", message: "declining-agent-msg-1")
 
-    await harness.client.sessionUpdate(
-        UpdateSessionNotification(
-            sessionId: testSession,
-            update: agentChunk(text: replyText, message: messageID.rawValue)
-        )
-    )
+    await harness.client.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
 
-    let state = harness.container.session(for: testSession)
-    state.flushPendingChunks()
-    #expect(state.messageContent(for: messageID) == [textBlock(replyText)])
+    #expect(harness.inner.sessionUpdates.elements.map(\.sessionId) == [testSession])
+    #expect(harness.inner.sessionUpdates.elements.map(\.update) == [update])
     // Forwarding writes nothing: only a refusal writes a line.
     #expect(harness.buffer.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
-func aForwardedElicitationCompleteReachesTheContainer() async throws {
+func anElicitationCompleteIsForwardedToTheInnerClient() async throws {
     let harness = DecliningClientHarness()
-    let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
-
-    // The container is the only holder of pending elicitations, so the
-    // request goes to it directly. A resolution proves the notification
-    // reached it through the wrapper.
-    let responseTask = Task { try await harness.container.createElicitation(request) }
-    try await waitUntil { !harness.container.pendingElicitations.isEmpty }
 
     await harness.client.elicitationComplete(
         CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
     )
 
-    let response = try await responseTask.value
-    #expect(response == .object(["action": .string("accept")]))
-    #expect(harness.container.pendingElicitations.isEmpty)
+    #expect(harness.inner.completedElicitations.elements == [ElicitationFixtures.urlID])
+    #expect(harness.buffer.elements.isEmpty)
 }
 
 @MainActor @Test(.timeLimit(.minutes(1)))
@@ -316,37 +371,38 @@ func eachRefusalWritesOneLineAtQuietToo() async throws {
     }
 }
 
+/// The connection model serves the declining client in front of its own
+/// router, so the elicitation of a turn is refused at once, no model holds it
+/// as pending, and the turn still reaches its stop reason.
 @MainActor @Test(.timeLimit(.minutes(1)))
 func anElicitationDuringATurnStillLetsTheTurnReachItsStopReason() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let elicitation = ElicitationFixtures.formRequest(
-        scope: .session(ElicitationFixtures.sessionScope)
-    )
+    let idle = idleState(stopReason: .endTurn)
     let agentConnection = await AgentSideConnection(stream: agentEnd) { agentSide in
         ScriptedStubAgent(
             connection: agentSide,
             session: testSession,
-            script: [idleState(stopReason: .endTurn)],
-            elicitation: elicitation
+            script: [idle],
+            elicitation: ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
         )
     }
-    let harness = DecliningClientHarness()
-    let connection = await harness.container.connect(over: clientEnd) { _ in harness.client }
-
-    let cwd = AbsolutePath(rawValue: "/")
-    let session = try await connection.newSession(NewSessionRequest(cwd: cwd))
-    #expect(session.sessionId == testSession)
+    let buffer = ThreadSafeBuffer<String>()
+    let terminal = bufferedTerminal(verbosity: .normal, into: buffer)
+    let model = ConnectionModel(coalescingCadence: .zero)
+    let connection = await model.connect(over: clientEnd) { router in
+        DecliningClient(inner: router, output: terminal)
+    }
+    let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
+    var updates = session.updateTap().makeAsyncIterator()
 
     // The prompt returns only after the agent's elicitation was answered, so
     // a wrapper that waited for a person would time this test out.
-    _ = try await connection.prompt(
-        PromptRequest(prompt: [textBlock("go")], sessionId: session.sessionId)
-    )
+    _ = try await session.prompt([textBlock("go")])
 
-    let state = harness.container.session(for: session.sessionId)
-    #expect(await eventually { state.lastStopReason == .endTurn })
-    #expect(harness.container.pendingElicitations.isEmpty)
-    #expect(harness.buffer.text == elicitationRefusalLine(mode: formModeText))
+    #expect(await updates.next() == idle)
+    #expect(session.pendingElicitations.isEmpty)
+    #expect(model.pendingElicitations.isEmpty)
+    #expect(buffer.text == elicitationRefusalLine(mode: formModeText))
 
     await connection.close()
     withExtendedLifetime(agentConnection) {}

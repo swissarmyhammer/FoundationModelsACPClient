@@ -2,7 +2,7 @@
 // answer as it arrives, and detect the end of the turn.
 //
 // This type holds NO process handling. `AgentSession` gives it a live
-// connection and an update stream, and `RunCommand` owns the `AgentProcess`.
+// connection and a session model, and `RunCommand` owns the `AgentProcess`.
 // That split is the whole reason this file is unit-testable over
 // `InMemoryTransport.pair()`: no binary is started, and no test waits on a
 // pipe.
@@ -21,7 +21,8 @@
 //    present, and an absent reason gives ``TurnOutcome/idleWithNoReason``.
 // 3. A thought chunk is the agent's reasoning and not its answer. §8 keeps
 //    standard output for the answer alone, so a thought reaches the
-//    observable container behind the connection and never reaches the sink.
+//    observable session model behind the connection and never reaches the
+//    sink.
 // 4. The sink takes `Data` and not `String`, because §8 wants the answer
 //    bytes verbatim: nothing added, no trailing newline and no colour, in a
 //    terminal and in a pipe alike. One write per chunk is one flush per
@@ -230,7 +231,11 @@ struct TurnRunner {
     ///   process has no working directory, `RequestError` on a peer error, or
     ///   `ConnectionError` when the agent went away.
     func run() async throws -> TurnOutcome {
-        let (sessionId, events) = try await session.openSession()
+        let opened = try await session.openSession()
+        // The tap is made before the prompt goes out, so it gives each update
+        // of the turn.
+        let updates = opened.updateTap()
+        let sessionId = opened.sessionId
         let (toolNames, toolNameFeed) = AsyncStream<String>.makeStream()
         let promptTrace = PromptTraceContext()
         return try await withThrowingTaskGroup(of: TurnEvent.self) { group in
@@ -249,7 +254,7 @@ struct TurnRunner {
             }
             group.addTask {
                 let outcome = await self.readTurn(
-                    from: events,
+                    from: updates,
                     reportingToolNamesTo: toolNameFeed
                 )
                 guard let outcome else { return .streamEndedWithoutIdle }
@@ -369,22 +374,20 @@ struct TurnRunner {
 
     /// Reads the session's updates until the agent reports `idle`.
     ///
-    /// The marker of a finished request changes nothing here: the prompt
-    /// answer never ends the turn, so the turn reads only the updates.
-    ///
     /// - Parameters:
-    ///   - events: The session's event stream.
+    ///   - updates: The update tap of the session model, which gives each raw
+    ///     update at its arrival.
     ///   - toolNameFeed: Where the running tool name goes, which is the
     ///     spinner's line. It ends at the first answer chunk, because §8
     ///     stops the spinner there, and at the end of the turn, for a turn
     ///     that carried no answer text at all.
     /// - Returns: Why the turn ended, or `nil` when the stream ended first.
     private func readTurn(
-        from events: AsyncStream<SessionStreamEvent>,
+        from updates: AsyncStream<SessionUpdate>,
         reportingToolNamesTo toolNameFeed: AsyncStream<String>.Continuation
     ) async -> TurnOutcome? {
         defer { toolNameFeed.finish() }
-        for await case .update(let update) in events {
+        for await update in updates {
             switch apply(update, reportingToolNamesTo: toolNameFeed) {
             case .turnEnded(let outcome):
                 return outcome
@@ -400,7 +403,7 @@ struct TurnRunner {
     /// Applies one update: writes an answer chunk, reports a tool name, or
     /// reads the end of the turn.
     ///
-    /// Every other update — a thought chunk among them — is the container's
+    /// Every other update — a thought chunk among them — is the session model's
     /// business and not this sink's, so it changes nothing here.
     ///
     /// - Parameters:
@@ -482,6 +485,6 @@ private enum UpdateEffect {
     /// The update carried answer text, and the text reached the sink.
     case answerWritten
 
-    /// The update belongs to the observable container and not to the sink.
+    /// The update belongs to the observable session model and not to the sink.
     case ignored
 }

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Testing
 
 @testable import AcpClientCore
 @testable import FoundationModelsACPClient
@@ -78,7 +79,10 @@ struct TracedSessionHarness {
                 cancelScript: cancelScript,
                 permissionRequest: permissionRequest,
                 promptError: promptError,
-                closeSessionError: closeSessionError
+                closeSessionError: closeSessionError,
+                // The session baseline holds `session/close`, so the
+                // connection model sends the close of each session.
+                capabilities: AgentCapabilities(session: SessionCapabilities())
             )
             builtAgents.append(stub)
             return stub
@@ -107,7 +111,23 @@ struct TracedSessionHarness {
     func runWholeSession() async throws {
         _ = try await session.initialize()
         _ = try await runner.run()
-        await session.closeSession(testSession)
+        try await closeTheTurnSession()
+    }
+
+    /// Sends `session/close` for the session the turn opened.
+    ///
+    /// - Throws: A requirement failure when the turn opened no session.
+    func closeTheTurnSession() async throws {
+        await session.closeSession(try #require(session.model.session(for: testSession)))
+    }
+
+    /// Sends `initialize`, opens one session, and sends `session/close` for
+    /// it, with no turn between.
+    ///
+    /// - Throws: Whatever `initialize` or `session/new` threw.
+    func openAndCloseOneSession() async throws {
+        _ = try await session.initialize()
+        await session.closeSession(try await session.openSession())
     }
 
     /// Gives the `_meta` that the agent got for one method.

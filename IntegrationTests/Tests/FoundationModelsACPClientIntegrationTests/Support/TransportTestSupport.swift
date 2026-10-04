@@ -16,10 +16,14 @@ import FoundationModelsACP
 // product that each user of the root package gets too.
 //
 // The helpers that both copies hold are the same, word for word:
-// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
-// `waitForIdle(in:within:)`, `makeInitializeRequest()` and
-// `promptTurnLandsReply(over:client:sessionId:messageID:expectedText:)`. A
-// change to one of them goes into both copies.
+// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)` and
+// `makeInitializeRequest()`. A change to one of them goes into both copies.
+//
+// `waitForIdle(in:within:)`, `initializedConnection(for:over:)` and
+// `promptTurnLandsReply(in:messageID:expectedText:)` here drive the
+// `ConnectionModel` and the `SessionModel`, which is what the `acp-client`
+// binary drives. The unit copy keeps the forms that drive `SwiftUIACPClient`,
+// because the unit tests of that container still use them.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {
@@ -83,19 +87,18 @@ func outcome<Answer: Sendable>(
     }
 }
 
-/// Waits for an idle `state_update` on one session event stream. The
-/// request markers of the stream do not end the wait.
+/// Waits for an idle `state_update` on the update tap of one session model.
 ///
 /// - Parameters:
-///   - events: The stream to read.
+///   - updates: The update tap to read.
 ///   - limit: The longest time to wait.
 /// - Returns: `true` when an idle update arrived before the limit ended.
 func waitForIdle(
-    in events: AsyncStream<SessionStreamEvent>,
+    in updates: AsyncStream<SessionUpdate>,
     within limit: Duration = TransportTestDeadline.limit
 ) async -> Bool {
     await outcome(within: limit) {
-        for await case .update(.stateUpdate(.idle(_))) in events {
+        for await case .stateUpdate(.idle(_)) in updates {
             return true
         }
         return false
@@ -113,51 +116,60 @@ func makeInitializeRequest() -> InitializeRequest {
     )
 }
 
-/// Connects `client` over `transport` and completes the initialize
-/// handshake, for the tests that do not assert on the handshake itself.
+/// Connects `model` over `transport` and completes the initialize
+/// handshake through it, for the tests that do not assert on the handshake
+/// itself.
 ///
 /// - Parameters:
-///   - client: The client to connect.
+///   - model: The connection model to connect.
 ///   - transport: The transport to run over.
 /// - Returns: The initialized connection.
 @MainActor
 func initializedConnection(
-    for client: SwiftUIACPClient,
+    for model: ConnectionModel,
     over transport: any ACPTransport
 ) async throws -> ClientSideConnection {
-    let connection = await client.connect(over: transport)
-    _ = try await connection.initialize(makeInitializeRequest())
+    let connection = await model.connect(over: transport)
+    _ = try await model.initialize(makeInitializeRequest())
     return connection
 }
 
-/// Drives one prompt turn and waits until the agent's streamed reply landed
-/// in the observable session state.
+/// Drives one prompt turn through a session model and tells whether the
+/// agent's streamed reply landed in its transcript.
+///
+/// The tap is made before the prompt goes out, so it gives each update of
+/// the turn. The model applies an update before the tap consumer reads it,
+/// so the transcript holds the whole reply when the idle update arrives.
 ///
 /// - Parameters:
-///   - connection: The connection to drive.
-///   - client: The client whose observable state receives the reply.
-///   - sessionId: The session to prompt.
+///   - session: The model of the session to prompt.
 ///   - messageID: The message id the agent stamps on its reply chunk.
-///   - expectedText: The reply text the state must hold at the end.
+///   - expectedText: The reply text the transcript must hold at the end.
 /// - Returns: `true` when the turn went idle and the reply landed.
 @MainActor
 func promptTurnLandsReply(
-    over connection: ClientSideConnection,
-    client: SwiftUIACPClient,
-    sessionId: SessionId,
+    in session: SessionModel,
     messageID: MessageId,
     expectedText: String
 ) async throws -> Bool {
-    let events = connection.subscribe(to: sessionId).updates
-    _ = try await connection.prompt(
-        PromptRequest(prompt: [.text(TextContent(text: "Hello"))], sessionId: sessionId)
-    )
-    guard await waitForIdle(in: events) else { return false }
-    let state = client.session(for: sessionId)
-    return await eventually {
-        state.flushPendingChunks()
-        return state.messageContent(for: messageID) == [.text(TextContent(text: expectedText))]
+    let updates = session.updateTap()
+    _ = try await session.prompt([.text(TextContent(text: "Hello"))])
+    guard await waitForIdle(in: updates) else { return false }
+    return session.transcript.contains { entry in
+        guard case .agentMessage(let message) = entry else { return false }
+        return message.messageId == messageID && message.content == [.text(TextContent(text: expectedText))]
     }
+}
+
+/// Gives the stop reason of the last idle state a session model holds.
+///
+/// - Parameter session: The session model.
+/// - Returns: The stop reason, or `nil` when the agent is not idle or named
+///   no stop reason.
+@MainActor
+func idleStopReason(of session: SessionModel) -> StopReason? {
+    guard case .idle(let idle) = session.agentState else { return nil }
+    return idle.stopReason
 }
 
 /// Tells whether a process with `pid` exists.
