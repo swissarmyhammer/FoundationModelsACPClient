@@ -8,26 +8,24 @@
 ///
 /// A caller that waits for its turn obeys the cancel of its task: it leaves
 /// the queue at once and throws `CancellationError`, and its operation never
-/// runs.
+/// runs. The shared ``KeyedWaiters`` holds the callers that wait.
 @MainActor
 final class KeyedTurnQueue<Key: Hashable & Sendable> {
-    /// A caller that waits for its turn.
-    private struct Waiter {
-        /// The id that the cancel handler of the caller names the waiter by.
-        let id: Int
+    /// How a caller that waited for its turn resumes.
+    private enum Turn {
+        /// The earlier operation of the key ended, so the caller runs now.
+        case granted
 
-        /// The continuation that gives the turn to the caller, or throws
-        /// `CancellationError` when its task was cancelled.
-        let continuation: CheckedContinuation<Void, any Error>
+        /// The task of the caller was cancelled while it waited.
+        case cancelled
     }
 
-    /// The callers that wait for their turn, in call order, keyed by the key
-    /// of their operation. A key is in the dictionary while an operation of
-    /// that key runs.
-    private var waiters: [Key: [Waiter]] = [:]
+    /// The keys that have a running operation.
+    private var runningKeys: Set<Key> = []
 
-    /// The id of the next caller that waits.
-    private var nextWaiterId = 0
+    /// The callers that wait for their turn, keyed by the key of their
+    /// operation.
+    private let waiters = KeyedWaiters<Key, Turn>(cancelledValue: .cancelled)
 
     /// Makes a queue with no running operation.
     init() {}
@@ -54,50 +52,13 @@ final class KeyedTurnQueue<Key: Hashable & Sendable> {
     /// - Throws: `CancellationError` when the task was cancelled before the
     ///   turn came. The key then does not run for this caller.
     private func takeTurn(for key: Key) async throws {
-        guard waiters[key] != nil else {
-            waiters[key] = []
+        guard runningKeys.contains(key) else {
+            runningKeys.insert(key)
             return
         }
-        let id = nextWaiterId
-        nextWaiterId += 1
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                enqueue(Waiter(id: id, continuation: continuation), for: key)
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelWaiter(id, of: key)
-            }
+        guard await waiters.wait(for: key) == .granted else {
+            throw CancellationError()
         }
-    }
-
-    /// Puts a caller at the end of the waiters of a key. A caller whose task
-    /// was already cancelled does not wait: the cancel handler ran before the
-    /// caller was in the queue, so the caller throws at once.
-    ///
-    /// - Parameters:
-    ///   - waiter: The caller that waits.
-    ///   - key: The key of its operation.
-    private func enqueue(_ waiter: Waiter, for key: Key) {
-        guard !Task.isCancelled else {
-            waiter.continuation.resume(throwing: CancellationError())
-            return
-        }
-        waiters[key, default: []].append(waiter)
-    }
-
-    /// Takes a cancelled caller out of the waiters of a key, and makes it
-    /// throw `CancellationError`. A caller that already has its turn is not in
-    /// the queue, so the call then changes nothing.
-    ///
-    /// - Parameters:
-    ///   - id: The id of the waiter.
-    ///   - key: The key of its operation.
-    private func cancelWaiter(_ id: Int, of key: Key) {
-        guard let index = waiters[key]?.firstIndex(where: { $0.id == id }),
-            let waiter = waiters[key]?.remove(at: index)
-        else { return }
-        waiter.continuation.resume(throwing: CancellationError())
     }
 
     /// Gives the turn of a key to its next waiter, or marks the key as idle
@@ -105,12 +66,8 @@ final class KeyedTurnQueue<Key: Hashable & Sendable> {
     ///
     /// - Parameter key: The key of the operation that ended.
     private func passTurn(for key: Key) {
-        guard var queue = waiters[key], !queue.isEmpty else {
-            waiters[key] = nil
-            return
+        if !waiters.resumeFirst(of: key, with: .granted) {
+            runningKeys.remove(key)
         }
-        let next = queue.removeFirst()
-        waiters[key] = queue
-        next.continuation.resume()
     }
 }
