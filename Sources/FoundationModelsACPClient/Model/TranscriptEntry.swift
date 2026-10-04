@@ -230,18 +230,3 @@ extension MessageTranscriptEntry {
         assign(message.meta.currentValue, to: \.meta)
     }
 }
-
-extension PatchField {
-    /// The value of a field that holds a concrete value, or `nil` for a field
-    /// that is unchanged or cleared.
-    ///
-    /// The session merge engine folds each field, so on a merged value
-    /// `.unchanged` means that no update gave the field, and `.cleared` means
-    /// that the agent cleared it. A view shows both as no value.
-    var currentValue: Wrapped? {
-        switch self {
-        case .value(let wrapped): wrapped
-        case .unchanged, .cleared: nil
-        }
-    }
-}

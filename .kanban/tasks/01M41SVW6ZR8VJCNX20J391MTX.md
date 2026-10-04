@@ -98,8 +98,24 @@ comments:
     - evidence: one local commit, refactor(model): share one keyed waiter core between the pending and turn queues
     - next: review
   timestamp: 2026-10-04T00:08:57.400394+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m424297c2ptbywce825206b1
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (1bc3a0c); counts findings 0, confirmed 0, refuted 0, attempted 7, failed 0. The 1 prior finding (KeyedTurnQueue.swift:13 duplication) is checked. Five code-hygiene tool rules declined Sources/FoundationModelsACPClient/PendingRequestStates.swift because this commit deletes that file (renamed to PendingRequestQueue.swift).
+    - next: none. The task is in done.
+  timestamp: 2026-10-04T00:12:20.588196+00:00
+- actor: claude-code
+  id: 01m4242k9qcfgc9nczb811f6m5
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 4 files (KeyedWaiters.swift new, PendingRequestQueue.swift renamed, KeyedTurnQueue.swift, KeyedWaitersTests.swift new)
+    - test: green — swift test 515/515, IntegrationTests 103/103
+    - commit: 1bc3a0c refactor(model): share one keyed waiter core between the pending and turn queues
+    - review: clean — prior finding checked; task moved to done
+  timestamp: 2026-10-04T00:12:30.903217+00:00
+position_column: done
+position_ordinal: cb80
 title: 'Model: two concurrent resumeSession calls of one session share one replay state'
 ---
 ## What

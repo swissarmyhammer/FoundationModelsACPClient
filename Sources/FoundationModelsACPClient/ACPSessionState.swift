@@ -473,8 +473,8 @@ public final class ACPSessionState {
         case .configOptionUpdate(let payload):
             configOptions = payload.configOptions
         case .sessionInfoUpdate(let info):
-            title = resolve(info.title, current: title)
-            updatedAt = resolve(info.updatedAt, current: updatedAt)
+            title = info.title.applied(to: title)
+            updatedAt = info.updatedAt.applied(to: updatedAt)
         case .usageUpdate(let payload):
             usage = payload
         case .unknown:
@@ -509,24 +509,5 @@ public final class ACPSessionState {
     private func appendEntryIfNew(_ entry: SessionEntry) {
         guard knownEntryIdentities.insert(entry.id).inserted else { return }
         entries.append(entry)
-    }
-
-    /// Resolves one patch-semantics field onto a stored optional value:
-    /// omitted keeps the stored value, `null` clears it, and a concrete
-    /// value replaces it.
-    ///
-    /// - Parameters:
-    ///   - field: The received field.
-    ///   - current: The stored value.
-    /// - Returns: The new stored value.
-    private func resolve<Value: Codable & Hashable & Sendable>(
-        _ field: PatchField<Value>,
-        current: Value?
-    ) -> Value? {
-        switch field {
-        case .unchanged: current
-        case .cleared: nil
-        case .value(let value): value
-        }
     }
 }

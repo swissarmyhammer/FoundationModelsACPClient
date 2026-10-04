@@ -150,18 +150,3 @@ extension SessionInfo {
         meta = update.meta.applied(to: meta)
     }
 }
-
-extension PatchField {
-    /// Applies this patch state to a stored optional value.
-    ///
-    /// - Parameter current: The stored value.
-    /// - Returns: `current` for `.unchanged`, `nil` for `.cleared`, and the
-    ///   new value for `.value`.
-    fileprivate func applied(to current: Wrapped?) -> Wrapped? {
-        switch self {
-        case .unchanged: current
-        case .cleared: nil
-        case .value(let value): value
-        }
-    }
-}
