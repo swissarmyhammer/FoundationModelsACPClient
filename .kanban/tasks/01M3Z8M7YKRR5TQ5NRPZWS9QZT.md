@@ -1,8 +1,15 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '9280'
+comments:
+- actor: claude-code
+  id: 01m448wbnc9vnd3bfwjtbephez
+  text: |-
+    ### closed — not done
+    The user accepted the MLX / mlx-swift SwiftPM warnings ("missing creator for mutated node" and the C++17 extension warnings), so this task is closed with no change. To remove the warning later, move MLX out of the core FoundationModelsExtras target, or use an mlx-swift version that does not cause it.
+  timestamp: 2026-10-04T20:14:58.220541+00:00
+position_column: done
+position_ordinal: d180
 title: Remove the SwiftPM "missing creator for mutated node" warning that the MLX bundle of FoundationModelsExtras main causes in `swift build`
 ---
 ## What
