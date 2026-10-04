@@ -15,8 +15,8 @@ extension SessionModel {
     ///
     /// The value gives approximately 30 flushes for each second. That rate is
     /// smooth for a reader and far under the token rate. This is the one
-    /// definition of the value: ``ACPSessionState`` and ``SwiftUIACPClient``
-    /// also use it as their default cadence.
+    /// definition of the value: ``ConnectionModel`` also uses it as its
+    /// default cadence.
     public static let defaultCoalescingCadence: Duration = .milliseconds(defaultCoalescingCadenceMilliseconds)
 
     // MARK: - Coalescing

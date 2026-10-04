@@ -248,6 +248,42 @@ struct ConnectionModelTests {
         #expect(model.openSessions.isEmpty)
     }
 
+    @Test func aDisconnectFlushesTheBufferedChunksOfEachOpenSession() async throws {
+        let model = ConnectionModel(coalescingCadence: SessionModelFixtures.bufferedCadence, clock: ManualClock())
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        _ = await model.connect(over: clientEnd)
+        let first = model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        let second = model.makeSessionModel(sessionId: otherTestSession, requestSender: FakeSessionRequestSender())
+        model.register(first)
+        model.register(second)
+        first.apply(agentChunk(text: "left open"))
+        second.apply(agentChunk(text: "also open", message: "agent-2"))
+        // The manual clock never moves, so only the disconnect can flush.
+        try #require(first.transcript.isEmpty && second.transcript.isEmpty)
+
+        agentEnd.close()
+
+        #expect(await eventually { model.state == .disconnected })
+        #expect(try #require(first.transcript.first?.agentMessage).content.joinedText == "left open")
+        #expect(try #require(second.transcript.first?.agentMessage).content.joinedText == "also open")
+    }
+
+    @Test func aDisconnectCancelsEachSessionScopedElicitation() async throws {
+        let model = ConnectionModel()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        _ = await model.connect(over: clientEnd)
+        let session = SessionModelFixtures.immediateModel()
+        model.register(session)
+        let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
+        let elicitation = Task { await session.awaitElicitation(request) }
+        try await waitUntil { !session.pendingElicitations.isEmpty }
+
+        agentEnd.close()
+
+        #expect(await elicitation.value == ElicitationResponseWire.cancelResponse)
+        #expect(session.pendingElicitations.isEmpty)
+    }
+
     @Test func aFailureClosesEachOpenSession() async {
         let model = ConnectionModel()
         let transport = FailingTransport()

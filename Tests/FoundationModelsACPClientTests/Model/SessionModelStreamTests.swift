@@ -62,16 +62,59 @@ private func requestFinished(
     .requestFinished(id: markedRequestId, method: method, outcome: outcome)
 }
 
-/// Runs one successful replay of the fixture updates into a model.
+/// The id of the summary message that a compaction writes into the record.
+private let summaryMessageId = MessageId(rawValue: "summary-1")
+
+/// The command that the compacted record announces.
+private let compactedRecordCommand = AvailableCommand(description: "Makes a plan", name: "create_plan")
+
+/// The live updates of the first turn, before the compaction.
+private let firstTurnUpdates: [SessionUpdate] = [
+    userChunk(text: "first question", message: "user-1"),
+    agentChunk(text: "first answer", message: "agent-1"),
+    idleState(stopReason: .endTurn),
+]
+
+/// The live updates of the second turn, after the compaction.
+private let secondTurnUpdates: [SessionUpdate] = [
+    userChunk(text: "second question", message: "user-2"),
+    agentChunk(text: "second answer", message: "agent-2"),
+    idleState(stopReason: .endTurn),
+]
+
+/// The replay of the record after the compaction: one summary message in
+/// place of the first turn, then the whole second turn. The agent message of
+/// the second turn replays in two chunks, so a replay that lands two times
+/// shows the text two times.
+private let compactedRecord: [SessionUpdate] = [
+    .agentMessage(AgentMessage(messageId: summaryMessageId, content: .value([textBlock("summary of the first turn")]))),
+    .userMessage(UserMessage(messageId: MessageId(rawValue: "user-2"), content: .value([textBlock("second question")]))),
+    agentChunk(text: "second ", message: "agent-2"),
+    agentChunk(text: "answer", message: "agent-2"),
+    toolCallStatus(id: replayedToolCallId.rawValue, .completed),
+    .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [compactedRecordCommand])),
+    .sessionInfoUpdate(SessionInfoUpdate(title: .value("Compacted session"))),
+    idleState(stopReason: .endTurn),
+]
+
+/// Runs one successful replay from the start into a model.
 ///
-/// - Parameter model: The model that receives the replay.
+/// - Parameters:
+///   - updates: The replayed updates, in order.
+///   - model: The model that receives the replay.
 @MainActor
-private func replayFixture(into model: SessionModel) {
+private func replayFixture(_ updates: [SessionUpdate] = replayedUpdates, into model: SessionModel) {
     model.beginReplay(replayFrom: replayFromStart)
-    for update in replayedUpdates {
-        model.apply(update)
-    }
+    model.applyEach(updates)
     model.endReplay(succeeded: true)
+}
+
+extension SessionModel {
+    /// The content of each message entry of the transcript, in order, and
+    /// `nil` for an entry that is not a message.
+    fileprivate var messageContents: [[ContentBlock]?] {
+        transcript.map { $0.userMessage?.content ?? $0.agentMessage?.content ?? $0.thought?.content }
+    }
 }
 
 /// The stream tests, in one suite so that `swift test --filter
@@ -368,6 +411,88 @@ struct SessionModelStreamTests {
 
         #expect(model.transcript.count == replayedEntryCount)
         #expect(model.usage == SessionModelFixtures.usage)
+    }
+
+    // MARK: - Replay after a compaction
+
+    /// Expects two models to show the same session: the same transcript
+    /// entries with the same message content, and the same last-value state.
+    ///
+    /// - Parameters:
+    ///   - model: The model under test.
+    ///   - reference: The model that shows the expected session.
+    private static func expectSameSession(_ model: SessionModel, as reference: SessionModel) {
+        #expect(model.transcript.map(\.id) == reference.transcript.map(\.id))
+        #expect(model.messageContents == reference.messageContents)
+        #expect(model.availableCommands == reference.availableCommands)
+        #expect(model.sessionInfo == reference.sessionInfo)
+        #expect(model.agentState == reference.agentState)
+    }
+
+    @Test func aReplayAfterACompactionGivesTheTranscriptOfAFreshReplay() {
+        let fresh = SessionModelFixtures.immediateModel()
+        replayFixture(compactedRecord, into: fresh)
+        let reloaded = SessionModelFixtures.immediateModel()
+        reloaded.applyEach(firstTurnUpdates + secondTurnUpdates)
+        #expect(reloaded.transcript.map(\.id) != fresh.transcript.map(\.id))
+
+        replayFixture(compactedRecord, into: reloaded)
+
+        Self.expectSameSession(reloaded, as: fresh)
+    }
+
+    @Test func aLiveStreamOfARecordGivesTheTranscriptOfItsReplay() {
+        let replayed = SessionModelFixtures.immediateModel()
+        replayFixture(compactedRecord, into: replayed)
+        let streamed = SessionModelFixtures.immediateModel()
+
+        streamed.applyEach(compactedRecord)
+
+        Self.expectSameSession(streamed, as: replayed)
+    }
+
+    @Test func aLiveChunkAfterAReplayAppendsToTheReplayedMessage() throws {
+        let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
+        let userMessageId = MessageId(rawValue: "user-1")
+        let agentMessageId = MessageId(rawValue: "agent-1")
+        let running = SessionUpdate.stateUpdate(.running(RunningStateUpdate()))
+        let turnSoFar = [agentChunk(text: "Hel"), agentChunk(text: "lo")]
+        // The chunks of the turn so far stay in the buffer when the replay
+        // starts.
+        model.applyEach([userChunk(text: "Question"), running] + turnSoFar)
+
+        let question = UserMessage(messageId: userMessageId, content: .value([textBlock("Question")]))
+        replayFixture([.userMessage(question)] + turnSoFar + [running], into: model)
+        model.apply(agentChunk(text: " world"))
+        model.flushPendingChunks()
+
+        #expect(model.transcript.map(\.id) == [.wire(.userMessage(userMessageId)), .wire(.agentMessage(agentMessageId))])
+        #expect(try #require(model.transcript.last?.agentMessage).content == [textBlock("Hel"), textBlock("lo"), textBlock(" world")])
+        #expect(model.agentState == .running(RunningStateUpdate()))
+    }
+
+    @Test func aPendingPermissionStaysPendingAcrossAReplay() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        replayFixture(into: model)
+        let permission = try await SessionModelFixtures.startPermission(on: model)
+
+        replayFixture(compactedRecord, into: model)
+
+        let pending = try #require(model.pendingPermissions.first)
+        #expect(model.pendingPermissions.count == 1)
+        model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
+        let response = await permission.value
+        #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId)))
+    }
+
+    @Test func anUpdateAfterAFailedReplayApplies() throws {
+        let model = SessionModelFixtures.immediateModel()
+        model.beginReplay(replayFrom: replayFromStart)
+        model.endReplay(succeeded: false)
+
+        model.apply(agentChunk(text: "live"))
+
+        #expect(try #require(model.transcript.first?.agentMessage).content.joinedText == "live")
     }
 
     @Test func aReplayedToolCallTakesTheLinkOfAPendingElicitation() async throws {

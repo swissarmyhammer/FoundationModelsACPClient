@@ -1,7 +1,6 @@
 import FoundationModelsACP
 
-/// The display-rate chunk buffer that ``SessionModel`` and
-/// ``ACPSessionState`` share.
+/// The display-rate chunk buffer of ``SessionModel``.
 ///
 /// `agent_message_chunk` and `agent_thought_chunk` arrive at token rate. The
 /// coalescer holds them in a buffer and gives the whole buffer to its owner on

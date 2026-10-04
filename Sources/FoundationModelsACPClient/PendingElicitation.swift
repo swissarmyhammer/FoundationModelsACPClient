@@ -10,16 +10,15 @@ import FoundationModelsACP
 /// ``SessionModel/declineElicitation(_:)``, or
 /// ``SessionModel/cancelElicitation(_:)`` — or through the methods of the
 /// same names on ``ConnectionModel``, which holds the request-scoped
-/// elicitations, or on ``SwiftUIACPClient``.
+/// elicitations.
 ///
 /// A form-mode elicitation asks the UI to render a form from the
 /// requested schema, and to accept with values that match that schema. A
 /// url-mode elicitation asks the UI to direct the user to ``url``. The
-/// container never navigates on its own: the UI must show ``targetHost``,
+/// models never navigate on their own: the UI must show ``targetHost``,
 /// get the user's consent, and only then navigate. The URL flow returns
-/// its data out of band, and
-/// ``SwiftUIACPClient/elicitationComplete(_:)`` closes the prompt, so no
-/// credentials go back over ACP.
+/// its data out of band, and the `elicitation/complete` notification of the
+/// agent closes the prompt, so no credentials go back over ACP.
 ///
 /// The wire request carries no local identity of its own, so the client
 /// gives each pending elicitation a local, stable identity. SwiftUI
@@ -58,9 +57,9 @@ public struct PendingElicitation: Identifiable, Hashable, Sendable {
     /// The session this elicitation is tied to, or `nil`.
     ///
     /// A request-scoped elicitation has no session — it can arrive before
-    /// any session exists, for example during authentication.
-    /// ``SwiftUIACPClient/pendingElicitations(for:)`` filters on this
-    /// value.
+    /// any session exists, for example during authentication. The
+    /// ``ConnectionModel`` holds such an elicitation, and the
+    /// ``SessionModel`` of this session holds each other one.
     public var sessionId: SessionId? {
         sessionScope?.sessionId
     }

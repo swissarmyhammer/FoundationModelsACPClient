@@ -16,9 +16,12 @@ import FoundationModelsACP
 //
 // The helpers that both copies hold are the same, word for word:
 // `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
-// `waitForIdle(in:within:)`, `makeInitializeRequest()` and
-// `promptTurnLandsReply(over:client:sessionId:messageID:expectedText:)`. A
-// change to one of them goes into both copies.
+// `waitForIdle(in:within:)` and `makeInitializeRequest()`. A change to one of
+// them goes into both copies.
+//
+// `waitUntil(_:)` is in this copy alone: only the unit tests wait on a
+// condition with no deadline of their own. The integration copy holds the
+// helpers that only the integration tests use.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {
@@ -97,19 +100,18 @@ func outcome<Answer: Sendable>(
     }
 }
 
-/// Waits for an idle `state_update` on one session event stream. The
-/// request markers of the stream do not end the wait.
+/// Waits for an idle `state_update` on the update tap of one session model.
 ///
 /// - Parameters:
-///   - events: The stream to read.
+///   - updates: The update tap to read.
 ///   - limit: The longest time to wait.
 /// - Returns: `true` when an idle update arrived before the limit ended.
 func waitForIdle(
-    in events: AsyncStream<SessionStreamEvent>,
+    in updates: AsyncStream<SessionUpdate>,
     within limit: Duration = TransportTestDeadline.limit
 ) async -> Bool {
     await outcome(within: limit) {
-        for await case .update(.stateUpdate(.idle(_))) in events {
+        for await case .stateUpdate(.idle(_)) in updates {
             return true
         }
         return false
@@ -125,34 +127,4 @@ func makeInitializeRequest() -> InitializeRequest {
         protocolVersion: ACPClient.supportedProtocolVersion,
         capabilities: ACPClient.advertisedCapabilities
     )
-}
-
-/// Drives one prompt turn and waits until the agent's streamed reply landed
-/// in the observable session state.
-///
-/// - Parameters:
-///   - connection: The connection to drive.
-///   - client: The client whose observable state receives the reply.
-///   - sessionId: The session to prompt.
-///   - messageID: The message id the agent stamps on its reply chunk.
-///   - expectedText: The reply text the state must hold at the end.
-/// - Returns: `true` when the turn went idle and the reply landed.
-@MainActor
-func promptTurnLandsReply(
-    over connection: ClientSideConnection,
-    client: SwiftUIACPClient,
-    sessionId: SessionId,
-    messageID: MessageId,
-    expectedText: String
-) async throws -> Bool {
-    let events = connection.subscribe(to: sessionId).updates
-    _ = try await connection.prompt(
-        PromptRequest(prompt: [.text(TextContent(text: "Hello"))], sessionId: sessionId)
-    )
-    guard await waitForIdle(in: events) else { return false }
-    let state = client.session(for: sessionId)
-    return await eventually {
-        state.flushPendingChunks()
-        return state.messageContent(for: messageID) == [.text(TextContent(text: expectedText))]
-    }
 }

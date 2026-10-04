@@ -4,9 +4,8 @@ import Testing
 
 @testable import FoundationModelsACPClient
 
-// The unit tests of `ChunkCoalescer`, the one chunk buffer that
-// `SessionModel` and `ACPSessionState` share. A manual clock controls the
-// cadence, so no test reads the wall clock.
+// The unit tests of `ChunkCoalescer`, the chunk buffer of `SessionModel`. A
+// manual clock controls the cadence, so no test reads the wall clock.
 
 /// The test cadence, in milliseconds.
 private let testCadenceMilliseconds = 40

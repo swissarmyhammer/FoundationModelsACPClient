@@ -710,6 +710,45 @@ struct ConnectionModelSessionTests {
         #expect(connected.receivedMethods.last == ClientRequestSpan.Method.setConfigOption)
     }
 
+    // MARK: - Routing of the updates
+
+    @Test func updatesForTwoOpenSessionsLandInTheirOwnModels() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+        let first = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let second = try await connected.model.resumeSession(
+            ResumeSessionRequest(cwd: SessionFactoryFixtures.workingDirectory, sessionId: otherTestSession)
+        )
+
+        try await connected.agentConnection.sessionUpdate(
+            UpdateSessionNotification(sessionId: testSession, update: agentChunk(text: "first", message: "agent-1"))
+        )
+        try await connected.agentConnection.sessionUpdate(
+            UpdateSessionNotification(sessionId: otherTestSession, update: agentChunk(text: "second", message: "agent-2"))
+        )
+
+        try await waitUntil { !first.transcript.isEmpty && !second.transcript.isEmpty }
+        #expect(SessionFactoryFixtures.messageTexts(of: first) == ["first"])
+        #expect(SessionFactoryFixtures.messageTexts(of: second) == ["second"])
+    }
+
+    @Test func aWrapThatForwardsEachCallKeepsTheTranscriptCurrent() async throws {
+        let factory = ForwardingClientFactory()
+        let connected = await ConnectedModel(
+            model: ConnectionModel(coalescingCadence: .zero),
+            client: { [factory] router in factory.wrap(router) }
+        ) { connection in
+            ScriptedStubAgent(connection: connection, session: testSession, script: SessionFactoryFixtures.twoMessages)
+        }
+        try await connected.initialize()
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+
+        _ = try await session.prompt([textBlock("Hello")])
+
+        try await waitUntil { SessionFactoryFixtures.messageTexts(of: session).compactMap(\.self) == ["first", "second"] }
+        #expect(factory.built.count == 1)
+        #expect(try #require(factory.built.first).forwardedUpdateCount == SessionFactoryFixtures.twoMessages.count)
+    }
+
     // MARK: - close
 
     @Test func closeSendsTheCloseAndClosesTheModel() async throws {
@@ -761,5 +800,61 @@ struct ConnectionModelSessionTests {
         #expect(!connected.receivedMethods.contains(ClientRequestSpan.Method.closeSession))
         #expect(!session.isClosed)
         #expect(connected.model.session(for: testSession) === session)
+    }
+}
+
+/// A `Client` that stands in front of the router of a connection model,
+/// forwards each call to it, and counts the session updates it forwards.
+///
+/// This is the shape that ``ConnectionModel/connect(over:logger:bufferLimits:client:)``
+/// documents for a host that puts its own `Client` in front of the router.
+@MainActor
+private final class ForwardingClient: Client {
+    /// The router that this client stands in front of.
+    private let router: any Client
+
+    /// The number of session updates that this client forwarded.
+    private(set) var forwardedUpdateCount = 0
+
+    /// Makes the client.
+    ///
+    /// - Parameter router: The router that this client stands in front of.
+    init(router: any Client) {
+        self.router = router
+    }
+
+    func sessionUpdate(_ notification: UpdateSessionNotification) async {
+        forwardedUpdateCount += 1
+        await router.sessionUpdate(notification)
+    }
+
+    func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
+        try await router.requestPermission(params)
+    }
+
+    func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
+        try await router.createElicitation(params)
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {
+        await router.elicitationComplete(notification)
+    }
+}
+
+/// Builds the ``ForwardingClient`` of each connection and keeps it, so a test
+/// can read what each one forwarded.
+@MainActor
+private final class ForwardingClientFactory {
+    /// Each client that ``wrap(_:)`` built, in build order.
+    private(set) var built: [ForwardingClient] = []
+
+    /// Builds a forwarding client in front of a router.
+    ///
+    /// - Parameter router: The router of the connection model.
+    /// - Returns: The client that the connection serves.
+    func wrap(_ router: any Client) -> any Client {
+        let client = ForwardingClient(router: router)
+        built.append(client)
+        return client
     }
 }

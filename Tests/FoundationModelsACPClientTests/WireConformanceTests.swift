@@ -4,11 +4,12 @@ import Testing
 
 @testable import FoundationModelsACPClient
 
-// This test drives the container over the real ACP wire. A stub agent runs
-// behind `InMemoryTransport.pair()` and sends one update for every
-// `SessionUpdate` case during one prompt turn. The connection read loop
-// applies each notification in wire order before it delivers the prompt
-// acknowledgement, so the assertions run against the final state.
+// This test drives the connection model and the session model over the real
+// ACP wire. A stub agent runs behind `InMemoryTransport.pair()` and sends one
+// update for every `SessionUpdate` case during one prompt turn. The test waits
+// for the idle update on the update tap of the session model; the model applies
+// each update before the tap gives it, so the assertions run against the final
+// state.
 
 /// The context-window size that the scripted usage update reports.
 private let scriptedContextWindowSize = 200_000
@@ -73,61 +74,62 @@ private func fullScript() -> [SessionUpdate] {
 
 @MainActor @Test(.timeLimit(.minutes(1)))
 func everySessionUpdateCaseLandsInObservableStateOverTheWire() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let model = SwiftUIACPClient()
-    let connection = await ClientSideConnection(stream: clientEnd) { _ in model }
-    let agentConnection = await AgentSideConnection(stream: agentEnd) { agentSide in
+    let connected = await ConnectedModel(model: ConnectionModel(coalescingCadence: .zero)) { agentSide in
         ScriptedStubAgent(connection: agentSide, session: testSession, script: fullScript())
     }
+    try await connected.initialize()
+    let session = try await connected.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
+    let updates = session.updateTap()
 
-    _ = try await connection.prompt(
-        PromptRequest(prompt: [textBlock("go")], sessionId: testSession)
-    )
+    _ = try await session.prompt([textBlock("go")])
+    #expect(await waitForIdle(in: updates))
 
-    let state = model.session(for: testSession)
-
-    // The ordered entry list holds one stable entry for each identity, and
-    // the unknown update adds nothing.
-    #expect(
-        state.entries == [
-            .userMessage(MessageId(rawValue: "user-1")),
-            .agentMessage(MessageId(rawValue: "agent-1")),
-            .agentThought(MessageId(rawValue: "thought-1")),
-            .toolCall(ToolCallId(rawValue: "call-1")),
-        ]
-    )
+    // The wire entries hold one stable entry for each identity. The local user
+    // message of the prompt is not a wire entry. The model holds the echo of a
+    // user message while the prompt waits for its response, so the place of
+    // the user message is not its arrival place, and the test reads the set of
+    // identities. The unknown update adds an entry of its own.
+    let userId: TranscriptEntry.ID = .wire(.userMessage(MessageId(rawValue: "user-1")))
+    let agentId: TranscriptEntry.ID = .wire(.agentMessage(MessageId(rawValue: "agent-1")))
+    let thoughtId: TranscriptEntry.ID = .wire(.agentThought(MessageId(rawValue: "thought-1")))
+    let callId: TranscriptEntry.ID = .wire(.toolCall(ToolCallId(rawValue: "call-1")))
+    let terminalId: TranscriptEntry.ID = .wire(.terminal(TerminalId(rawValue: "term-1")))
+    let planId: TranscriptEntry.ID = .wire(.plan(PlanId(rawValue: "plan-1")))
+    let expectedIds = [userId, agentId, thoughtId, callId, terminalId, planId]
+    let wireEntries = session.transcript.filter { $0.id.origin == .wire }
+    let identifiedIds = wireEntries.filter { $0.unknown == nil }.map(\.id)
+    #expect(identifiedIds.count == expectedIds.count)
+    #expect(Set(identifiedIds) == Set(expectedIds))
+    #expect(wireEntries.compactMap(\.unknown).map(\.type) == ["future_update"])
+    let entry = { (id: TranscriptEntry.ID) in session.transcript.first { $0.id == id } }
 
     // The whole-message upserts replaced the chunk content.
-    #expect(state.messageContent(for: MessageId(rawValue: "user-1")) == [textBlock("question")])
-    #expect(state.messageContent(for: MessageId(rawValue: "agent-1")) == [textBlock("answer")])
-    #expect(state.messageContent(for: MessageId(rawValue: "thought-1")) == [textBlock("reasoning")])
+    #expect(try #require(entry(userId)?.userMessage).content == [textBlock("question")])
+    #expect(try #require(entry(agentId)?.agentMessage).content == [textBlock("answer")])
+    #expect(try #require(entry(thoughtId)?.thought).content == [textBlock("reasoning")])
 
-    // The tool call folded its three updates into one record.
-    let call = state.toolCalls[ToolCallId(rawValue: "call-1")]
-    #expect(call?.status == .value(.completed))
-    #expect(call?.title == .value("Search"))
-    #expect(call?.content == .value([.content(Content(content: textBlock("line")))]))
+    // The tool call folded its three updates into one entry.
+    let call = try #require(entry(callId)?.toolCall)
+    #expect(call.status == .completed)
+    #expect(call.title == "Search")
+    #expect(call.content == [.content(Content(content: textBlock("line")))])
 
     // The terminal accumulated its output bytes.
-    let terminal = state.terminals[TerminalId(rawValue: "term-1")]
-    #expect(terminal?.command == .value("ls"))
-    #expect(terminal?.output == Data("hi".utf8))
+    let terminal = try #require(entry(terminalId)?.terminal)
+    #expect(terminal.command == "ls")
+    #expect(terminal.bytes == Data("hi".utf8))
 
     // The plan, the commands, the config options, the session info, and the
     // usage all landed.
-    #expect(state.plans[PlanId(rawValue: "plan-1")] == [scriptedPlanEntry])
-    #expect(state.availableCommands == [scriptedCommand])
-    #expect(state.configOptions == [scriptedOption])
-    #expect(state.title == "Session title")
-    #expect(state.usage == scriptedUsage)
+    #expect(try #require(entry(planId)?.plan).entries == [scriptedPlanEntry])
+    #expect(session.availableCommands == [scriptedCommand])
+    #expect(session.configOptions == [scriptedOption])
+    #expect(session.sessionInfo.title == .value("Session title"))
+    #expect(session.usage == scriptedUsage)
 
-    // The turn ended: the state update drove the turn state and the stop
+    // The turn ended: the last state update is the idle state with its stop
     // reason.
-    #expect(state.turnState == .idle)
-    #expect(state.lastStopReason == .endTurn)
-
-    await connection.close()
-    withExtendedLifetime(agentConnection) {}
+    #expect(session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)))
 }
 
 /// The decode tests for the wire fields that ACP schema v2.0.0-alpha.7 added

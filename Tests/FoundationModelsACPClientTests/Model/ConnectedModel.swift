@@ -54,10 +54,13 @@ struct ConnectedModel {
     ///   - model: The model to connect.
     ///   - bufferLimits: The limits on the updates that the connection keeps
     ///     for a session with no subscriber.
+    ///   - wrap: Builds the `Client` that the connection serves from the
+    ///     router of the model. The default serves the router itself.
     ///   - makeAgent: Builds the stub agent from its connection.
     init(
         model: ConnectionModel = ConnectionModel(),
         bufferLimits: SessionUpdateBufferLimits = .default,
+        client wrap: @escaping @Sendable @MainActor (any Client) -> any Client = { $0 },
         makeAgent: @escaping @Sendable (AgentSideConnection) -> ScriptedStubAgent
     ) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -70,7 +73,7 @@ struct ConnectedModel {
             return stub
         }
         self.model = model
-        _ = await model.connect(over: clientEnd, bufferLimits: bufferLimits)
+        _ = await model.connect(over: clientEnd, bufferLimits: bufferLimits, client: wrap)
     }
 
     /// Connects a new model to a new stub agent with no update script.

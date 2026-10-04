@@ -28,8 +28,21 @@ private let planId = PlanId(rawValue: "plan-1")
 /// The terminal id that the terminal tests use.
 private let terminalId = TerminalId(rawValue: "terminal-1")
 
+/// The id of a second terminal, for the tests that need two terminals.
+private let otherTerminalId = TerminalId(rawValue: "terminal-2")
+
+/// Terminal output that is not valid base64, so the engine cannot decode it.
+private let notBase64 = "!!! not base64 !!!"
+
 /// The tool-call id that the tool-call tests use.
 private let toolCallId = ToolCallId(rawValue: "tool-1")
+
+/// The id of a second tool call, for the tests that need two tool calls.
+private let otherToolCallId = ToolCallId(rawValue: "tool-2")
+
+/// Each tool-call status of the schema. A queued call (`pending`) and a
+/// running call (`inProgress`) must stay two states.
+private let everyToolCallStatus: [ToolCallStatus] = [.pending, .inProgress, .completed, .failed, .cancelled]
 
 /// Makes a model for the test session, and folds each update into it.
 ///
@@ -65,11 +78,20 @@ private func planItem(_ content: String) -> PlanEntry {
 
 /// Makes a terminal-output-chunk update.
 ///
-/// - Parameter text: The text of the chunk, which the update carries in
-///   base64.
+/// - Parameters:
+///   - text: The text of the chunk, which the update carries in base64.
+///   - terminal: The terminal that gets the bytes.
 /// - Returns: The update.
-private func terminalChunk(_ text: String) -> SessionUpdate {
-    .terminalOutputChunk(TerminalOutputChunk(data: Data(text.utf8).base64EncodedString(), terminalId: terminalId))
+private func terminalChunk(_ text: String, for terminal: TerminalId = terminalId) -> SessionUpdate {
+    .terminalOutputChunk(TerminalOutputChunk(data: Data(text.utf8).base64EncodedString(), terminalId: terminal))
+}
+
+extension ToolCallContent {
+    /// The id of the terminal that this content refers to, or `nil` for
+    /// content that is not a terminal reference.
+    fileprivate var referencedTerminalId: TerminalId? {
+        if case .terminal(let reference) = self { reference.terminalId } else { nil }
+    }
 }
 
 /// The fold tests, in one suite so that `swift test --filter
@@ -154,6 +176,20 @@ struct SessionModelFoldTests {
         #expect(entry.content == [textBlock("Thinking")])
     }
 
+    @Test func wholeUserMessageAndThoughtUpsertsAddTheirEntries() throws {
+        let userId = MessageId(rawValue: "user-9")
+        let thoughtId = MessageId(rawValue: "thought-9")
+
+        let model = foldedModel(
+            .userMessage(UserMessage(messageId: userId, content: .value([textBlock("Question")]))),
+            .agentThought(AgentThought(messageId: thoughtId, content: .value([textBlock("Reasoning")])))
+        )
+
+        #expect(model.transcript.map(\.id) == [.wire(.userMessage(userId)), .wire(.agentThought(thoughtId))])
+        #expect(try #require(model.transcript.first?.userMessage).content == [textBlock("Question")])
+        #expect(try #require(model.transcript.last?.thought).content == [textBlock("Reasoning")])
+    }
+
     @Test func unknownContentBlockStaysRawInItsMessage() throws {
         let block = ContentBlock.unknown("future_block", .object(["detail": .string("x")]))
         let chunk = ContentChunk(content: block, messageId: MessageId(rawValue: "agent-1"))
@@ -190,6 +226,34 @@ struct SessionModelFoldTests {
         #expect(entry.content == [firstLine, secondLine])
     }
 
+    @Test func toolCallContentChunkForAnUnseenIdAddsTheToolCall() throws {
+        let line = ToolCallContent.content(Content(content: textBlock("line-1")))
+
+        let model = foldedModel(.toolCallContentChunk(ToolCallContentChunk(content: line, toolCallId: toolCallId)))
+
+        #expect(model.transcript.map(\.id) == [.wire(.toolCall(toolCallId))])
+        #expect(try #require(model.transcript.first?.toolCall).content == [line])
+    }
+
+    @Test func twoToolCallsWithTheSameNameStayTwoEntries() throws {
+        let model = foldedModel(
+            .toolCallUpdate(ToolCallUpdate(toolCallId: toolCallId, name: .value("shell"), status: .value(.inProgress))),
+            .toolCallUpdate(ToolCallUpdate(toolCallId: otherToolCallId, name: .value("shell"), status: .value(.inProgress))),
+            toolCallStatus(id: toolCallId.rawValue, .completed)
+        )
+
+        #expect(model.transcript.map(\.id) == [.wire(.toolCall(toolCallId)), .wire(.toolCall(otherToolCallId))])
+        #expect(try #require(model.transcript.first?.toolCall).status == .completed)
+        #expect(try #require(model.transcript.last?.toolCall).status == .inProgress)
+    }
+
+    @Test(arguments: everyToolCallStatus)
+    func eachToolCallStatusLandsDistinctly(status: ToolCallStatus) throws {
+        let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, status))
+
+        #expect(try #require(model.transcript.first?.toolCall).status == status)
+    }
+
     // MARK: - Terminals
 
     @Test func terminalUpdateAddsATerminalEntry() throws {
@@ -218,6 +282,60 @@ struct SessionModelFoldTests {
 
         #expect(model.transcript.first?.terminal === entry)
         #expect(entry.bytes == Data("new".utf8))
+    }
+
+    @Test func interleavedTerminalChunksAccumulateForEachTerminal() throws {
+        let model = foldedModel(
+            terminalChunk("one "),
+            terminalChunk("alpha ", for: otherTerminalId),
+            terminalChunk("two"),
+            terminalChunk("beta", for: otherTerminalId)
+        )
+
+        #expect(model.transcript.map(\.id) == [.wire(.terminal(terminalId)), .wire(.terminal(otherTerminalId))])
+        #expect(try #require(model.transcript.first?.terminal).bytes == Data("one two".utf8))
+        #expect(try #require(model.transcript.last?.terminal).bytes == Data("alpha beta".utf8))
+    }
+
+    @Test func aTerminalChunkThatIsNotBase64ChangesNoBytes() throws {
+        let model = foldedModel(terminalChunk("good "))
+        let entry = try #require(model.transcript.first?.terminal)
+
+        model.apply(.terminalOutputChunk(TerminalOutputChunk(data: notBase64, terminalId: terminalId)))
+        model.apply(terminalChunk("still good"))
+
+        #expect(entry.bytes == Data("good still good".utf8))
+    }
+
+    @Test func aTerminalSnapshotThatIsNotBase64KeepsTheBytes() throws {
+        let model = foldedModel(terminalChunk("kept"))
+        let entry = try #require(model.transcript.first?.terminal)
+
+        model.apply(.terminalUpdate(TerminalUpdate(terminalId: terminalId, output: .value(TerminalOutput(data: notBase64)))))
+
+        #expect(entry.bytes == Data("kept".utf8))
+    }
+
+    @Test func aTerminalReferenceOfAToolCallNamesTheIdOfItsTerminalEntry() throws {
+        let reference = ToolCallContent.terminal(Terminal(terminalId: terminalId))
+        let model = foldedModel(
+            .terminalUpdate(TerminalUpdate(terminalId: terminalId, command: .value("ls"))),
+            .toolCallContentChunk(ToolCallContentChunk(content: reference, toolCallId: toolCallId))
+        )
+        let toolCall = try #require(model.transcript.last?.toolCall)
+
+        let referencedId = try #require(toolCall.content.first?.referencedTerminalId)
+
+        let terminal = try #require(model.transcript.first { $0.id == .wire(.terminal(referencedId)) }?.terminal)
+        #expect(terminal.command == "ls")
+    }
+
+    @Test func aTerminalReferenceToAnUnseenTerminalNamesNoEntry() {
+        let reference = ToolCallContent.terminal(Terminal(terminalId: otherTerminalId))
+
+        let model = foldedModel(.toolCallContentChunk(ToolCallContentChunk(content: reference, toolCallId: toolCallId)))
+
+        #expect(!model.transcript.contains { $0.id == .wire(.terminal(otherTerminalId)) })
     }
 
     // MARK: - Plans
@@ -251,6 +369,17 @@ struct SessionModelFoldTests {
         #expect(model.transcript.map(\.id) == [.wire(.unidentified(position: 0))])
         #expect(entry.type == "future_update")
         #expect(entry.raw == payload)
+    }
+
+    @Test func anUnknownUpdateChangesNoOtherEntryAndNoAgentState() throws {
+        let model = foldedModel(agentChunk(text: "Hello"), idleState(stopReason: .endTurn))
+        let message = try #require(model.transcript.first?.agentMessage)
+
+        model.apply(.unknown("future_update", .object([:])))
+
+        #expect(model.transcript.first?.agentMessage === message)
+        #expect(message.content == [textBlock("Hello")])
+        #expect(model.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)))
     }
 
     // MARK: - Last-value state

@@ -13,10 +13,10 @@ public enum ACPClient {
     /// The client capabilities that this client sends during `initialize`.
     ///
     /// The client advertises only the modes it implements, and nothing
-    /// more. ``SwiftUIACPClient`` implements both elicitation modes: form
-    /// mode as bindable pending state that the UI answers with
-    /// schema-shaped values, and url mode as pending state with a
-    /// consent-gated URL that `elicitation/complete` closes. The value
+    /// more. ``SessionModel`` and ``ConnectionModel`` implement both
+    /// elicitation modes: form mode as bindable pending state that the UI
+    /// answers with schema-shaped values, and url mode as pending state with
+    /// a consent-gated URL that `elicitation/complete` closes. The value
     /// therefore advertises the `elicitation` capability with `form` and
     /// `url`.
     ///

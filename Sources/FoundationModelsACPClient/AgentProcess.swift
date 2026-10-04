@@ -135,7 +135,7 @@ public struct AgentProcess: Sendable {
     public let arguments: [String]
 
     /// The transport wired to the agent's stdio. Hand it to
-    /// ``SwiftUIACPClient/connect(over:logger:)``.
+    /// ``ConnectionModel/connect(over:logger:bufferLimits:client:)``.
     public let transport: any ACPTransport
 
     /// The shared, class-backed process bookkeeping every copy of this

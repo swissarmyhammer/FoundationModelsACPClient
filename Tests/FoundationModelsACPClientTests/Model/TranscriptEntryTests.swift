@@ -6,8 +6,8 @@ import Testing
 
 // The tests of the observable transcript entry classes. Each wire entry comes
 // from the FoundationModelsACP merge engine, because the upstream entry value
-// has no public initializer. Both modules declare a `SessionEntry`, so this
-// file writes `FoundationModelsACP.SessionEntry` for the engine value.
+// has no public initializer. This file writes `FoundationModelsACP.SessionEntry`
+// in full, so each use names the module of the engine value.
 
 extension SessionMergeEngine.Change {
     /// The entry that this change added or changed, or `nil` for a change of

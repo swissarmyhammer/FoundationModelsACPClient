@@ -16,14 +16,14 @@ import FoundationModelsACP
 // product that each user of the root package gets too.
 //
 // The helpers that both copies hold are the same, word for word:
-// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)` and
-// `makeInitializeRequest()`. A change to one of them goes into both copies.
+// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
+// `waitForIdle(in:within:)` and `makeInitializeRequest()`. A change to one of
+// them goes into both copies.
 //
-// `waitForIdle(in:within:)`, `initializedConnection(for:over:)` and
-// `promptTurnLandsReply(in:messageID:expectedText:)` here drive the
-// `ConnectionModel` and the `SessionModel`, which is what the `acp-client`
-// binary drives. The unit copy keeps the forms that drive `SwiftUIACPClient`,
-// because the unit tests of that container still use them.
+// `initializedConnection(for:over:)`, `promptTurnLandsReply(in:messageID:expectedText:)`,
+// `idleStopReason(of:)`, `processExists(_:)` and
+// `processGroupHasLiveMember(ledBy:)` are in this copy alone, because only the
+// integration tests use them. The unit copy holds `waitUntil(_:)` alone.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {

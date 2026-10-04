@@ -56,10 +56,27 @@ comments:
     - evidence: local commit "refactor(cli): send the TurnRunner prompt and cancel through SessionModel". The sha is in the step record of the commit agent.
     - next: review. The new public SessionModel.promptTraceMeta holds the trace parent of the last prompt. The cancel uses it.
   timestamp: 2026-10-04T13:08:16.755370+00:00
+- actor: claude-code
+  id: 01m43gqv0pgt92q650h07dq2f2
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit b85fd92): 0 findings, 0 confirmed, 0 refuted, 7 validators attempted, 0 failed. 12 files reviewed. 4 `.kanban/` files are excluded by `.reviewignore`.
+    - evidence: the engine tool rule `code-hygiene/dead-code-swift` failed on the damaged `.build` (permission error on `.build/checkouts/FoundationModelsExtras`). The rule script was run again by hand with `swift build --build-tests --scratch-path <scratchpad>/build`, `swift package --scratch-path <scratchpad>/build describe`, and `periphery scan --index-store-path <scratchpad>/build/out` with the same flags and test-target exclusions. Periphery gives 3 results in `Sources/`, and 0 results on the lines that this commit added or changed.
+    - next: none. The task moved to `done`.
+  timestamp: 2026-10-04T13:13:04.278626+00:00
+- actor: claude-code
+  id: 01m43gr3ke1kgcx1581d2h5jwk
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 12 files (TurnRunner prompt/cancel through SessionModel, SessionModel.promptTraceMeta, sender closure, tests)
+    - test: green — swift test 533/533, IntegrationTests 103/103 (with --scratch-path)
+    - commit: b85fd92 refactor(cli): send the TurnRunner prompt and cancel through SessionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-04T13:13:13.070433+00:00
 depends_on:
 - 01M3YR2H3Y0P7AHWS91HVQK65A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: cf80
 title: 'Move acp-client TurnRunner to SessionModel: stream from the update tap, prompt and cancel through the model'
 ---
 ## What

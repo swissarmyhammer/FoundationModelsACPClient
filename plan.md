@@ -51,7 +51,7 @@ SessionEvent / SessionProjection     keyed on Apple's Transcript.ToolCall.id
    │  FoundationModelsACPAgent maps
 ACP session/update                   THE INTERFACE — append-only wire stream
    │  InMemoryTransport │ stdio
-SwiftUIACPClient (@Observable)       ← this package; SwiftUI binds
+ConnectionModel / SessionModel       ← this package (@Observable); SwiftUI binds
 ```
 
 The container is a **projection of a projection**. It is not a database and never
@@ -65,14 +65,33 @@ makes two concurrent same-name tool calls distinguishable.
 
 ## The container
 
-`SwiftUIACPClient` — `@MainActor @Observable`, conforming to `Client`. Per session
-it holds:
+The container is two `@MainActor @Observable` models.
 
-- an **ordered entry list**, stably identified for `ForEach`;
+`ConnectionModel` holds one connection to an agent. It serves the `Client`
+protocol through a router (`ModelClient`) that gives each request of the agent to
+the model that owns it. It holds:
+
+- the **connection state**: `disconnected`, `connecting`, `connected`, or
+  `failed`;
+- the `initialize` answer, the **capability flags**, and the **auth state**;
+- the `SessionModel` of each **open session**, and the `session/list` items;
+- the **request-scoped elicitations**, while the client request that each one
+  names is in flight.
+
+`SessionModel` holds one session. Each model reads its updates from its own
+subscription to the connection, and folds them through the merge engine of
+`FoundationModelsACP`, so this package holds no second copy of the merge rules.
+It holds:
+
+- the **transcript**: an ordered list of `TranscriptEntry` values, stably
+  identified for `ForEach`. Each entry holds one observable object, so a chunk
+  changes only the object of its own entry;
 - **messages keyed by `messageId`** — required and **agent-generated** in v2,
   because *"the Agent owns session history, so it is the single source of message
-  identity."* The container never mints identity;
-- **tool calls indexed by `toolCallId`**. In v2 `tool_call` create is gone:
+  identity."* The model never mints a wire identity; a user message that the
+  client sends has a local identity until the prompt response names its
+  `messageId`;
+- **tool calls keyed by `toolCallId`**. In v2 `tool_call` create is gone:
   `tool_call_update` is an **upsert**, so the first update bearing a new id creates
   the entry and later ones patch it. `tool_call_content_chunk` appends content
   items;
@@ -81,9 +100,10 @@ it holds:
   (v2 replaced modes with config options: `mode`, `model`, `model_config`,
   `thought_level`);
 - **session metadata and usage** from `session_info_update` and `usage_update`;
-- **turn state read from the protocol, not inferred** — `state_update` gives
-  `running`, `idle` (carrying `stopReason`), and **`requires_action`**;
-- connection state.
+- **the agent state read from the protocol, not inferred** — the last
+  `state_update`: `running`, `idle` (carrying `stopReason`), or
+  **`requires_action`**;
+- the **pending permission requests** and the **session-scoped elicitations**.
 
 ### Upsert semantics are the tricky part
 
@@ -116,8 +136,9 @@ That was stale. The evidence:
 
 So this package **renders** the terminals the agent owns: `terminal_update`
 upserts keyed by `terminalId`, `terminal_output_chunk` appends RFC 4648 base64
-bytes, and `{"type": "terminal", "terminalId": …}` content references resolve
-against the terminal index. The surface stays display-only — no input, resize,
+bytes, and a `{"type": "terminal", "terminalId": …}` content reference names
+the transcript entry of its terminal: the entry with the identity of that
+`terminalId`. The surface stays display-only — no input, resize,
 interrupt, kill, wait, release, or execution semantics. M5 implements it.
 
 The schema also puts a **`terminalId` field on `CommandPermissionSubject`** —
@@ -128,9 +149,14 @@ command can point at a terminal already in the index. M3 covers that reference.
 
 `requestPermission` and elicitation arrive as *requests the user must answer*. A
 callback cannot be rendered. So each becomes **observable pending state** the UI
-binds to and resolves — a permission prompt is a view. The container holds the
-continuation and completes it when the UI answers, with cancellation and
-agent-side withdrawal handled.
+binds to and resolves — a permission prompt is a view. The `SessionModel` of the
+session holds a permission request and a session-scoped elicitation. The
+`ConnectionModel` holds a request-scoped elicitation, because it has no session.
+The model that holds a request holds its continuation and completes it when the
+UI answers. The cancellation of the call, the withdrawal by the agent, and the
+close of the connection each answer `cancelled` (or the `cancel` action), so no
+continuation leaks. A request for a session that is not open gets that answer at
+once.
 
 This is also where ACP's elicitation modes land: **form mode** renders
 `requestedSchema` (flat primitives/enums); **URL mode** must display the target
@@ -141,11 +167,11 @@ preferences.
 ### Coalescing is a requirement, not an optimization
 
 `agentMessageChunk` arrives at token rate. Applying each one to an `@Observable` on
-the main actor thrashes SwiftUI. The container batches deltas and flushes on a
-display-rate cadence, appending into the in-flight message instead of rebuilding
-arrays. **This gets measured, not assumed** — a test asserts N chunks produce far
-fewer than N observable mutations while the final text stays byte-identical to
-plain concatenation.
+the main actor thrashes SwiftUI. The `SessionModel` batches the chunks and flushes
+them on a display-rate cadence, and writes each changed entry object one time for
+each flush instead of rebuilding arrays. **This gets measured, not assumed** — a
+test asserts N chunks produce far fewer than N observable mutations while the
+final text stays byte-identical to plain concatenation.
 
 ### Rehydration, because the record is non-monotonic
 
@@ -159,16 +185,24 @@ worsens the longer a session lives — exactly the desktop case.
 asked. Combined with whole-message upserts that can replace or clear content, and
 agent-owned `messageId`, the protocol now says what the record says.
 
-So the container **rebuilds by asking**, and needs no bespoke invalidation signal:
+So the `SessionModel` **rebuilds by asking**, and needs no bespoke invalidation
+signal. `ConnectionModel.resumeSession(_:)` sends `session/resume`, and the
+`SessionModel` of the session takes the replay:
 
-- build full state from a `replayFrom: start` resume, discarding prior accumulation;
-- rebuild must be **idempotent** — resuming twice changes nothing;
-- a container joining mid-session must reach the same state as one that streamed
-  from the beginning.
+- a replay from the start clears the transcript and the last-value state at the
+  start of the replay, and builds the full state from the replayed updates;
+- the rebuild is **idempotent** — resuming twice gives the transcript of one
+  replay, with no doubled text;
+- a model that joins mid-session reaches the same state as one that streamed
+  from the beginning;
+- pending permission requests and elicitations are live request state, not
+  record state, so they stay pending across a replay;
+- the marker of the `session/resume` response ends the replay, after each
+  replayed update. A failed resume ends the replay and keeps the live history.
 
 Nothing in v2 pushes a "you should resume" signal after a compaction, and none is
-needed. The answer is **policy, not protocol**: this container resumes with full
-replay on reconnect, and whenever the app chooses to resynchronize.
+needed. The answer is **policy, not protocol**: the host resumes with full replay
+on reconnect, and whenever the app chooses to resynchronize.
 
 ## What a v2 client owes the agent: almost nothing
 

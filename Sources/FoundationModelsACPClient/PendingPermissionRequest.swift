@@ -6,8 +6,8 @@ import FoundationModelsACP
 /// A callback cannot be rendered, so the client turns each
 /// `session/request_permission` call into this observable value. The UI
 /// binds to it, shows the options and the context, and resolves it
-/// through ``ACPSessionState/answerPermissionRequest(_:with:)`` or
-/// ``ACPSessionState/cancelPermissionRequest(_:)``.
+/// through ``SessionModel/selectPermission(_:option:)`` or
+/// ``SessionModel/cancelPermission(_:)``.
 ///
 /// The wire request carries no identity of its own, so the client gives
 /// each pending request a local, stable identity. SwiftUI `ForEach` uses
