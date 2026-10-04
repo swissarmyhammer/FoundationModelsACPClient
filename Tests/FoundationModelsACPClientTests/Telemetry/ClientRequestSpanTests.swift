@@ -25,9 +25,6 @@ import Tracing
 // records the `_meta` of each message it gets, which is the value that
 // crosses the process boundary.
 
-/// The answer text that the agent sends before a turn is cancelled.
-private let partialAnswerText = "The first half of the answer."
-
 /// The name of the `_meta` member that a caller gives beside the trace
 /// context.
 private let vendorMemberName = "vendor.example/requestTag"
@@ -126,43 +123,6 @@ struct ClientRequestSpanTests {
                 #expect(records.count == 1, "\(method) wrote \(records.count) enter records.")
                 #expect(records.first?.level == TracedCall.enterLevel)
             }
-        }
-    }
-
-    /// `session/cancel` carries the trace of the current turn: its
-    /// `traceparent` names the trace of the `session/prompt` span, and its own
-    /// span is a child of that prompt span.
-    ///
-    /// The interrupt is sent only after the agent got the prompt, so the press
-    /// lands inside the turn.
-    @MainActor @Test("session/cancel carries the trace of the current turn", .timeLimit(.minutes(1)))
-    func theCancelCarriesTheTraceOfTheTurn() async throws {
-        try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
-            let harness = await TracedSessionHarness(
-                script: [agentChunk(text: partialAnswerText)],
-                cancelScript: [idleState(stopReason: .cancelled)]
-            )
-            _ = try await harness.session.initialize()
-            let turn = Task { @MainActor in try await harness.runner.run() }
-            #expect(
-                await eventually { !harness.receivedMeta(of: ClientRequestSpan.Method.prompt).isEmpty },
-                "The agent never got the prompt."
-            )
-            harness.interrupt(.cancelTurn)
-            #expect(try await turn.value == .stopped(.cancelled))
-            #expect(
-                await eventually { !context.requestSpans(of: ClientRequestSpan.Method.cancelSession).isEmpty },
-                "The session/cancel span never ended."
-            )
-            await harness.teardown()
-
-            let promptSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.prompt).first)
-            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
-            let meta = try #require(harness.receivedMeta(of: ClientRequestSpan.Method.cancelSession).first)
-            let identity = try RequestTelemetry.traceparentIdentity(in: meta)
-            #expect(identity.traceID == promptSpan.traceID)
-            #expect(identity.spanID == cancelSpan.spanID)
-            #expect(cancelSpan.parentSpanID == promptSpan.spanID)
         }
     }
 

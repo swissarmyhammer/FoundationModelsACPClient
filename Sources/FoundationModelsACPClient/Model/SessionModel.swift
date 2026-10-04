@@ -171,6 +171,16 @@ public final class SessionModel {
     /// The sender of the requests of this session.
     @ObservationIgnored let requestSender: any SessionRequestSender
 
+    /// The W3C trace context of the last `session/prompt` that this model
+    /// sent, as a `_meta` value that holds only the `traceparent` and
+    /// `tracestate` members. It is `nil` before the first prompt, and when
+    /// the last prompt went out with no trace context.
+    ///
+    /// The model records it when the request goes out, before the agent
+    /// answers. Give it as the `meta` of ``cancel(meta:)``, so that the
+    /// `session/cancel` span of the turn is a child of the prompt span.
+    @ObservationIgnored public internal(set) var promptTraceMeta: JSONValue?
+
     /// Receives the session id and the new ``sessionInfo`` each time a
     /// `session_info_update` changes it, or `nil` when no one listens. The
     /// connection model sets it, so its session list shows the change.

@@ -6,9 +6,11 @@ import Testing
 @testable import FoundationModelsACPClient
 
 // The session harness of the telemetry tests. `ClientRequestSpanTests`,
-// `ClientRequestMetricsTests` and `ContentSafetyTests` drive the real
-// `AgentSession` and `TurnRunner` with it, over `InMemoryTransport.pair()`,
-// with a `ScriptedStubAgent` on the far end.
+// `ClientRequestMetricsTests`, `ContentSafetyTests` and the trace test of
+// `TurnRunnerTests` drive the real `AgentSession` and `TurnRunner` with it,
+// over `InMemoryTransport.pair()`, with a `ScriptedStubAgent` on the far end.
+// The turn sends its prompt and its cancel through the `SessionModel` of the
+// session, so each span of those two requests opens inside the model.
 //
 // Both packages export a type called `TerminalOutput`, and this file imports
 // both, so the terminal layer of the binary is named

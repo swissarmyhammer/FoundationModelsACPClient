@@ -46,12 +46,28 @@ comments:
     - note: acp-client sends no session/close when the agent has no close capability.
     - next: review
   timestamp: 2026-10-04T12:47:48.118121+00:00
+- actor: claude-code
+  id: 01m43fn4mzkm1peareeww2vh36
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit ff99048): 0 findings, 0 confirmed, 0 refuted; 17 files reviewed, 6 `.kanban/` files excluded by `.reviewignore`. The engine run of the tool rule `code-hygiene/dead-code-swift` failed because the `.build` folder is damaged (no permission to remove `.build/checkouts/FoundationModelsExtras`). I ran the same rule commands manually: `swift build --build-tests --scratch-path <scratchpad>/build` (build complete) and `periphery scan` with the rule flags on the `out` index store, with `--report-exclude Tests/FoundationModelsACPClientTests/**`. Periphery reports 3 results in this repository: `Sources/FoundationModelsACPClient/Telemetry/ACPClientTelemetry.swift` imports `Logging`, `Metrics`, `Tracing`. This commit does not change that file, so these results are not on the diff and are not findings of this review. No earlier `## Review Findings` sections. `.build` was not touched.
+    - next: task moved to done.
+  timestamp: 2026-10-04T12:54:07.264001+00:00
+- actor: claude-code
+  id: 01m43fndw11ekj3wa60mb6y5kz
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 17 files (AgentSession, DecliningClient, ProbeCommand, ProbeReport, TurnRunner tap, FrameTeeTransport docs, tests, integration TransportTestSupport)
+    - test: green — swift test 527/527, IntegrationTests 103/103 (with --scratch-path)
+    - commit: ff99048 refactor(cli): move AgentSession, DecliningClient and ProbeCommand to ConnectionModel
+    - review: clean — task moved to done
+  timestamp: 2026-10-04T12:54:16.705640+00:00
 depends_on:
 - 01M3YR1XW7S2KVG2ABV6NP8VDV
 - 01M3YRBGEKBG5X2Z9MFCFH2WSW
 - 01M3YREME90QMSRYG4V8XPJBW9
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ce80
 title: Move acp-client AgentSession, DecliningClient and ProbeCommand to ConnectionModel
 ---
 ## What

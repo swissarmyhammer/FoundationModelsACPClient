@@ -69,9 +69,18 @@ final class FakeSessionRequestSender: SessionRequestSender {
 
     /// Records the prompt and suspends until the test answers it.
     ///
-    /// - Parameter request: The prompt request.
+    /// The fake sends the request as the caller made it, so `willSend` gets
+    /// the request unchanged, before the observer and before the suspension.
+    ///
+    /// - Parameters:
+    ///   - request: The prompt request.
+    ///   - willSend: Gets the request before the fake records it.
     /// - Returns: The response that the test gives.
-    func prompt(_ request: PromptRequest) async throws -> PromptResponse {
+    func prompt(
+        _ request: PromptRequest,
+        willSend: @MainActor @Sendable (PromptRequest) -> Void
+    ) async throws -> PromptResponse {
+        await willSend(request)
         let observer = state.withLock { $0.promptObserver }
         await observer(request)
         return try await withCheckedThrowingContinuation { continuation in

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import TelemetryTestSupport
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -42,6 +43,9 @@ private enum TurnText {
     /// The whole of that answer.
     static var wholeAnswer: String { firstAnswerHalf + secondAnswerHalf }
 
+    /// The bytes of each half of that answer, one element for each chunk.
+    static var answerChunks: [Data] { [Data(firstAnswerHalf.utf8), Data(secondAnswerHalf.utf8)] }
+
     /// The first half of a multi-byte answer.
     ///
     /// Every character that is more than one byte in UTF-8 is a chance for a
@@ -64,6 +68,10 @@ private enum TurnText {
 
     /// The title of the tool call that runs AFTER the first answer chunk.
     static let lateToolName = "reading the late file"
+
+    /// The title of a second tool call that runs BEFORE the first answer
+    /// chunk, after the one ``earlyToolName`` names.
+    static let nextToolName = "reading the next file"
 
     /// The number of milliseconds ``shortLimit`` covers.
     private static let shortLimitMilliseconds = 200
@@ -279,6 +287,78 @@ struct TurnRunnerTests {
         await harness.teardown()
     }
 
+    /// The runner sends the prompt through the session model, so the
+    /// transcript of the session shows the prompt as a sent user message.
+    /// The stub sends no `user_message` echo, so only the model's own
+    /// prompt call can put this entry there.
+    @MainActor @Test("the prompt goes out through the session model", .timeLimit(.minutes(1)))
+    func thePromptGoesOutThroughTheSessionModel() async throws {
+        let harness = try await TurnRunnerHarness(script: [idleState(stopReason: .endTurn)])
+
+        _ = try await harness.runner.run()
+
+        let opened = try #require(harness.session.model.session(for: testSession))
+        let prompt = try #require(opened.transcript.first?.userMessage)
+        #expect(prompt.content == [textBlock(TurnText.prompt)])
+        #expect(prompt.sendState == .sent)
+        await harness.teardown()
+    }
+
+    /// §8 writes each answer chunk to standard output when it arrives, and
+    /// never holds one back for a later chunk. Each chunk stands behind a
+    /// gate of its own, so the sink must hold the first chunk alone while the
+    /// second gate is still shut.
+    @MainActor @Test("each answer chunk reaches the sink when it arrives", .timeLimit(.minutes(1)))
+    func eachAnswerChunkReachesTheSinkWhenItArrives() async throws {
+        let firstGate = UpdateGate()
+        let secondGate = UpdateGate()
+        let idleGate = UpdateGate()
+        let harness = try await TurnRunnerHarness(deferredScript: [
+            GatedUpdates(gate: firstGate, updates: [agentChunk(text: TurnText.firstAnswerHalf)]),
+            GatedUpdates(gate: secondGate, updates: [agentChunk(text: TurnText.secondAnswerHalf)]),
+            GatedUpdates(gate: idleGate, updates: [idleState(stopReason: .endTurn)]),
+        ])
+        let turn = Task { @MainActor in try await harness.runner.run() }
+
+        firstGate.open()
+        #expect(await eventually { !harness.answer.isEmpty }, "the first chunk never arrived")
+        #expect(harness.answerWrites.elements == [Data(TurnText.firstAnswerHalf.utf8)])
+
+        secondGate.open()
+        #expect(
+            await eventually { harness.answerWrites.elements.count == TurnText.answerChunks.count },
+            "the second chunk never arrived"
+        )
+        idleGate.open()
+        _ = try await turn.value
+
+        #expect(harness.answerWrites.elements == TurnText.answerChunks)
+        await harness.teardown()
+    }
+
+    /// The spinner gets the title of each tool call that runs before the
+    /// first answer chunk, in arrival order, and draws each one.
+    @MainActor @Test("the spinner receives each tool title", .timeLimit(.minutes(1)))
+    func theSpinnerReceivesEachToolTitle() async throws {
+        let harness = try await TurnRunnerHarness(
+            script: [
+                TurnText.toolCallTitle(id: "call-1", TurnText.earlyToolName),
+                TurnText.toolCallTitle(id: "call-2", TurnText.nextToolName),
+                agentChunk(text: TurnText.firstAnswerHalf),
+                idleState(stopReason: .endTurn),
+            ],
+            standardErrorIsATerminal: true
+        )
+
+        _ = try await harness.runner.run()
+
+        let drawn = harness.terminalBuffer.text
+        let early = try #require(drawn.range(of: TurnText.earlyToolName))
+        let next = try #require(drawn.range(of: TurnText.nextToolName))
+        #expect(early.lowerBound < next.lowerBound)
+        await harness.teardown()
+    }
+
     /// The turn ends on the `idle` state update, and not at the prompt
     /// acknowledgement. In v2 `PromptResponse` carries only `meta`: it says
     /// the prompt was accepted, and it names no stop reason.
@@ -472,12 +552,13 @@ struct TurnRunnerTests {
         await harness.teardown()
     }
 
-    /// An agent that goes away in the middle of a turn reached NO limit, so the
-    /// turn owes ``TurnEndedWithoutIdleError`` even under `--timeout`. §9 sends
-    /// that error to the protocol-failure row, and the limit's own row belongs
-    /// to a run that really ran out of time.
+    /// An agent that goes away in the middle of a turn sends no `idle`, and the
+    /// update tap of its session model ends when the model closes. The turn
+    /// then owes ``TurnEndedWithoutIdleError``, with no limit and under
+    /// `--timeout` alike. §9 sends that error to the protocol-failure row, and
+    /// the limit's own row belongs to a run that really ran out of time.
     ///
-    /// The limit here is far longer than the turn, so the throw also pins WHEN
+    /// The limit row is far longer than the turn, so the throw also pins WHEN
     /// the turn ends: a run that waited for a limit nothing reached would carry
     /// ``AcpClientTimeout`` instead, five seconds later.
     ///
@@ -485,11 +566,16 @@ struct TurnRunnerTests {
     /// answered by then and the failure is the reader's alone. The sink is
     /// asserted beside the throw, because §8 keeps the bytes that already
     /// arrived whichever way the turn ended.
-    @MainActor @Test("an agent that goes away under a limit is a protocol failure", .timeLimit(.minutes(1)))
-    func anAgentThatGoesAwayUnderALimitIsAProtocolFailure() async throws {
+    @MainActor
+    @Test(
+        "an agent that goes away in the middle of a turn is a protocol failure",
+        .timeLimit(.minutes(1)),
+        arguments: [nil, TurnText.unreachedLimit]
+    )
+    func anAgentThatGoesAwayInTheMiddleOfATurnIsAProtocolFailure(limit: Duration?) async throws {
         let harness = try await TurnRunnerHarness(
             script: [agentChunk(text: TurnText.firstAnswerHalf)],
-            limit: TurnText.unreachedLimit
+            limit: limit
         )
         let turn = Task { @MainActor in try await harness.runner.run() }
 
@@ -525,6 +611,45 @@ struct TurnRunnerTests {
         #expect(outcome == .stopped(.cancelled))
         #expect(harness.answer == Data(TurnText.firstAnswerHalf.utf8))
         await harness.teardown()
+    }
+
+    /// The `session/cancel` of the first `Ctrl-C` carries the trace of the
+    /// turn: its span is a child of the `session/prompt` span, and its
+    /// `traceparent` names the trace of the prompt and its own span. The
+    /// prompt span opens inside the session model, so this proves that the
+    /// runner gives the cancel the trace context the model recorded.
+    ///
+    /// The interrupt is sent only after the agent got the prompt, so the press
+    /// lands inside the turn.
+    @MainActor @Test("the cancel of the turn is a child of the prompt span", .timeLimit(.minutes(1)))
+    func theCancelOfTheTurnIsAChildOfThePromptSpan() async throws {
+        try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
+            let harness = await TracedSessionHarness(
+                script: [agentChunk(text: TurnText.firstAnswerHalf)],
+                cancelScript: [idleState(stopReason: .cancelled)]
+            )
+            _ = try await harness.session.initialize()
+            let turn = Task { @MainActor in try await harness.runner.run() }
+            #expect(
+                await eventually { !harness.receivedMeta(of: ClientRequestSpan.Method.prompt).isEmpty },
+                "The agent never got the prompt."
+            )
+            harness.interrupt(.cancelTurn)
+            #expect(try await turn.value == .stopped(.cancelled))
+            #expect(
+                await eventually { !context.requestSpans(of: ClientRequestSpan.Method.cancelSession).isEmpty },
+                "The session/cancel span never ended."
+            )
+            await harness.teardown()
+
+            let promptSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.prompt).first)
+            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
+            let meta = try #require(harness.receivedMeta(of: ClientRequestSpan.Method.cancelSession).first)
+            let identity = try RequestTelemetry.traceparentIdentity(in: meta)
+            #expect(identity.traceID == promptSpan.traceID)
+            #expect(identity.spanID == cancelSpan.spanID)
+            #expect(cancelSpan.parentSpanID == promptSpan.spanID)
+        }
     }
 
     /// §11 gives the SECOND `Ctrl-C` the end of the run at once. This stub

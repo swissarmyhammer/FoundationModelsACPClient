@@ -20,6 +20,9 @@ extension SessionModel {
     /// transcript gets a local error entry with the JSON-RPC code, message,
     /// and data of the failure, and the call throws the error again.
     ///
+    /// When the request goes out, the model records its W3C trace context in
+    /// ``promptTraceMeta``, so a cancel of the turn can join its trace.
+    ///
     /// - Parameters:
     ///   - content: The content of the user message.
     ///   - meta: The `_meta` field of the request, for example the trace
@@ -33,7 +36,10 @@ extension SessionModel {
         let entry = UserMessageEntry(content: content, meta: meta)
         addPendingPrompt(entry)
         do {
-            let response = try await requestSender.prompt(PromptRequest(prompt: content, sessionId: sessionId, meta: meta))
+            let request = PromptRequest(prompt: content, sessionId: sessionId, meta: meta)
+            let response = try await requestSender.prompt(request) { sent in
+                self.recordTraceContext(of: sent)
+            }
             resolvePrompt(entry, with: response)
             return response
         } catch {
@@ -84,6 +90,16 @@ extension SessionModel {
     ///   `ConnectionError` on a disconnect or a timeout.
     public func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws {
         try await requestSender.setConfigOption(request)
+    }
+
+    /// Records the W3C trace context of a prompt request as it goes out.
+    ///
+    /// Only the trace context members are kept, so each other `_meta` member
+    /// of the prompt stays out of a cancel that gives this value.
+    ///
+    /// - Parameter request: The prompt request with its final `_meta`.
+    private func recordTraceContext(of request: PromptRequest) {
+        promptTraceMeta = TraceContextMeta.extract(from: request.meta).map { $0.inject(into: nil) }
     }
 
     /// Appends the local error entry of a failed request.

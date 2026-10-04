@@ -15,7 +15,10 @@ import Testing
 // in a `TelemetryCapture`, through a `TracedSessionHarness`, with a
 // `ScriptedStubAgent` on the far end. `TurnRunner.run()` calls
 // `AgentSession.openSession()`, so the turn sends `initialize`,
-// `session/new`, `session/prompt` and `session/close`.
+// `session/new`, `session/prompt` and `session/close`. The turn sends its
+// prompt through `SessionModel.prompt(_:meta:)`, so the prompt span, the
+// transcript entries of the model and the error entry of a refused turn are
+// all inside the capture.
 //
 // The code under test gets the telemetry of the capture globally: the capture
 // binds its tracer and its metrics factory as the task-local values, and its

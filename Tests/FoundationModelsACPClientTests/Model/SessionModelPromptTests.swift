@@ -26,6 +26,15 @@ private let promptText = "Hello agent"
 /// The `_meta` field that the tests give a request, as a trace parent does.
 private let traceMeta: JSONValue = .object(["traceparent": .string("00-trace-span-01")])
 
+/// A valid W3C `traceparent` that a sent prompt carries.
+private let sentTraceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+/// The W3C `tracestate` that a sent prompt carries.
+private let sentTracestate = "vendor=prompt"
+
+/// A `_meta` member that is not trace context.
+private let vendorMeta: JSONValue = .object(["vendor": .string("kept")])
+
 /// The request tests, in one suite so that `swift test --filter
 /// SessionModelPromptTests` selects them. A test that waits for a prompt the
 /// fake never receives would suspend forever, so the suite has a time limit.
@@ -207,6 +216,38 @@ struct SessionModelPromptTests {
         let request = try #require(await received.next())
 
         #expect(request == PromptRequest(prompt: [textBlock(promptText)], sessionId: testSession, meta: traceMeta))
+        sender.answerPrompt(with: promptedResponse)
+        _ = try await call.value
+    }
+
+    // MARK: - The trace context of the prompt
+
+    /// The model records the W3C trace context of the prompt when the request
+    /// goes out, before the agent answers, so a cancel of the turn can name
+    /// the prompt span as its parent. The other `_meta` members stay out.
+    @Test func promptRecordsTheTraceContextOfTheSentRequest() async throws {
+        let model = makeModel()
+        let sent = try #require(TraceContextMeta(traceparent: sentTraceparent, tracestate: sentTracestate))
+        let call = Task { try await model.prompt([textBlock(promptText)], meta: sent.inject(into: vendorMeta)) }
+        var received = sender.receivedPrompts.makeAsyncIterator()
+        _ = await received.next()
+
+        #expect(model.promptTraceMeta == sent.inject(into: nil))
+        sender.answerPrompt(with: promptedResponse)
+        _ = try await call.value
+    }
+
+    /// A model that sent no prompt, or a prompt with no trace context, has no
+    /// prompt trace context to give.
+    @Test func promptWithNoTraceContextRecordsNone() async throws {
+        let model = makeModel()
+        #expect(model.promptTraceMeta == nil)
+
+        let call = Task { try await model.prompt([textBlock(promptText)], meta: vendorMeta) }
+        var received = sender.receivedPrompts.makeAsyncIterator()
+        _ = await received.next()
+
+        #expect(model.promptTraceMeta == nil)
         sender.answerPrompt(with: promptedResponse)
         _ = try await call.value
     }

@@ -291,6 +291,21 @@ struct ModelRequestSpanTests {
         }
     }
 
+    /// The session model records the trace context of the prompt that it
+    /// sent. A caller that gives no `_meta` of its own sends the trace context
+    /// alone, so the record is exactly the `_meta` that the agent got.
+    @Test func aPromptRecordsTheTraceContextThatTheAgentGot() async throws {
+        try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { _ in
+            let connected = await ModelRequestFixtures.connect()
+            try await connected.initialize()
+            let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
+            _ = try await session.prompt(ModelRequestFixtures.promptContent)
+
+            let promptMeta = try #require(connected.receivedMeta(of: ClientRequestSpan.Method.prompt).first)
+            #expect(session.promptTraceMeta == promptMeta)
+        }
+    }
+
     /// A `session/cancel` whose `_meta` holds the `traceparent` of the
     /// prompt span is a child of that prompt span, in the trace of the
     /// prompt. The agent gets the `traceparent` of the cancel span.

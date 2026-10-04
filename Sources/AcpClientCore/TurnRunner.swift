@@ -1,8 +1,9 @@
 // `TurnRunner` — the turn of `cli-plan.md` §8: send one prompt, stream the
 // answer as it arrives, and detect the end of the turn.
 //
-// This type holds NO process handling. `AgentSession` gives it a live
-// connection and a session model, and `RunCommand` owns the `AgentProcess`.
+// This type holds NO process handling. `AgentSession` gives it the session
+// model of a live connection, and the turn reads, prompts and cancels through
+// that model alone. `RunCommand` owns the `AgentProcess`.
 // That split is the whole reason this file is unit-testable over
 // `InMemoryTransport.pair()`: no binary is started, and no test waits on a
 // pipe.
@@ -235,12 +236,10 @@ struct TurnRunner {
         // The tap is made before the prompt goes out, so it gives each update
         // of the turn.
         let updates = opened.updateTap()
-        let sessionId = opened.sessionId
         let (toolNames, toolNameFeed) = AsyncStream<String>.makeStream()
-        let promptTrace = PromptTraceContext()
         return try await withThrowingTaskGroup(of: TurnEvent.self) { group in
             group.addTask {
-                try await self.sendPrompt(for: sessionId, recordingTraceIn: promptTrace)
+                try await self.sendPrompt(through: opened)
                 // The acknowledgement never ends the turn.
                 return .sideWorkFinished
             }
@@ -268,7 +267,7 @@ struct TurnRunner {
             }
             if let interrupts {
                 group.addTask {
-                    try await self.applyInterrupts(from: interrupts, to: sessionId, joining: promptTrace)
+                    try await self.applyInterrupts(from: interrupts, to: opened)
                     // The stream ended with no second press on it, so the
                     // interrupts are over and the turn is not.
                     return .sideWorkFinished
@@ -296,30 +295,18 @@ struct TurnRunner {
         }
     }
 
-    /// Sends the prompt of the turn in a client request span.
+    /// Sends the prompt of the turn through the session model.
     ///
-    /// Before the request goes out, the function records the trace context of
-    /// its span in `promptTrace`, so that a `session/cancel` of the same turn
-    /// joins the trace of the prompt.
+    /// The model sends `session/prompt` in a client request span, and it
+    /// records the W3C trace context of that span in
+    /// `SessionModel.promptTraceMeta` before the request goes out, so that a
+    /// `session/cancel` of the same turn joins the trace of the prompt.
     ///
-    /// - Parameters:
-    ///   - sessionId: The session to prompt.
-    ///   - promptTrace: Where the trace context of the prompt span goes.
+    /// - Parameter opened: The session model of the turn.
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` when
     ///   the agent went away.
-    private func sendPrompt(
-        for sessionId: SessionId,
-        recordingTraceIn promptTrace: PromptTraceContext
-    ) async throws {
-        _ = try await ClientRequestSpan.run(
-            method: ClientRequestSpan.Method.prompt,
-            sessionId: sessionId
-        ) { meta in
-            await promptTrace.record(ClientRequestSpan.ParentContext.current)
-            return try await session.connection.prompt(
-                PromptRequest(prompt: [.text(TextContent(text: prompt))], sessionId: sessionId, meta: meta)
-            )
-        }
+    private func sendPrompt(through opened: SessionModel) async throws {
+        _ = try await opened.prompt([.text(TextContent(text: prompt))])
     }
 
     /// Applies each interrupt of the run to the live turn.
@@ -339,33 +326,25 @@ struct TurnRunner {
     /// The `session/cancel` span is a child of the `session/prompt` span of
     /// the turn, so the notification carries the trace of the turn. The two
     /// requests run in two children of one task group, and a child task does
-    /// not see the span of its sibling. Thus the prompt records its trace
-    /// context in `promptTrace`, and the cancellation reads it there.
+    /// not see the span of its sibling. Thus the cancel gives the model the
+    /// trace context that the model recorded for the prompt, as its `_meta`.
+    /// A press before the prompt went out finds no record, and the cancel
+    /// starts in the context of its own task.
     ///
     /// - Parameters:
     ///   - interrupts: The interrupts of the run.
-    ///   - sessionId: The session to cancel.
-    ///   - promptTrace: The trace context of the prompt of the turn.
+    ///   - opened: The session model of the turn.
     /// - Throws: ``AcpClientInterrupted`` on the second interrupt, or
     ///   `ConnectionError` when the agent went away before the cancellation
     ///   could reach it.
     private func applyInterrupts(
         from interrupts: AsyncStream<TurnInterrupt>,
-        to sessionId: SessionId,
-        joining promptTrace: PromptTraceContext
+        to opened: SessionModel
     ) async throws {
         for await interrupt in interrupts {
             switch interrupt {
             case .cancelTurn:
-                try await ClientRequestSpan.run(
-                    method: ClientRequestSpan.Method.cancelSession,
-                    sessionId: sessionId,
-                    parent: await promptTrace.prompt
-                ) { meta in
-                    try await session.connection.sessionCancel(
-                        CancelSessionNotification(sessionId: sessionId, meta: meta)
-                    )
-                }
+                try await opened.cancel(meta: opened.promptTraceMeta)
             case .endRunAtOnce:
                 throw AcpClientInterrupted()
             }
@@ -456,25 +435,6 @@ private enum TurnEvent: Sendable {
     /// A child that cannot end the turn finished: the prompt was acknowledged,
     /// or the spinner stopped.
     case sideWorkFinished
-}
-
-/// The trace context of the `session/prompt` span of one turn.
-///
-/// The prompt and the interrupts of a turn run in two children of one task
-/// group. The prompt writes its trace context here, and a `session/cancel`
-/// reads it, so that the cancellation joins the trace of the turn.
-private actor PromptTraceContext {
-    /// The trace context of the prompt span, or `nil` when the turn has not
-    /// sent its prompt yet. A cancellation before the prompt has no prompt
-    /// trace to join, and it starts in the context of its own task.
-    private(set) var prompt: ClientRequestSpan.ParentContext?
-
-    /// Records the trace context of the prompt span.
-    ///
-    /// - Parameter context: The trace context of the prompt span.
-    func record(_ context: ClientRequestSpan.ParentContext) {
-        prompt = context
-    }
 }
 
 /// What one update did to the turn.

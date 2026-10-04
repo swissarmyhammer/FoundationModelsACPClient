@@ -14,8 +14,26 @@ struct ConnectionSessionRequestSender: SessionRequestSender {
     /// The connection that carries the requests.
     let connection: ClientSideConnection
 
-    func prompt(_ request: PromptRequest) async throws -> PromptResponse {
-        try await ClientRequestSpan.send(request) { try await connection.prompt($0) }
+    /// Sends `session/prompt` in a client request span.
+    ///
+    /// `willSend` gets the request inside the span, with the W3C trace context
+    /// of the span in its `_meta`, before the request goes out.
+    ///
+    /// - Parameters:
+    ///   - request: The prompt request.
+    ///   - willSend: Gets the request with its traced `_meta`.
+    /// - Returns: The response of the agent.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on a
+    ///   disconnect or a timeout, or `CancellationError` when the calling task
+    ///   is cancelled.
+    func prompt(
+        _ request: PromptRequest,
+        willSend: @MainActor @Sendable (PromptRequest) -> Void
+    ) async throws -> PromptResponse {
+        try await ClientRequestSpan.send(request) { traced in
+            await willSend(traced)
+            return try await connection.prompt(traced)
+        }
     }
 
     /// Sends the `session/cancel` notification in a client request span.
