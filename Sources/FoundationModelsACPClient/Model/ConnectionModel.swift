@@ -266,6 +266,24 @@ public final class ConnectionModel {
         }
     }
 
+    /// Gives `signal` when the connection wrote the response of the inbound
+    /// request that the calling task handles, or when the connection will
+    /// never write that response.
+    ///
+    /// Call this on the task of an inbound request, before its handler
+    /// returns: the connection finds the request through that task. The
+    /// connection gives `signal` exactly one time. With no open connection, no
+    /// response follows, so `signal` goes at once.
+    ///
+    /// - Parameter signal: The signal to give.
+    func signalAfterCurrentResponse(_ signal: @escaping @Sendable () -> Void) {
+        guard let connection else {
+            signal()
+            return
+        }
+        connection.afterRespondingToCurrentRequest({ signal() }, onDiscard: signal)
+    }
+
     // MARK: - Open sessions
 
     /// Gives the model of an open session.

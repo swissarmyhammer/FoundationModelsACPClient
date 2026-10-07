@@ -98,7 +98,7 @@ struct ModelClientTests {
         try await waitUntil { !session.pendingPermissions.isEmpty }
         let pending = try #require(session.pendingPermissions.first)
         #expect(pending.request == request)
-        session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
+        await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
 
         let response = try await call.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId)))

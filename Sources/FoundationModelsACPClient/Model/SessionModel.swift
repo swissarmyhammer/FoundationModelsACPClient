@@ -175,6 +175,11 @@ public final class SessionModel {
         cancelledResponse: PendingPermissionRequest.cancelledResponse
     )
 
+    /// The callers of ``selectPermission(_:option:)`` and
+    /// ``cancelPermission(_:)`` that wait until the connection wrote the
+    /// permission response, keyed by the id of the request.
+    @ObservationIgnored let permissionWrites = ResponseWriteWaiters()
+
     /// The pending session-scoped elicitations and the continuation of each
     /// one. The queue is observable, so a read of ``pendingElicitations``
     /// tracks it.

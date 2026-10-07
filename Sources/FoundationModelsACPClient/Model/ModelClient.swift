@@ -52,11 +52,17 @@ struct ModelClient: Client {
     /// Gives the permission request to the open model of its session, and
     /// waits for the user's decision.
     ///
+    /// After the decision, and before this handler returns, the router asks
+    /// the connection to give the "written" signal of the request when it
+    /// wrote the response, or when it will never write it. Thus
+    /// `SessionModel.selectPermission(_:option:)` returns only after the
+    /// response is on the wire.
+    ///
     /// - Parameter params: The permission request.
     /// - Returns: The user's decision, or the `cancelled` outcome when the
     ///   session is not open.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        guard let session = await model?.session(for: params.sessionId) else {
+        guard let model, let session = await model.session(for: params.sessionId) else {
             let warning = Self.closedSessionWarning(
                 answer: "cancelled",
                 request: "a permission request",
@@ -65,7 +71,9 @@ struct ModelClient: Client {
             logger.log(warning)
             return PendingPermissionRequest.cancelledResponse
         }
-        return await session.awaitPermissionDecision(for: params)
+        return await session.awaitPermissionDecision(for: params) { signal in
+            model.signalAfterCurrentResponse(signal)
+        }
     }
 
     /// Gives the elicitation to the model of its scope, and waits for the

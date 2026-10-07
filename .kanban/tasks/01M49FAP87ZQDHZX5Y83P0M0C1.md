@@ -1,10 +1,40 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m4bb346k5rkwesrs41fzx20w
+  text: |-
+    Research (implement):
+    - `ClientSideConnection.afterRespondingToCurrentRequest(_:onDiscard:)` is a sync method on a final Sendable class. It reads the task-local `Connection.currentResponseHooks`, so it must run on the dispatch task of the request. The main-actor hop of `SessionModel.awaitPermissionDecision` stays on the same task, so a `@MainActor` closure that the model calls after the decision finds the hooks.
+    - `completeInbound` returns false when the connection is closed; then the hooks are discarded and `onDiscard` runs. `ClientSideConnection.close()` from inside a handler sets the closed flag before the handler returns, so a wrapping `Client` that closes the connection after the router returns gives a deterministic "connection closes before the write" test.
+    - `SessionModel.cancel(meta:)` calls `permissions.cancelAll()`; that resolves only requests that no caller resolved, so no "written" waiter is attached to them. `markClosed()` calls `cancelAllPending()`.
+    - Frame order on the agent side: wrap the agent end in `FrameTeeTransport` (AcpClientCore). Its forwarding task records inbound lines in wire order, before the agent read loop sees them. A record from the agent handlers would race, because the response and the prompt are handled on different tasks.
+    - Plan: a small main-actor `ResponseWriteWaiters` (KeyedWaiters<UUID, Void> plus a state per id: expected / written) owned by SessionModel. Only ids that `selectPermission`/`cancelPermission` resolved are tracked, so a signal for an id that nobody waits on leaves no state.
+  timestamp: 2026-10-07T14:08:18.131111+00:00
+- actor: claude-code
+  id: 01m4bdq2qmxwd7j9wx8ct11vaa
+  text: |-
+    Implementation landed (TDD).
+    - RED: the four card tests ran against the old sync API. Three failed for the expected reason: both 100-round order tests (a `session/prompt` frame came before the permission response), and the close test (`didCloseTheConnection` was false, because the old call returned before the handler resumed). `selectPermissionWithAnUnknownIdReturnsAtOnce` passed in RED, because the old call also returns at once. It stays as a guard for the new wait path.
+    - New `ResponseWriteWaiters` (main actor): a `KeyedWaiters<UUID, Void>` plus a `Progress` enum per id (`expected` / `written`). `selectPermission`/`cancelPermission` mark the id expected after a resolve that removed a request, and then wait. A signal for an id that no caller expects changes nothing, so a cancel of the turn or a task cancel leaves no state.
+    - `awaitPermissionDecision(for:afterResponse:)`: with `nil`, the model signals at once. Otherwise it gives the closure a `@Sendable` signal that hops to the main actor through one short `Task` (`onDiscard` is sync and can run on the connection task).
+    - `ModelClient.requestPermission` passes `{ signal in model.signalAfterCurrentResponse(signal) }`. The new `ConnectionModel.signalAfterCurrentResponse(_:)` calls `connection.afterRespondingToCurrentRequest({ signal() }, onDiscard: signal)`, or signals at once when no connection is open. It is a named method because a callback closure that branches must call a named method (swift/initialization rule).
+    - `cancelAllPending()` calls `permissionWrites.resumeAll()`. `markClosed()` (thus `disconnect()` and each close) goes through `cancelAllPending()`.
+    - Two extra tests: `selectPermissionReturnsWhenTheSessionCloses` (a decision that never signals; `markClosed` ends the wait) and `ResponseWriteWaitersTests.aSignalBeforeTheWaitEndsTheWaitAtOnce`. I watched each fail with a temporary probe: `resumeAll` removed, and a signal before the wait left as `expected`. Each failed on the 60 s time limit. Then I restored the code.
+    - Dead end: my first version of the close test ran `selectPermission` in an unstructured `Task`. With the probe, the suite time limit could not cancel it, so `swift test` hung for 30 min. I had to kill it. The test now uses `async let`, so the time limit reaches the wait.
+  timestamp: 2026-10-07T14:54:09.140667+00:00
+- actor: claude-code
+  id: 01m4bdq6gqe9gajejmk7marqcb
+  text: |-
+    ### implement — changed
+    - evidence: 10 files — Sources/FoundationModelsACPClient/Model/ResponseWriteWaiters.swift (new), Sources/FoundationModelsACPClient/Model/SessionModel.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Pending.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/ModelClient.swift, Tests/FoundationModelsACPClientTests/Model/PermissionReplyOrderTests.swift (new), Tests/FoundationModelsACPClientTests/Model/ResponseWriteWaitersTests.swift (new), Tests/FoundationModelsACPClientTests/Model/SessionModelPendingTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelStreamTests.swift, Tests/FoundationModelsACPClientTests/Model/ModelClientTests.swift. `swift test --filter "PermissionReplyOrderTests|ResponseWriteWaitersTests"`: 6 passed. `swift build && swift test`: 555 tests in 48 suites passed, 0 failures, no warnings other than the accepted MLX "missing creator" warning.
+    - next: /review (task stays in doing). Not committed.
+  timestamp: 2026-10-07T14:54:13.015999+00:00
 depends_on:
 - 01M49FA5BK7YA0BJ57PQCDQCM3
-position_column: todo
-position_ordinal: '8580'
+position_column: doing
+position_ordinal: '80'
 title: 'Model: selectPermission and cancelPermission wait until the response frame is written'
 ---
 ## What
@@ -39,12 +69,12 @@ Thus each path ends with exactly one of the two calls, and the model needs no sp
 
 ## Acceptance Criteria
 
-- [ ] `await session.selectPermission(id, option:)` returns only after the response frame of that request is written to the transport.
-- [ ] A prompt that the caller sends after that `await` goes on the wire after the permission response, in 100 of 100 runs, with no sleeps.
-- [ ] `await session.cancelPermission(id)` has the same order guarantee, with the `cancelled` outcome.
-- [ ] A call with an unknown or already resolved id returns at once.
-- [ ] When the connection closes before the write, the call returns (through `onDiscard`) and does not hang.
-- [ ] Each existing test passes with the `await` forms, and `swift build` gives no new warning.
+- [x] `await session.selectPermission(id, option:)` returns only after the response frame of that request is written to the transport.
+- [x] A prompt that the caller sends after that `await` goes on the wire after the permission response, in 100 of 100 runs, with no sleeps.
+- [x] `await session.cancelPermission(id)` has the same order guarantee, with the `cancelled` outcome.
+- [x] A call with an unknown or already resolved id returns at once.
+- [x] When the connection closes before the write, the call returns (through `onDiscard`) and does not hang.
+- [x] Each existing test passes with the `await` forms, and `swift build` gives no new warning.
 
 ## Tests
 
@@ -61,8 +91,8 @@ Use /tdd — write failing tests first, then implement to make them pass.
 
 ## Subtasks
 
-- [ ] Write the four failing tests in `PermissionReplyOrderTests.swift`.
-- [ ] Add the "written" waiters and `awaitPermissionDecision(for:afterResponse:)`.
-- [ ] Make `selectPermission` and `cancelPermission` async, and resume the waiters on close.
-- [ ] Register `work` and `onDiscard` in `ModelClient.requestPermission(_:)`.
-- [ ] Add `await` at the existing call sites.
+- [x] Write the four failing tests in `PermissionReplyOrderTests.swift`.
+- [x] Add the "written" waiters and `awaitPermissionDecision(for:afterResponse:)`.
+- [x] Make `selectPermission` and `cancelPermission` async, and resume the waiters on close.
+- [x] Register `work` and `onDiscard` in `ModelClient.requestPermission(_:)`.
+- [x] Add `await` at the existing call sites.

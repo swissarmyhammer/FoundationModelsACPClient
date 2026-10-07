@@ -35,6 +35,14 @@ extension SessionModel {
 
     // MARK: - Permissions
 
+    /// Registers the "written" signal of one permission response.
+    ///
+    /// The model calls the closure on the task of the agent's request, after
+    /// the decision and before that request returns. The closure must give
+    /// `signal` exactly one time: when the connection wrote the response to
+    /// the transport, or when the connection will never write it.
+    typealias AfterResponse = @MainActor (_ signal: @escaping @Sendable () -> Void) -> Void
+
     /// Suspends until the user answers or cancels the permission request.
     ///
     /// The request is pending in ``pendingPermissions`` until one of these
@@ -49,35 +57,88 @@ extension SessionModel {
     ///   sends does not cancel that task, so ``cancel(meta:)`` answers the
     ///   request itself.
     ///
-    /// - Parameter request: The permission request from the agent.
+    /// After the decision, the model gives the "written" signal of the
+    /// request to `afterResponse`. ``selectPermission(_:option:)`` and
+    /// ``cancelPermission(_:)`` return only after that signal.
+    ///
+    /// - Parameters:
+    ///   - request: The permission request from the agent.
+    ///   - afterResponse: Registers the "written" signal of the response, or
+    ///     `nil` to give the signal at once, for example in a unit test with
+    ///     no connection.
     /// - Returns: The user's decision, or the `cancelled` outcome.
-    func awaitPermissionDecision(for request: RequestPermissionRequest) async -> RequestPermissionResponse {
-        await permissions.awaitResponse(to: PendingPermissionRequest(id: UUID(), request: request))
+    func awaitPermissionDecision(
+        for request: RequestPermissionRequest,
+        afterResponse: AfterResponse? = nil
+    ) async -> RequestPermissionResponse {
+        let id = UUID()
+        let response = await permissions.awaitResponse(to: PendingPermissionRequest(id: id, request: request))
+        guard let afterResponse else {
+            permissionWrites.signal(id)
+            return response
+        }
+        afterResponse(responseWrittenSignal(for: id))
+        return response
     }
 
-    /// Answers one pending permission request with the selected option.
+    /// Answers one pending permission request with the selected option, and
+    /// waits until the connection wrote the response.
     ///
-    /// The call removes the pending request and resolves the agent's call. A
-    /// call with an unknown or already resolved id changes nothing.
+    /// The call removes the pending request and resolves the agent's call. It
+    /// returns when the connection gave the response to the transport, so a
+    /// request that the caller sends after this call goes on the wire after
+    /// the response. When the connection closes before it writes the
+    /// response, the call returns too. A call with an unknown or already
+    /// resolved id changes nothing and returns at once.
     ///
     /// - Parameters:
     ///   - id: The id of the pending request.
     ///   - optionId: The id of the selected option. Give the id of one option
     ///     of the request.
-    public func selectPermission(_ id: PendingPermissionRequest.ID, option optionId: PermissionOptionId) {
-        permissions.resolve(id, with: PendingPermissionRequest.selectedResponse(optionId))
+    public func selectPermission(_ id: PendingPermissionRequest.ID, option optionId: PermissionOptionId) async {
+        await waitUntilWritten(permissions.resolve(id, with: PendingPermissionRequest.selectedResponse(optionId)))
     }
 
-    /// Cancels one pending permission request.
+    /// Cancels one pending permission request, and waits until the
+    /// connection wrote the response.
     ///
     /// The call removes the pending request and resolves the agent's call
     /// with the `cancelled` outcome, which is the spec's outcome for a request
-    /// that the user did not decide. A call with an unknown or already
-    /// resolved id changes nothing.
+    /// that the user did not decide. The call returns with the same guarantee
+    /// as ``selectPermission(_:option:)``. A call with an unknown or already
+    /// resolved id changes nothing and returns at once.
     ///
     /// - Parameter id: The id of the pending request.
-    public func cancelPermission(_ id: PendingPermissionRequest.ID) {
-        permissions.cancel(id)
+    public func cancelPermission(_ id: PendingPermissionRequest.ID) async {
+        await waitUntilWritten(permissions.cancel(id))
+    }
+
+    /// Waits until the connection wrote the response of a request that a
+    /// caller resolved.
+    ///
+    /// - Parameter resolved: The request that the caller resolved, or `nil`
+    ///   when the call resolved nothing. A `nil` request returns at once.
+    private func waitUntilWritten(_ resolved: PendingPermissionRequest?) async {
+        guard let resolved else { return }
+        permissionWrites.expect(resolved.id)
+        await permissionWrites.waitUntilWritten(resolved.id)
+    }
+
+    /// Makes the "written" signal of one permission request.
+    ///
+    /// The connection gives the signal from its own task, and the waiters
+    /// live on the main actor. The signal is synchronous, so it starts one
+    /// short task that moves the signal to the main actor. The response is
+    /// already written or discarded at that time, so the hop does not change
+    /// the order on the wire.
+    ///
+    /// - Parameter id: The id of the request.
+    /// - Returns: The signal.
+    private func responseWrittenSignal(for id: UUID) -> @Sendable () -> Void {
+        let writes = permissionWrites
+        return {
+            Task { @MainActor in writes.signal(id) }
+        }
     }
 
     // MARK: - Elicitations
@@ -165,10 +226,13 @@ extension SessionModel {
     /// elicitation.
     ///
     /// Each permission request answers `cancelled`, and each elicitation
-    /// answers with the cancel action. A closed session thus leaves no pending
-    /// prompt, no tool-call link, and no suspended call.
+    /// answers with the cancel action. Each call of
+    /// ``selectPermission(_:option:)`` or ``cancelPermission(_:)`` that waits
+    /// for its response to be written returns too. A closed session thus
+    /// leaves no pending prompt, no tool-call link, and no suspended call.
     public func cancelAllPending() {
         permissions.cancelAll()
+        permissionWrites.resumeAll()
         for id in pendingElicitations.map(\.id) {
             cancelElicitation(id)
         }

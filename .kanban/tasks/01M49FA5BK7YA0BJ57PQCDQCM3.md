@@ -28,8 +28,24 @@ comments:
     - evidence: FoundationModelsACP resolved at 163f7ebbebc5c831319a618cf8ba7edde982e483 (contains 9a32d8e); Package.resolved is git-ignored, so no tracked file changed; `swift build` passed, and `swift test` passed with 549 tests in 46 suites and 0 failures (only the accepted MLX warning from zws9qzt)
     - next: /review, then task ^3p0m0c1 can use `ClientSideConnection.afterRespondingToCurrentRequest(_:onDiscard:)`
   timestamp: 2026-10-07T14:00:27.183644+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4bavdjrytq1wec18zqv8qwd
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (cd5a301): 0 findings, 0 confirmed, 0 refuted. The 4 changed files are all in `.kanban/`, and `.reviewignore` excludes them. The dependency update is in the git-ignored `Package.resolved`, so this commit has no reviewable source change.
+    - next: Task is in done. Task ^3p0m0c1 can now use the new API.
+  timestamp: 2026-10-07T14:04:05.592493+00:00
+- actor: claude-code
+  id: 01m4bavpyqwy42v53pw34190zw
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — FoundationModelsACP resolved at 163f7eb (contains 9a32d8e); Package.resolved is git-ignored
+    - test: green — swift test, 549 passed, 0 failed, 0 skipped
+    - commit: cd5a301
+    - review: clean — 0 findings (only .kanban/ files in the commit); task moved to done
+  timestamp: 2026-10-07T14:04:15.191575+00:00
+position_column: done
+position_ordinal: dc80
 title: 'Adopt FoundationModelsACP task 34m4s52: resolve the revision with ClientSideConnection.afterRespondingToCurrentRequest'
 ---
 ## What

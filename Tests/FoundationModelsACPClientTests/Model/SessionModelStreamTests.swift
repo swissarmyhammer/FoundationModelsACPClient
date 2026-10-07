@@ -480,7 +480,7 @@ struct SessionModelStreamTests {
 
         let pending = try #require(model.pendingPermissions.first)
         #expect(model.pendingPermissions.count == 1)
-        model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
+        await model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
         let response = await permission.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId)))
     }

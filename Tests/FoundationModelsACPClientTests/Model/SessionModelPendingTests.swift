@@ -82,7 +82,7 @@ struct SessionModelPendingTests {
         let pending = try #require(model.pendingPermissions.first)
         #expect(pending.request == request)
 
-        model.selectPermission(pending.id, option: rejectOptionId)
+        await model.selectPermission(pending.id, option: rejectOptionId)
 
         #expect(model.pendingPermissions.isEmpty)
         let response = await task.value
@@ -108,7 +108,7 @@ struct SessionModelPendingTests {
         let task = try await SessionModelFixtures.startPermission(on: model)
 
         let pending = try #require(model.pendingPermissions.first)
-        model.cancelPermission(pending.id)
+        await model.cancelPermission(pending.id)
 
         #expect(model.pendingPermissions.isEmpty)
         let response = await task.value
@@ -120,11 +120,11 @@ struct SessionModelPendingTests {
         let task = try await SessionModelFixtures.startPermission(on: model)
         let pending = try #require(model.pendingPermissions.first)
 
-        model.selectPermission(pending.id, option: allowOptionId)
+        await model.selectPermission(pending.id, option: allowOptionId)
         // A second resume of the continuation traps, so these two calls prove
         // that a resolved request resumes one time only.
-        model.selectPermission(pending.id, option: rejectOptionId)
-        model.cancelPermission(pending.id)
+        await model.selectPermission(pending.id, option: rejectOptionId)
+        await model.cancelPermission(pending.id)
 
         let response = await task.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
@@ -138,12 +138,12 @@ struct SessionModelPendingTests {
         // More than one outstanding request is supported, in arrival order.
         #expect(model.pendingPermissions.map(\.request.title) == ["First?", "Second?"])
 
-        model.selectPermission(model.pendingPermissions[1].id, option: allowOptionId)
+        await model.selectPermission(model.pendingPermissions[1].id, option: allowOptionId)
         let secondResponse = await secondTask.value
         #expect(secondResponse.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
         #expect(model.pendingPermissions.map(\.request.title) == ["First?"])
 
-        model.selectPermission(try #require(model.pendingPermissions.first).id, option: rejectOptionId)
+        try await model.selectPermission(#require(model.pendingPermissions.first).id, option: rejectOptionId)
         let firstResponse = await firstTask.value
         #expect(firstResponse.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
         #expect(model.pendingPermissions.isEmpty)
