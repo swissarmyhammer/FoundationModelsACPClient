@@ -38,9 +38,13 @@ enum InitializeFixtures {
     /// An auth method that the agent handles through `auth/login`.
     static let agentMethod = AuthMethod.agent(AuthMethodAgent(methodId: agentMethodId, name: "API key"))
 
+    /// The id of the auth method that the client runs as a separate terminal
+    /// process.
+    static let terminalMethodId = AuthMethodId(rawValue: "terminal-login")
+
     /// An auth method that the client runs as a separate terminal process.
     static let terminalMethod = AuthMethod.terminal(
-        AuthMethodTerminal(methodId: AuthMethodId(rawValue: "terminal-login"), name: "Terminal login")
+        AuthMethodTerminal(methodId: terminalMethodId, name: "Terminal login")
     )
 
     /// The error that the agent refuses a login with.
@@ -84,6 +88,9 @@ private struct CapabilityFlags: Equatable {
     /// ``ConnectionModel/canDeleteSessions``.
     let canDeleteSessions: Bool
 
+    /// ``ConnectionModel/canLogin``.
+    let canLogin: Bool
+
     /// ``ConnectionModel/canLogout``.
     let canLogout: Bool
 
@@ -93,6 +100,7 @@ private struct CapabilityFlags: Equatable {
         canResumeSessions: false,
         canCloseSessions: false,
         canDeleteSessions: false,
+        canLogin: false,
         canLogout: false
     )
 
@@ -102,6 +110,7 @@ private struct CapabilityFlags: Equatable {
         canResumeSessions: true,
         canCloseSessions: true,
         canDeleteSessions: true,
+        canLogin: true,
         canLogout: true
     )
 }
@@ -120,6 +129,7 @@ extension CapabilityFlags {
             canResumeSessions: model.canResumeSessions,
             canCloseSessions: model.canCloseSessions,
             canDeleteSessions: model.canDeleteSessions,
+            canLogin: model.canLogin,
             canLogout: model.canLogout
         )
     }
@@ -175,6 +185,7 @@ struct ConnectionModelInitializeTests {
             canResumeSessions: true,
             canCloseSessions: true,
             canDeleteSessions: false,
+            canLogin: false,
             canLogout: false
         )
         #expect(CapabilityFlags(of: connected.model) == expected)
@@ -192,13 +203,32 @@ struct ConnectionModelInitializeTests {
         #expect(advertising.model.canUseAdditionalDirectories)
     }
 
-    @Test func terminalAuthMethodsAloneCannotLogout() async throws {
+    @Test func aTerminalOnlyAgentCanLogOutButNotLogIn() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.terminalMethod])
 
         try await connected.initialize()
 
-        #expect(!connected.model.canLogout)
+        #expect(connected.model.canLogout)
+        #expect(!connected.model.canLogin)
         #expect(connected.model.authState == .required([InitializeFixtures.terminalMethod]))
+    }
+
+    @Test func anAgentMethodAllowsLoginAndLogout() async throws {
+        let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+
+        try await connected.initialize()
+
+        #expect(connected.model.canLogin)
+        #expect(connected.model.canLogout)
+    }
+
+    @Test func noAuthMethodsAllowsNeither() async throws {
+        let connected = await ConnectedModel()
+
+        try await connected.initialize()
+
+        #expect(!connected.model.canLogin)
+        #expect(!connected.model.canLogout)
     }
 
     @Test func aNewConnectionForgetsTheInitializeOfTheLastOne() async throws {
@@ -369,14 +399,28 @@ struct ConnectionModelInitializeTests {
     }
 
     @Test func aLogoutWithNoCapabilityKeepsTheAuthState() async throws {
-        let connected = await ConnectedModel(authMethods: [InitializeFixtures.terminalMethod])
+        let connected = await ConnectedModel()
         try await connected.initialize()
 
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
             try await connected.model.logout(LogoutAuthRequest())
         }
 
-        #expect(connected.model.authState == .required([InitializeFixtures.terminalMethod]))
+        #expect(connected.model.authState == .notRequired)
+    }
+
+    @Test func loginWithATerminalMethodThrowsAndSendsNothing() async throws {
+        try await expectRefusedLogin(
+            of: LoginAuthRequest(methodId: InitializeFixtures.terminalMethodId),
+            by: [InitializeFixtures.terminalMethod]
+        )
+    }
+
+    @Test func loginWithAnUnlistedMethodThrowsAndSendsNothing() async throws {
+        try await expectRefusedLogin(
+            of: LoginAuthRequest(methodId: AuthMethodId(rawValue: "unlisted")),
+            by: [InitializeFixtures.agentMethod]
+        )
     }
 
     @Test func aLogoutRequiresAuthAgain() async throws {
@@ -406,6 +450,31 @@ struct ConnectionModelInitializeTests {
     }
 
     // MARK: - Helpers
+
+    /// Sends a login that the model must refuse, and expects that the model
+    /// throws ``ConnectionModelError/unsupported(method:)``, sends no frame,
+    /// and keeps the auth state.
+    ///
+    /// A second initialize makes a round trip after the refused login, so a
+    /// login that went out would be in the record before its answer. No sleep
+    /// is necessary.
+    ///
+    /// - Parameters:
+    ///   - request: The login request that the model must refuse.
+    ///   - methods: The auth methods that the agent lists.
+    /// - Throws: The error of an initialize.
+    private func expectRefusedLogin(of request: LoginAuthRequest, by methods: [AuthMethod]) async throws {
+        let connected = await ConnectedModel(authMethods: methods)
+        try await connected.initialize()
+
+        await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.login)) {
+            try await connected.model.login(request)
+        }
+        #expect(connected.model.authState == .required(methods))
+        try await connected.initialize()
+
+        #expect(connected.receivedMethods == [ClientRequestSpan.Method.initialize, ClientRequestSpan.Method.initialize])
+    }
 
     /// Sends a request through the model, closes the agent end of the pair
     /// while the agent holds that request at its gate, and expects that the

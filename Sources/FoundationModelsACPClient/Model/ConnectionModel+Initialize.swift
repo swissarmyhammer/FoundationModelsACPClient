@@ -6,7 +6,7 @@ import FoundationModelsACP
 //
 // The capability flags follow the advertisement rules of the ACP schema of
 // alpha.7. The schema has no flag of its own for `session/list`,
-// `session/resume`, `session/close`, or `auth/logout`:
+// `session/resume`, `session/close`, `auth/login`, or `auth/logout`:
 //
 // - A `capabilities.session` object advertises the session baseline, which
 //   holds `session/list`, `session/resume`, and `session/close`.
@@ -14,9 +14,13 @@ import FoundationModelsACP
 // - `capabilities.session.mcp.http` and `capabilities.session.mcp.stdio`
 //   advertise the MCP transports that the agent can use. The client sends
 //   only the MCP servers of these transports.
-// - An `authMethods` entry that is not a `terminal` method advertises
-//   `auth/login` and `auth/logout`. The client runs a `terminal` method as a
-//   separate process and never sends it to `auth/login`.
+// - One or more `authMethods` entries advertise `auth/logout`, also when each
+//   entry is a `terminal` method. When `authMethods` is empty, the client
+//   must not send `auth/logout`.
+// - An `agent` method advertises `auth/login`. The client sends to
+//   `auth/login` only the id of an `agent` method that the agent lists. The
+//   client runs a `terminal` method as a separate process and never sends it
+//   to `auth/login`. The client does not send a method of an unknown type.
 //
 // Each request goes out in a client request span, through
 // `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
@@ -68,10 +72,28 @@ extension ConnectionModel {
         agentCapabilities?.session?.additionalDirectories != nil
     }
 
-    /// Tells whether the agent serves `auth/logout`. It is `false` before
+    /// Tells whether the agent serves `auth/login`: the agent lists one or
+    /// more `agent` auth methods. It is `false` before ``initialize(_:)``
+    /// succeeds.
+    public var canLogin: Bool {
+        authMethods.contains { $0.loginMethodId != nil }
+    }
+
+    /// Tells whether the agent serves `auth/logout`: the agent lists one or
+    /// more auth methods of any type. It is `false` before
     /// ``initialize(_:)`` succeeds.
     public var canLogout: Bool {
-        authMethods.contains(where: \.isSentToLogin)
+        !authMethods.isEmpty
+    }
+
+    /// Tells whether the client can send a method id to `auth/login`: the id
+    /// is the id of an `agent` method that the agent lists.
+    ///
+    /// - Parameter methodId: The method id of a login request.
+    /// - Returns: `true` when the agent lists an `agent` method with
+    ///   `methodId`.
+    private func canLogin(with methodId: AuthMethodId) -> Bool {
+        authMethods.contains { $0.loginMethodId == methodId }
     }
 
     /// Tells whether the agent advertises the session baseline.
@@ -156,13 +178,21 @@ extension ConnectionModel {
     /// ``AuthState/authenticated(_:)`` with the method of the request. When
     /// the request fails, ``authState`` becomes ``AuthState/failed(_:)`` with
     /// the login operation and the JSON-RPC form of the error: the refusal of
-    /// the agent, a closed connection, a time-out, or a cancel. When no
-    /// connection is open, the call sends nothing and changes no state.
+    /// the agent, a closed connection, a time-out, or a cancel.
+    ///
+    /// The client sends only the id of an `agent` method that the agent
+    /// lists. When `request.methodId` is the id of a `terminal` method, or an
+    /// id that the agent does not list, the call sends nothing and changes no
+    /// state. When no connection is open, the call sends nothing and changes
+    /// no state.
     ///
     /// - Parameter request: The login request.
-    /// - Throws: `ConnectionError.closed` when no connection is open, the
+    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
+    ///   `request.methodId` is not the id of a listed `agent` method,
+    ///   `ConnectionError.closed` when no connection is open, the
     ///   `RequestError` of the agent, or the error of the connection.
     public func login(_ request: LoginAuthRequest) async throws {
+        try requireCapability(canLogin(with: request.methodId), method: ClientRequestSpan.Method.login)
         let connection = try openConnection()
         try await recordingFailure(of: .login(request.methodId)) {
             _ = try await ClientRequestSpan.send(request) { try await connection.loginAuth($0) }
@@ -232,15 +262,16 @@ extension ConnectionModel {
 }
 
 extension AuthMethod {
-    /// Tells whether the client sends this method to `auth/login`. The client
-    /// runs a `terminal` method as a separate process, and sends each other
-    /// method, an unknown one too, to `auth/login`.
-    fileprivate var isSentToLogin: Bool {
+    /// The method id that the client can send to `auth/login`, or `nil` when
+    /// the client must not send this method. Only an `agent` method goes to
+    /// `auth/login`. The client runs a `terminal` method as a separate
+    /// process, and does not send a method of an unknown type.
+    fileprivate var loginMethodId: AuthMethodId? {
         switch self {
-        case .terminal:
-            false
-        case .agent, .unknown:
-            true
+        case .agent(let method):
+            method.methodId
+        case .terminal, .unknown:
+            nil
         }
     }
 }

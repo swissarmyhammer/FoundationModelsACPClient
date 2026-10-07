@@ -51,6 +51,7 @@ private struct LoginHarness {
                 connection: connection,
                 session: testSession,
                 script: [],
+                authMethods: [InitializeFixtures.agentMethod],
                 loginError: loginError,
                 loginGate: loginGate
             )
@@ -60,13 +61,17 @@ private struct LoginHarness {
         requestEvents = connection.subscribeToOutgoingRequests()
     }
 
-    /// Starts a login through the model, and waits until the request is in
-    /// flight.
+    /// Initializes the model, starts a login through the model, and waits
+    /// until the request is in flight.
+    ///
+    /// The model sends a login only for an `agent` method that the agent
+    /// lists, so the initialize comes first.
     ///
     /// - Returns: The task of the login, and the wire id of its request.
-    /// - Throws: An error when the event stream ended before the login
-    ///   started.
+    /// - Throws: The error of the initialize, or an error when the event
+    ///   stream ended before the login started.
     func startLogin() async throws -> (login: Task<Void, any Error>, requestId: RequestId) {
+        _ = try await model.initialize(makeInitializeRequest())
         let login = Task { [model] in try await model.login(InitializeFixtures.login) }
         let requestId = try #require(await loginRequestId())
         return (login, requestId)
