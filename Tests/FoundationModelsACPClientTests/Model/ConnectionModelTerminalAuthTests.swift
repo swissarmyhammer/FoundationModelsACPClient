@@ -73,9 +73,9 @@ private enum TerminalAuthFixtures {
     /// - Returns: The failure of the terminal login, with the unsupported
     ///   reason of ``ConnectionModelError/terminalAuthOperation``.
     static func unsupportedFailure(of methodId: AuthMethodId) -> AuthFailure {
-        AuthFailure(
-            operation: .terminalLogin(methodId),
-            reason: .unsupported(method: ConnectionModelError.terminalAuthOperation)
+        AuthFailureFixtures.unsupportedFailure(
+            of: .terminalLogin(methodId),
+            method: ConnectionModelError.terminalAuthOperation
         )
     }
 }
@@ -183,6 +183,17 @@ struct ConnectionModelTerminalAuthTests {
             environment: [TerminalAuthFixtures.environmentName: TerminalAuthFixtures.environmentValue]
         )
         #expect(runner.calls == [expected])
+    }
+
+    @Test func aTerminalLoginWithNoOpenConnectionRunsTheMethod() async throws {
+        let connected = try await initializedModel()
+        try await connected.closeAgentEnd()
+        let runner = FakeTerminalAuthRunner(outcome: .success(0))
+
+        try await connected.model.loginWithTerminal(InitializeFixtures.terminalMethodId, runner: runner)
+
+        #expect(runner.calls.count == 1)
+        #expect(connected.model.authState == .reconnectRequired(InitializeFixtures.terminalMethodId))
     }
 
     // MARK: - Failure

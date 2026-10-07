@@ -32,9 +32,11 @@ extension ConnectionModel {
     /// Runs a `terminal` auth method of the agent through a runner of the
     /// host.
     ///
-    /// The call sends no ACP request. It gives the `args` of the method and
-    /// its `env` to `runner`, which runs the agent program in an interactive
-    /// terminal.
+    /// The call sends no ACP request. Thus it does not need an open
+    /// connection: with no open connection, it uses the auth methods and the
+    /// terminal capability of the last ``initialize(_:)``. It gives the
+    /// `args` of the method and its `env` to `runner`, which runs the agent
+    /// program in an interactive terminal.
     ///
     /// - Exit status zero: ``authState`` becomes
     ///   ``AuthState/reconnectRequired(_:)``. The open connection is not

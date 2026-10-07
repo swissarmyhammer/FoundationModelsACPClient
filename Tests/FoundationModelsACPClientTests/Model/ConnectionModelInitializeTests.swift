@@ -78,14 +78,14 @@ enum InitializeFixtures {
     /// - Returns: The failure of the login, with the unsupported reason of
     ///   `auth/login`.
     static func unsupportedLoginFailure(of methodId: AuthMethodId) -> AuthFailure {
-        AuthFailure(operation: .login(methodId), reason: .unsupported(method: ClientRequestSpan.Method.login))
+        AuthFailureFixtures.unsupportedFailure(of: .login(methodId), method: ClientRequestSpan.Method.login)
     }
 
     /// The failure that a logout records when the agent does not serve
     /// `auth/logout`.
-    static let unsupportedLogoutFailure = AuthFailure(
-        operation: .logout,
-        reason: .unsupported(method: ClientRequestSpan.Method.logout)
+    static let unsupportedLogoutFailure = AuthFailureFixtures.unsupportedFailure(
+        of: .logout,
+        method: ClientRequestSpan.Method.logout
     )
 
     /// The exit status of a terminal auth process that failed, for the
@@ -419,16 +419,33 @@ struct ConnectionModelInitializeTests {
     }
 
     @Test func aLoginWithNoOpenConnectionKeepsTheAuthState() async throws {
-        let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
-        try await connected.initialize()
-        connected.agentEnd.close()
-        try await waitUntil { connected.model.state == .disconnected }
+        let connected = try await disconnectedModel(authMethods: [InitializeFixtures.agentMethod])
 
         await #expect(throws: ConnectionError.closed) {
             try await connected.model.login(InitializeFixtures.login)
         }
 
         #expect(connected.model.authState == .required([InitializeFixtures.agentMethod]))
+    }
+
+    @Test func anUnsupportedLoginWithNoOpenConnectionKeepsTheAuthState() async throws {
+        let connected = try await disconnectedModel()
+
+        await #expect(throws: ConnectionError.closed) {
+            try await connected.model.login(InitializeFixtures.login)
+        }
+
+        #expect(connected.model.authState == .notRequired)
+    }
+
+    @Test func anUnsupportedLogoutWithNoOpenConnectionKeepsTheAuthState() async throws {
+        let connected = try await disconnectedModel()
+
+        await #expect(throws: ConnectionError.closed) {
+            try await connected.model.logout(LogoutAuthRequest())
+        }
+
+        #expect(connected.model.authState == .notRequired)
     }
 
     @Test func anUnsupportedLoginRecordsTheFailure() async throws {
@@ -517,6 +534,21 @@ struct ConnectionModelInitializeTests {
     }
 
     // MARK: - Helpers
+
+    /// Connects a model to a stub agent, sends `initialize`, and then closes
+    /// the agent end of the pair, so the model has no open connection.
+    ///
+    /// - Parameter authMethods: The auth methods that the agent lists, or
+    ///   `nil` to leave the member out.
+    /// - Returns: The model, in the ``ConnectionState/disconnected`` state.
+    /// - Throws: The error of the initialize, or `CancellationError` when the
+    ///   test time limit cancels the wait.
+    private func disconnectedModel(authMethods: [AuthMethod]? = nil) async throws -> ConnectedModel {
+        let connected = await ConnectedModel(authMethods: authMethods)
+        try await connected.initialize()
+        try await connected.closeAgentEnd()
+        return connected
+    }
 
     /// Sends a login that the model must refuse, and expects that the model
     /// throws ``ConnectionModelError/unsupported(method:)``, sends no frame,

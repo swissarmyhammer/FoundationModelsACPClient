@@ -190,23 +190,26 @@ extension ConnectionModel {
     /// the login operation and the JSON-RPC form of the error: the refusal of
     /// the agent, a closed connection, a time-out, or a cancel.
     ///
+    /// When no connection is open, the call sends nothing, changes no state,
+    /// and throws `ConnectionError.closed`. The model does this check first,
+    /// before it examines `request.methodId`.
+    ///
     /// The client sends only the id of an `agent` method that the agent
-    /// lists. When `request.methodId` is the id of a `terminal` method, or an
-    /// id that the agent does not list, the call sends nothing, and
-    /// ``authState`` becomes ``AuthState/failed(_:)`` with the login
-    /// operation and ``AuthFailure/Reason/unsupported(method:)``. When no
-    /// connection is open, the call sends nothing and changes no state.
+    /// lists. When a connection is open and `request.methodId` is the id of
+    /// a `terminal` method, or an id that the agent does not list, the call
+    /// sends nothing, and ``authState`` becomes ``AuthState/failed(_:)`` with
+    /// the login operation and ``AuthFailure/Reason/unsupported(method:)``.
     ///
     /// - Parameter request: The login request.
-    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
-    ///   `request.methodId` is not the id of a listed `agent` method,
-    ///   `ConnectionError.closed` when no connection is open, the
+    /// - Throws: `ConnectionError.closed` when no connection is open,
+    ///   ``ConnectionModelError/unsupported(method:)`` when
+    ///   `request.methodId` is not the id of a listed `agent` method, the
     ///   `RequestError` of the agent, or the error of the connection.
     public func login(_ request: LoginAuthRequest) async throws {
+        let connection = try openConnection()
         guard canLogin(with: request.methodId) else {
             throw recordUnsupported(of: .login(request.methodId), method: ClientRequestSpan.Method.login)
         }
-        let connection = try openConnection()
         try await recordingFailure(of: .login(request.methodId)) {
             _ = try await ClientRequestSpan.send(request) { try await connection.loginAuth($0) }
         }
@@ -219,20 +222,24 @@ extension ConnectionModel {
     /// ``AuthState/required(_:)`` with the auth methods of the agent. When
     /// the request fails, ``authState`` becomes ``AuthState/failed(_:)`` with
     /// the logout operation and the JSON-RPC form of the error, and no other
-    /// state changes. When ``canLogout`` is `false`, the call sends nothing,
-    /// and ``authState`` becomes ``AuthState/failed(_:)`` with the logout
-    /// operation and ``AuthFailure/Reason/unsupported(method:)``. When no
-    /// connection is open, the call sends nothing and changes no state.
+    /// state changes.
+    ///
+    /// When no connection is open, the call sends nothing, changes no state,
+    /// and throws `ConnectionError.closed`. The model does this check first,
+    /// before it examines ``canLogout``. When a connection is open and
+    /// ``canLogout`` is `false`, the call sends nothing, and ``authState``
+    /// becomes ``AuthState/failed(_:)`` with the logout operation and
+    /// ``AuthFailure/Reason/unsupported(method:)``.
     ///
     /// - Parameter request: The logout request.
-    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
-    ///   ``canLogout`` is `false`, `ConnectionError.closed` when no connection
-    ///   is open, or the error of the agent or of the connection.
+    /// - Throws: `ConnectionError.closed` when no connection is open,
+    ///   ``ConnectionModelError/unsupported(method:)`` when ``canLogout`` is
+    ///   `false`, or the error of the agent or of the connection.
     public func logout(_ request: LogoutAuthRequest) async throws {
+        let connection = try openConnection()
         guard canLogout else {
             throw recordUnsupported(of: .logout, method: ClientRequestSpan.Method.logout)
         }
-        let connection = try openConnection()
         try await recordingFailure(of: .logout) {
             _ = try await ClientRequestSpan.send(request) { try await connection.logoutAuth($0) }
         }

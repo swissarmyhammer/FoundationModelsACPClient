@@ -38,6 +38,55 @@ comments:
     - note: the only warning is "missing creator for mutated node" from the MLX bundle. It is accepted. No warnings from .build/checkouts were seen.
     - next: review
   timestamp: 2026-10-07T19:07:36.015605+00:00
+- actor: claude-code
+  id: 01m4bw7psf6bratg5v2tbeetk8
+  text: |-
+    ### commit — changed
+    - evidence: 6afd746 feat(model)!: record an unsupported login, logout or terminal login in authState
+    - next: review
+  timestamp: 2026-10-07T19:07:54.031472+00:00
+- actor: claude-code
+  id: 01m4bwhtpwxraxjpnpf9c68dyh
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (6afd746): 5 findings (5 confirmed, 1 refuted) — ConnectionModel+Initialize.swift:206, ConnectionModel+Initialize.swift:232, ConnectionModelInitializeTests.swift:80, ConnectionModelInitializeTests.swift:86, ConnectionModelTerminalAuthTests.swift:75
+    - next: implement the 5 open items in "Review Findings (2026-10-07 14:08)". The two completeness findings agree with the task "Out of scope" rule: a call with no open connection must still throw ConnectionError.closed and must not change authState. The open subtask "Tell agentviewkit-a3 the commit" is for the orchestrator after the push.
+  timestamp: 2026-10-07T19:13:25.724258+00:00
+- actor: claude-code
+  id: 01m4bwjebze76g7sapmkhh5gwb
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 5 files
+    - test: green — swift test, 577 tests in 49 suites pass; IntegrationTests build passes
+    - commit: 6afd746
+    - review: findings — Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift:206, Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift:232, Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift:80, Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift:86, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTerminalAuthTests.swift:75
+  timestamp: 2026-10-07T19:13:45.855811+00:00
+- actor: claude-code
+  id: 01m4bx1pkkrymghx0xrxh153bh
+  text: |-
+    Review findings (2026-10-07 14:08), implementation:
+    - Findings 1 and 2: `login(_:)` and `logout(_:)` now call `openConnection()` first, and then do the capability check. Thus a call with no open connection always throws `ConnectionError.closed` and records nothing, also when the call is unsupported. The doc comments now say this order, and put `ConnectionError.closed` first in `- Throws:`.
+    - RED: new tests `anUnsupportedLoginWithNoOpenConnectionKeepsTheAuthState` and `anUnsupportedLogoutWithNoOpenConnectionKeepsTheAuthState` failed: they got `ConnectionModelError.unsupported` and `authState == .failed(...unsupported...)`. GREEN: the 2 tests passed after the order change.
+    - `loginWithTerminal(_:runner:)` does not have the same order problem. It does not call `openConnection()`, because it sends no ACP request. With no open connection, it uses the auth methods and `hasAdvertisedTerminalAuth` of the last `initialize` (`connect` resets them, a close does not). Before this task it also never threw `ConnectionError.closed`, so the out-of-scope rule does not apply to it. I added a doc sentence about this, and the test `aTerminalLoginWithNoOpenConnectionRunsTheMethod` that pins it (it passed at once: it documents behavior that already existed).
+    - Findings 3 to 5: new shared file `Tests/FoundationModelsACPClientTests/Model/AuthFailureFixtures.swift` with `AuthFailureFixtures.unsupportedFailure(of: AuthFailure.Operation, method: String) -> AuthFailure`. `InitializeFixtures.unsupportedLoginFailure(of:)`, `InitializeFixtures.unsupportedLogoutFailure` and `TerminalAuthFixtures.unsupportedFailure(of:)` stay in their files as per-case values, and each one is now built from the shared helper. No copy of the construction stays.
+    - Also: new `ConnectedModel.closeAgentEnd()` (closes the agent end and waits for `.disconnected`). The private helper `disconnectedModel(authMethods:)` in the initialize tests and the new terminal test use it, so the close-and-wait lines are not copied again. `aLoginWithNoOpenConnectionKeepsTheAuthState` now uses `disconnectedModel(authMethods:)`.
+    - Other calls (`refreshSessions`, `deleteSession`, and so on) also use `requireCapability` before `openConnection()`. They change no state when unsupported, so they have no such problem. I did not change them.
+  timestamp: 2026-10-07T19:22:05.811342+00:00
+- actor: claude-code
+  id: 01m4bx1tc0ca0t0t3r3x1rapb4
+  text: |-
+    ### implement — changed
+    - evidence: 6 files — Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+TerminalAuth.swift, Tests/FoundationModelsACPClientTests/Model/AuthFailureFixtures.swift (new), Tests/FoundationModelsACPClientTests/Model/ConnectedModel.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTerminalAuthTests.swift. `swift build`: complete. `swift test`: 580 tests in 49 suites passed, 0 failed (577 before, 3 new). `swift build --package-path IntegrationTests --build-tests`: complete. The only warning is the accepted MLX warning "missing creator for mutated node". All 5 findings of "Review Findings (2026-10-07 14:08)" are checked.
+    - next: /review. The task stays in doing. The subtask "Tell agentviewkit-a3 the commit" stays open for the orchestrator. Nothing is committed.
+  timestamp: 2026-10-07T19:22:09.664731+00:00
+- actor: claude-code
+  id: 01m4bx627rtevbgceav7w78yfs
+  text: |-
+    ### test — green
+    - evidence: swift build — complete, 0 warnings in package code. swift test — 580 tests in 49 suites passed, 0 failed, 0 skipped. swift build --package-path IntegrationTests --build-tests — complete, 0 warnings in package code.
+    - note: only warning is "missing creator for mutated node" from the MLX bundle. The task accepts it.
+    - next: review
+  timestamp: 2026-10-07T19:24:28.792150+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Model: record an unsupported login, logout or terminal login in authState'
@@ -96,3 +145,16 @@ Use /tdd — write failing tests first, then implement to make them pass.
 - [x] Add `Reason.unsupported(method:)` and `Reason.message`.
 - [x] Record the failure in the three calls, and update the doc comments.
 - [ ] Tell agentviewkit-a3 the commit when it is pushed.
+
+## Review Findings (2026-10-07 14:08)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift:206` `completeness/public-output-contract` — The unsupported check in login(_:) runs before openConnection(). With no open connection and a method id the agent does not list, the call now throws ConnectionModelError.unsupported and sets authState to .failed. Before this change it threw ConnectionError.closed and kept the state. The doc at line 198 says that with no open connection the call sends nothing and changes no state, which is false for this path. Call openConnection() before the canLogin guard so that a closed connection still throws ConnectionError.closed and changes no state, or narrow the doc at :198. Add a test that calls login with an unlisted method and no open connection, and asserts the error and authState.
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift:232` `completeness/public-output-contract` — The canLogout guard in logout(_:) runs before openConnection(). With no open connection and canLogout false, the call now throws ConnectionModelError.unsupported and sets authState to .failed, where it used to throw ConnectionError.closed and keep the state. The doc at line 225 says that with no open connection the call changes no state, which is false for this path. Call openConnection() before the canLogout guard so that a closed connection still throws ConnectionError.closed, or narrow the doc at :225. Add a test for logout with no capability and no open connection that asserts the thrown error and authState.
+- [x] `Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift:80` `reuse/reuse` — InitializeFixtures.unsupportedLoginFailure(of:) builds the same AuthFailure shape as TerminalAuthFixtures.unsupportedFailure(of:). Only the operation case and the method differ. Two copies of the same construction can drift apart. Use one shared helper that takes the operation and the method, and build the login, logout and terminal-login failures from it.
+- [x] `Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift:86` `reuse/reuse` — InitializeFixtures.unsupportedLogoutFailure is a static constant that repeats the unsupported-failure construction. It is the logout form of the same pattern that the login and terminal-login fixtures use. Build this constant from the same shared unsupported-failure helper, passing the logout operation and ConnectionModelError-independent method id of auth/logout.
+- [x] `Tests/FoundationModelsACPClientTests/Model/ConnectionModelTerminalAuthTests.swift:75` `reuse/reuse` — TerminalAuthFixtures.unsupportedFailure(of:) builds the same AuthFailure as InitializeFixtures.unsupportedLoginFailure(of:). Only the operation case and the method differ. Two copies of the same construction can drift apart. Use one helper that takes the operation and the method, for example unsupportedFailure(of: AuthFailure.Operation, method: String), in a shared fixture. Then build the login, logout and terminal-login failures from it. Keep the per-case constants in their own files.
