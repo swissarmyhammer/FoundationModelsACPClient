@@ -30,6 +30,14 @@ private enum StatusFixtures {
     /// The reason of the failed update of the example.
     static let reason = "The command is not an absolute path."
 
+    /// The name of a client server with a transport that the agent does not
+    /// know.
+    static let legacyName = "legacy"
+
+    /// The reason that the agent gives for a client server with a transport
+    /// that it does not know.
+    static let unknownTransportReason = "The transport is not known."
+
     /// The stdio server that the client sends.
     static let filesServer = MCPServer.stdio(
         MCPServerStdio(command: AbsolutePath(rawValue: "/usr/local/bin/files-mcp"), name: filesName)
@@ -208,6 +216,36 @@ struct SessionModelMCPServerStatusTests {
         #expect(added.status == .connected)
     }
 
+    @Test func anUpdateWithNoTransportAddsAServerWithNoTransport() throws {
+        let model = StatusFixtures.modelWithClientServers()
+
+        model.apply(
+            try StatusFixtures.update([
+                "name": .string(StatusFixtures.legacyName),
+                "origin": .string("client"),
+                "status": .string("failed"),
+                "reason": .string(StatusFixtures.unknownTransportReason),
+            ])
+        )
+
+        let added = try #require(model.mcpServers.last)
+        #expect(model.mcpServers.map(\.name) == [StatusFixtures.docsName, StatusFixtures.filesName, StatusFixtures.legacyName])
+        #expect(added.transport == nil)
+        #expect(added.origin == .client)
+        #expect(added.status == .failed(reason: StatusFixtures.unknownTransportReason))
+    }
+
+    @Test func anUpdateWithNoTransportKeepsTheKnownTransport() throws {
+        let model = StatusFixtures.modelWithClientServers()
+
+        model.apply(try StatusFixtures.exampleUpdate(setting: "transport", to: nil))
+
+        let files = try #require(model.mcpServers.last)
+        #expect(files.name == StatusFixtures.filesName)
+        #expect(files.transport == .stdio)
+        #expect(files.status == .failed(reason: StatusFixtures.reason))
+    }
+
     @Test func aSecondUpdateOfAConfigServerAddsNoSecondItem() throws {
         let model = SessionModelFixtures.immediateModel()
 
@@ -230,8 +268,17 @@ struct SessionModelMCPServerStatusTests {
         #expect(model.transcript.isEmpty)
     }
 
+    @Test(arguments: [JSONValue.string("sse"), .bool(true), .null])
+    func anUpdateWithAnUnknownTransportValueIsStillIgnored(transport: JSONValue) throws {
+        let model = StatusFixtures.modelWithClientServers()
+
+        model.apply(try StatusFixtures.exampleUpdate(setting: "transport", to: transport))
+
+        #expect(model.mcpServers.map(\.status) == [.notReported, .notReported])
+        #expect(model.transcript.isEmpty)
+    }
+
     @Test(arguments: [
-        ("transport", JSONValue.string("sse")),
         ("origin", JSONValue.string("plugin")),
         ("status", JSONValue.bool(true)),
         ("name", JSONValue.null),
@@ -245,7 +292,7 @@ struct SessionModelMCPServerStatusTests {
         #expect(model.transcript.isEmpty)
     }
 
-    @Test(arguments: ["name", "transport", "origin", "status"])
+    @Test(arguments: ["name", "origin", "status"])
     func aMissingRequiredMemberChangesNothing(key: String) throws {
         let model = StatusFixtures.modelWithClientServers()
 

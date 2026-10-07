@@ -1264,8 +1264,8 @@ private struct MCPServerRecord: Equatable {
     /// The name of the server.
     let name: String
 
-    /// The transport of the server.
-    let transport: MCPServerTransport
+    /// The transport of the server, or `nil` when the agent did not tell it.
+    let transport: MCPServerTransport?
 
     /// The source of the server.
     let origin: MCPServerOrigin

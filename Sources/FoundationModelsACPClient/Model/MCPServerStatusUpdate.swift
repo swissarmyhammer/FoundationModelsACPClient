@@ -12,7 +12,9 @@ import FoundationModelsACP
 /// The members of the update:
 ///
 /// - `name` (string, required): the key of the server.
-/// - `transport` (required): `"stdio"` or `"http"`.
+/// - `transport` (optional): `"stdio"` or `"http"`. The agent does not send
+///   it for a server that the client sent with a transport that the agent
+///   does not know.
 /// - `origin` (required): `"client"` or `"config"`.
 /// - `status` (required): `"connecting"`, `"connected"`, `"failed"` or
 ///   `"closed"`.
@@ -25,8 +27,9 @@ struct MCPServerStatusUpdate {
     /// The name of the server.
     let name: String
 
-    /// The transport of the server.
-    let transport: MCPServerTransport
+    /// The transport of the server, or `nil` when the update has no
+    /// `transport` member.
+    let transport: MCPServerTransport?
 
     /// The source of the server.
     let origin: MCPServerOrigin
@@ -50,8 +53,11 @@ struct MCPServerStatusUpdate {
     ///
     /// The decode ignores a member that it does not know. It ignores the
     /// whole update when a required member is missing or is not a string,
-    /// or when `transport`, `origin` or `status` has a value that this client
-    /// does not know. A `reason` that is not a string counts as no reason.
+    /// or when `origin` or `status` has a value that this client does not
+    /// know. A missing `transport` gives no transport. A `transport` that is
+    /// present, but is not a string or has a value that this client does not
+    /// know, makes the decode ignore the whole update. A `reason` that is not
+    /// a string counts as no reason.
     ///
     /// - Parameter update: The session update.
     /// - Returns: The status update, or `nil` for each other update and for
@@ -59,8 +65,6 @@ struct MCPServerStatusUpdate {
     static func decode(_ update: SessionUpdate) -> MCPServerStatusUpdate? {
         guard case .object(let members)? = payload(of: update),
             case .string(let name) = members["name"],
-            case .string(let transportValue) = members["transport"],
-            let transport = MCPServerTransport(wireValue: transportValue),
             case .string(let originValue) = members["origin"],
             let origin = MCPServerOrigin(wireValue: originValue),
             case .string(let statusValue) = members["status"],
@@ -68,6 +72,9 @@ struct MCPServerStatusUpdate {
         else {
             return nil
         }
+        let transportMember = members["transport"]
+        let transport = transportMember.flatMap(knownTransport(of:))
+        guard transportMember == nil || transport != nil else { return nil }
         return MCPServerStatusUpdate(name: name, transport: transport, origin: origin, status: status)
     }
 
@@ -83,6 +90,16 @@ struct MCPServerStatusUpdate {
     private static func payload(of update: SessionUpdate) -> JSONValue? {
         guard case .unknown(let updateKind, let payload) = update, updateKind == kind else { return nil }
         return payload
+    }
+
+    /// Reads the transport of a `transport` member that is present.
+    ///
+    /// - Parameter value: The value of the member.
+    /// - Returns: The transport, or `nil` when the value is not a string or
+    ///   has a value that this client does not know.
+    private static func knownTransport(of value: JSONValue) -> MCPServerTransport? {
+        guard case .string(let wireValue) = value else { return nil }
+        return MCPServerTransport(wireValue: wireValue)
     }
 
     /// Reads the optional `reason` member of an update.

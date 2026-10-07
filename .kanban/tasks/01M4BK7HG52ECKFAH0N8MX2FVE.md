@@ -39,10 +39,27 @@ comments:
     - evidence: 43dffd1 test(model): prove that disconnect() ends an in-process agent
     - next: review. The commit is local. No push.
   timestamp: 2026-10-07T17:52:52.291399+00:00
+- actor: claude-code
+  id: 01m4br6r4dm83jt3xt7n2ddwfy
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 9468005). 0 findings, 0 confirmed, 0 refuted. 7 validator runs attempted, 0 failed. 2 files reviewed. 8 .kanban files are not reviewed because .reviewignore excludes them.
+    - note: the commit comment names sha 43dffd1. That sha was amended. The correct sha is 9468005.
+    - next: none. The task is in done.
+  timestamp: 2026-10-07T17:57:28.333030+00:00
+- actor: claude-code
+  id: 01m4br6z3w46qvxb80rkmsbb3f
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files; FoundationModelsACP resolves at b2cec56
+    - test: green — swift test, 569 tests in 49 suites pass; IntegrationTests build passes
+    - commit: 9468005 (the commit comment names 43dffd1, which was amended)
+    - review: clean — zero findings; task is done
+  timestamp: 2026-10-07T17:57:35.484933+00:00
 depends_on:
 - 01M4BK78NR5DCNP6WMAA25YVY1
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: e180
 title: 'Adopt the InMemoryTransport fix: pin FoundationModelsACP, and prove that disconnect() ends an in-process agent'
 ---
 ## What

@@ -127,8 +127,12 @@ public final class SessionModel {
     ///
     /// Each `_mcp_server_status` update of the agent sets the status of the
     /// item with its name. An update for a name that the list does not hold
-    /// appends one ``MCPServerOrigin/config`` item: the configuration of the
-    /// agent gave that server. These updates add no transcript entry.
+    /// appends one item with the origin of the update: usually a
+    /// ``MCPServerOrigin/config`` item, which the configuration of the agent
+    /// gave. A ``MCPServerOrigin/client`` server with a transport that this
+    /// schema revision does not know also gets its item this way, with no
+    /// transport when the agent does not know the transport either. These
+    /// updates add no transcript entry.
     public internal(set) var mcpServers: [MCPServerItem] = []
 
     /// Whether the connection discarded updates of this session before the
@@ -403,10 +407,11 @@ public final class SessionModel {
     /// ``mcpServers``.
     ///
     /// The update replaces the status of the item with its name, and no other
-    /// item changes. When no item has that name, the update appends a new
+    /// item changes. The item keeps its transport, also when the update has
+    /// no transport. When no item has that name, the update appends a new
     /// item with the name, the transport, the origin and the status of the
-    /// update, and with no configuration: the configuration of the agent gave
-    /// that server, and the client did not send it.
+    /// update, and with no configuration: the client does not have the
+    /// configuration of that server.
     ///
     /// - Parameter update: The decoded status update.
     func applyMCPServerStatus(_ update: MCPServerStatusUpdate) {

@@ -89,14 +89,20 @@ public final class MCPServerItem: Identifiable {
     /// The name of the server.
     public nonisolated let name: String
 
-    /// The transport of the server.
-    public let transport: MCPServerTransport
+    /// The transport of the server, or `nil` when the agent did not tell the
+    /// transport.
+    ///
+    /// The agent sends a status update with no transport for a server that
+    /// the client sent with a transport that the agent does not know. Such an
+    /// update never removes a transport that the item already has.
+    public let transport: MCPServerTransport?
 
     /// The source of the server.
     public let origin: MCPServerOrigin
 
     /// The configuration that the client sent, or `nil` for a server that the
-    /// configuration of the agent gave.
+    /// configuration of the agent gave or that has a transport that this
+    /// schema revision does not know.
     public let server: MCPServer?
 
     /// The last connection status that the agent reported. A new item starts
@@ -131,8 +137,10 @@ public final class MCPServerItem: Identifiable {
     }
 
     /// Makes the item of a server that the client does not have, from the
-    /// status update of that server. The client did not send the server, so
-    /// the item has no configuration.
+    /// status update of that server. The item has no configuration: the
+    /// configuration of the agent gave the server, or the client sent it with
+    /// a transport that this schema revision does not know. The item has no
+    /// transport when the update has none.
     ///
     /// - Parameter update: The status update of the server.
     init(statusUpdate update: MCPServerStatusUpdate) {
