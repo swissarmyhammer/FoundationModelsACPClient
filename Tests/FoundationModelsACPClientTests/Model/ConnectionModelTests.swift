@@ -6,12 +6,13 @@ import Testing
 
 // The tests of the base of `ConnectionModel`: the connection state, the
 // registry of open sessions, the close of each open session when the
-// connection closes, and the cadence and clock that each session model of the
-// connection gets.
+// connection closes, the disconnect that the host starts, and the cadence and
+// clock that each session model of the connection gets.
 //
 // `InMemoryTransport.pair()` gives the real ACP wire. A `close()` on the agent
 // end finishes the byte stream of the client end, which is the end of input
 // of a dead agent. `FailingTransport` gives a byte stream that throws.
+// `EndRecordingTransport` records the end of its byte stream.
 
 /// The error that the failing byte stream throws.
 private struct ByteStreamFailure: Error, Equatable {}
@@ -53,6 +54,36 @@ private struct FailingTransport: ACPTransport {
     /// - Parameter error: The error that the byte stream throws.
     func fail(with error: any Error) {
         continuation.finish(throwing: error)
+    }
+
+    /// Drops the bytes.
+    ///
+    /// - Parameter data: The bytes to send.
+    func write(_ data: Data) async throws {}
+}
+
+/// A transport that records the end of its byte stream.
+///
+/// The connection stops its read of ``bytes`` when it closes. That stop ends
+/// the stream, as the end of the stream of an `AgentProcess` transport ends
+/// the agent process. A write goes nowhere.
+private struct EndRecordingTransport: ACPTransport {
+    /// The incoming bytes. No chunk arrives.
+    let bytes: AsyncThrowingStream<Data, any Error>
+
+    /// One item for each end of ``bytes``.
+    private let ends = ThreadSafeBuffer<Bool>()
+
+    /// Whether the byte stream ended.
+    var hasEnded: Bool {
+        !ends.elements.isEmpty
+    }
+
+    /// Makes a transport whose byte stream is open.
+    init() {
+        let (bytes, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        self.bytes = bytes
+        continuation.onTermination = { [ends] _ in ends.append(true) }
     }
 
     /// Drops the bytes.
@@ -108,6 +139,9 @@ private struct AllowingClient: Client {
 @MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct ConnectionModelTests {
+    /// The working directory of the session that a test opens over the wire.
+    private let workingDirectory = AbsolutePath(rawValue: "/")
+
     /// Makes the agent side of a pair: a stub agent over `agentEnd`.
     ///
     /// - Parameter agentEnd: The agent end of the pair.
@@ -296,6 +330,82 @@ struct ConnectionModelTests {
         #expect(await eventually { model.state == .failed(ByteStreamFailure()) })
         #expect(session.isClosed)
         #expect(model.openSessions.isEmpty)
+    }
+
+    // MARK: - Disconnect
+
+    @Test func disconnectSetsDisconnectedAndClosesOpenSessions() async throws {
+        let connected = await ConnectedModel()
+        try await connected.initialize()
+        let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
+
+        await connected.model.disconnect()
+
+        // The call returns only after the close, so the state is final at once.
+        #expect(connected.model.state == .disconnected)
+        #expect(connected.model.openSessions.isEmpty)
+        #expect(session.isClosed)
+    }
+
+    @Test func disconnectCancelsPendingPermissions() async throws {
+        let connected = await ConnectedModel()
+        try await connected.initialize()
+        let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
+        let permission = try await SessionModelFixtures.startPermission(on: session)
+
+        await connected.model.disconnect()
+
+        #expect(session.pendingPermissions.isEmpty)
+        #expect(await permission.value.outcome == .cancelled)
+    }
+
+    @Test func disconnectClosesTheTransport() async throws {
+        let model = ConnectionModel()
+        let transport = EndRecordingTransport()
+        _ = await model.connect(over: transport)
+
+        await model.disconnect()
+
+        // The read of the bytes stops in a task of the connection, so the
+        // end can come a short time after the close.
+        try await waitUntil { transport.hasEnded }
+        #expect(model.state == .disconnected)
+    }
+
+    @Test func disconnectTwiceOrWithNoConnectionChangesNothing() async {
+        let unconnected = ConnectionModel()
+        let unconnectedSession = SessionModelFixtures.immediateModel()
+        unconnected.register(unconnectedSession)
+        let connected = await ConnectedModel()
+        await connected.model.disconnect()
+        let laterSession = SessionModelFixtures.immediateModel()
+        connected.model.register(laterSession)
+
+        await unconnected.disconnect()
+        await connected.model.disconnect()
+
+        #expect(unconnected.state == .disconnected)
+        #expect(unconnected.session(for: testSession) === unconnectedSession)
+        #expect(!unconnectedSession.isClosed)
+        #expect(connected.model.state == .disconnected)
+        #expect(connected.model.session(for: testSession) === laterSession)
+        #expect(!laterSession.isClosed)
+    }
+
+    @Test func connectAfterDisconnectWorks() async throws {
+        let connected = await ConnectedModel()
+        try await connected.initialize()
+        await connected.model.disconnect()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let agentConnection = await makeAgentConnection(over: agentEnd)
+
+        _ = await connected.model.connect(over: clientEnd)
+        let response = try await connected.model.initialize(makeInitializeRequest())
+
+        #expect(connected.model.state == .connected)
+        #expect(connected.model.initializeResponse == response)
+        // The test holds the agent end of the new pair until here.
+        withExtendedLifetime(agentConnection) {}
     }
 
     // MARK: - Session models

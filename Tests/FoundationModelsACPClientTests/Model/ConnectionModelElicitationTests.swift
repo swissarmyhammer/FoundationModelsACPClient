@@ -6,8 +6,8 @@ import Testing
 // The tests of the request-scoped elicitations of `ConnectionModel`: an
 // elicitation that names a request of the client is pending on the model
 // while that request is in flight. The user resolves it, a url-mode
-// `elicitation/complete` closes it, or the end of its request, a disconnect,
-// or a new connection cancels it.
+// `elicitation/complete` closes it, or the end of its request, a disconnect
+// (from the agent or from the host), or a new connection cancels it.
 //
 // `InMemoryTransport.pair()` gives the real ACP wire, with a
 // `ScriptedStubAgent` on the agent end. The stub holds `auth/login` behind a
@@ -233,14 +233,23 @@ struct ConnectionModelElicitationTests {
 
     // MARK: - Close
 
-    @Test func aDisconnectCancelsEachRequestScopedElicitation() async throws {
+    /// Starts a login and an elicitation that names it, closes the connection
+    /// with `close`, and checks that the close cancels the elicitation and
+    /// fails the login.
+    ///
+    /// - Parameter close: Closes the connection of the harness, and waits
+    ///   until the model is disconnected.
+    /// - Throws: Whatever the start of the login, the elicitation, or `close`
+    ///   threw.
+    private func expectACloseCancelsTheRequestScopedElicitation(
+        _ close: (LoginHarness) async throws -> Void
+    ) async throws {
         let harness = await LoginHarness()
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
 
-        harness.agentEnd.close()
+        try await close(harness)
 
-        try await waitUntil { harness.model.state == .disconnected }
         #expect(harness.model.pendingElicitations.isEmpty)
         await #expect(throws: ConnectionError.closed) {
             try await login.value
@@ -249,6 +258,21 @@ struct ConnectionModelElicitationTests {
         // ends the agent's call and the held login itself.
         call.cancel()
         harness.loginGate.open()
+    }
+
+    @Test func aDisconnectCancelsEachRequestScopedElicitation() async throws {
+        try await expectACloseCancelsTheRequestScopedElicitation { harness in
+            harness.agentEnd.close()
+            try await waitUntil { harness.model.state == .disconnected }
+        }
+    }
+
+    @Test func aDisconnectByTheHostCancelsEachRequestScopedElicitation() async throws {
+        try await expectACloseCancelsTheRequestScopedElicitation { harness in
+            await harness.model.disconnect()
+            // The call returns only after the close, so the state is final at once.
+            #expect(harness.model.state == .disconnected)
+        }
     }
 
     @Test func aNewConnectionCancelsEachRequestScopedElicitationOfTheLastOne() async throws {

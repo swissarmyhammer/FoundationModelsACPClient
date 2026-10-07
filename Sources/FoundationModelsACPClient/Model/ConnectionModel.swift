@@ -127,11 +127,12 @@ public final class ConnectionModel {
     ///
     /// ``state`` is ``ConnectionState/connecting`` while the call makes the
     /// connection, and ``ConnectionState/connected`` when the call returns.
-    /// When the agent closes its side, or the host calls `close()` on the
-    /// connection, ``state`` becomes ``ConnectionState/disconnected``. When
-    /// the read from the agent fails, ``state`` becomes
-    /// ``ConnectionState/failed(_:)`` with the error. A failed write does not
-    /// close the connection; only the request of that write fails.
+    /// When the agent closes its side, or the host calls ``disconnect()`` or
+    /// `close()` on the connection, ``state`` becomes
+    /// ``ConnectionState/disconnected``. When the read from the agent fails,
+    /// ``state`` becomes ``ConnectionState/failed(_:)`` with the error. A
+    /// failed write does not close the connection; only the request of that
+    /// write fails.
     ///
     /// The connection serves the `Client` that `wrap` returns. `wrap` gets
     /// the router of this model, which routes the calls of the agent to the
@@ -193,6 +194,34 @@ public final class ConnectionModel {
             self?.connectionDidClose(opened, because: reason)
         }
         return opened
+    }
+
+    /// Closes the open connection from the client side, and waits until the
+    /// model recorded the close.
+    ///
+    /// When the call returns, the model recorded the close: ``state`` is
+    /// ``ConnectionState/disconnected`` (or ``ConnectionState/failed(_:)``
+    /// when the read from the agent failed first), ``openSessions`` is empty,
+    /// each session model that was open is closed, and each pending
+    /// permission request, session elicitation and request-scoped
+    /// elicitation is cancelled. Thus a host can read the state at once.
+    ///
+    /// The call does not send `session/close` for each open session: the
+    /// agent frees its sessions when the connection ends. A host that must
+    /// close a session cleanly calls ``close(_:)`` for it before this call.
+    ///
+    /// The close stops the read of the transport, which ends its byte
+    /// stream. For an ``AgentProcess`` transport, the end of that stream
+    /// ends the agent process.
+    ///
+    /// With no open connection, the call returns at once and changes
+    /// nothing. After this call, ``connect(over:logger:bufferLimits:client:)``
+    /// can make a new connection.
+    public func disconnect() async {
+        guard let connection else { return }
+        await connection.close()
+        let reason = await connection.closed
+        connectionDidClose(connection, because: reason)
     }
 
     /// Records the close of a connection: sets ``state`` from the reason,
