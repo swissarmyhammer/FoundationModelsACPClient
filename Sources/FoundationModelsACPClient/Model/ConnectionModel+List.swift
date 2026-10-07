@@ -4,9 +4,10 @@ import FoundationModelsACP
 // patch of a listed session from the `session_info_update` of its open
 // model, and `session/delete`.
 //
-// Each request goes out in a client request span, through
-// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
-// and the W3C trace context in the `_meta` of the request.
+// Each request goes out through `sendRecordingAuth(_:through:)`: the client
+// request span, the request metrics, and the W3C trace context in the `_meta`
+// of the request of `ClientRequestSpan.send(_:parent:through:)`, and a
+// `-32000` answer of the agent recorded in `authState`.
 
 extension ConnectionModel {
     /// How a page of `session/list` changes ``sessions``.
@@ -85,7 +86,7 @@ extension ConnectionModel {
         merge: SessionPageMerge
     ) async throws {
         let generation = sessionListGeneration
-        let page = try await ClientRequestSpan.send(request) { try await connection.listSessions($0) }
+        let page = try await sendRecordingAuth(request) { try await connection.listSessions($0) }
         guard generation == sessionListGeneration else { return }
         sessionListGeneration += 1
         switch merge {
@@ -129,7 +130,7 @@ extension ConnectionModel {
         if let open = openSessions[sessionId] {
             try await close(open)
         }
-        _ = try await ClientRequestSpan.send(DeleteSessionRequest(sessionId: sessionId)) {
+        _ = try await sendRecordingAuth(DeleteSessionRequest(sessionId: sessionId)) {
             try await connection.deleteSession($0)
         }
         sessions.removeAll { $0.sessionId == sessionId }

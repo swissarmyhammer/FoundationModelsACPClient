@@ -24,8 +24,24 @@ comments:
     - evidence: Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTests.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelElicitationTests.swift. `swift test --filter "ConnectionModelTests|ConnectionModelElicitationTests"`: 31 tests in 2 suites passed. `swift test`: 537 tests in 45 suites passed, 0 failures, 0 warnings (the accepted MLX "missing creator" warning is excluded).
     - next: /review
   timestamp: 2026-10-07T13:19:58.297627+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4b8ms8h1zdv2h8vjvvafjv1
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (d0195ff); 0 findings, 0 confirmed, 0 refuted; 3 files reviewed, 4 .kanban files not reviewed (.reviewignore); no prior Review Findings sections
+    - next: none; task moved to done
+  timestamp: 2026-10-07T13:25:31.025339+00:00
+- actor: claude-code
+  id: 01m4b8n0c5cyzcdm00wdptjze4
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files
+    - test: green — swift test, 537 passed, 0 failed, 0 skipped
+    - commit: d0195ff
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-07T13:25:38.309719+00:00
+position_column: done
+position_ordinal: d980
 title: 'Model: ConnectionModel.disconnect() closes the connection from the client side and ends the open sessions'
 ---
 ## What

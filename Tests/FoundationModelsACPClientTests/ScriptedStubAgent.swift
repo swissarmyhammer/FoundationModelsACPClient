@@ -10,6 +10,12 @@ import Synchronization
 /// it delivers the prompt acknowledgement, so a test can assert on the final
 /// observable state after the prompt call returns.
 ///
+/// A stub built with a new-session error refuses each `session/new` with
+/// that error, and sends no update. In the same way, a list error refuses
+/// each `session/list`, and a delete error refuses each `session/delete`.
+/// `ConnectionModelAuthRequiredTests` uses these errors to send a `-32000`
+/// answer to each request of ``ConnectionModel``.
+///
 /// The stub answers `session/new` with the session the script belongs to,
 /// because a test that drives the whole turn path opens a session before it
 /// prompts. The answer carries the `newSessionCommands` the test chose, and
@@ -201,6 +207,18 @@ final class ScriptedStubAgent: Agent {
     /// each close.
     private let closeSessionError: RequestError?
 
+    /// The error to refuse each `session/new` with, or `nil` to answer each
+    /// new session.
+    private let newSessionError: RequestError?
+
+    /// The error to refuse each `session/list` with, or `nil` to answer
+    /// each list with the page of its cursor.
+    private let listSessionsError: RequestError?
+
+    /// The error to refuse each `session/delete` with, or `nil` to accept
+    /// each delete.
+    private let deleteSessionError: RequestError?
+
     /// The updates to send, in order, before the `session/new` answer.
     private let newSessionScript: [SessionUpdate]
 
@@ -312,6 +330,12 @@ final class ScriptedStubAgent: Agent {
     ///     answer each prompt.
     ///   - closeSessionError: The error to answer `session/close` with, or
     ///     `nil` to accept each close.
+    ///   - newSessionError: The error to refuse each `session/new` with, or
+    ///     `nil` to answer each new session.
+    ///   - listSessionsError: The error to refuse each `session/list` with,
+    ///     or `nil` to answer each list with the page of its cursor.
+    ///   - deleteSessionError: The error to refuse each `session/delete`
+    ///     with, or `nil` to accept each delete.
     ///   - newSessionScript: The updates to send before the `session/new`
     ///     answer.
     ///   - afterNewSessionScript: The updates to send after the `session/new`
@@ -353,6 +377,9 @@ final class ScriptedStubAgent: Agent {
         permissionRequest: RequestPermissionRequest? = nil,
         promptError: RequestError? = nil,
         closeSessionError: RequestError? = .methodNotFound(ClientRequestSpan.Method.closeSession),
+        newSessionError: RequestError? = nil,
+        listSessionsError: RequestError? = nil,
+        deleteSessionError: RequestError? = nil,
         newSessionScript: [SessionUpdate] = [],
         afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
@@ -379,6 +406,9 @@ final class ScriptedStubAgent: Agent {
         self.permissionRequest = permissionRequest
         self.promptError = promptError
         self.closeSessionError = closeSessionError
+        self.newSessionError = newSessionError
+        self.listSessionsError = listSessionsError
+        self.deleteSessionError = deleteSessionError
         self.newSessionScript = newSessionScript
         self.afterNewSessionScript = afterNewSessionScript
         self.newSessionCommands = newSessionCommands
@@ -430,6 +460,9 @@ final class ScriptedStubAgent: Agent {
         workingDirectories.append(params.cwd)
         newSessionMCPServerRecord.append(params.mcpServers)
         await newSessionGate?.wait()
+        if let newSessionError {
+            throw newSessionError
+        }
         for update in newSessionScript {
             try await send(update)
         }
@@ -441,6 +474,9 @@ final class ScriptedStubAgent: Agent {
         record(params.meta, of: ClientRequestSpan.Method.listSessions)
         listRequestRecord.append(params)
         await sessionListGates[params.cursor]?.wait()
+        if let listSessionsError {
+            throw listSessionsError
+        }
         guard let page = sessionListPages[params.cursor] else {
             throw RequestError.invalidParams
         }
@@ -450,6 +486,9 @@ final class ScriptedStubAgent: Agent {
     func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.deleteSession)
         deleteRequestRecord.append(params)
+        if let deleteSessionError {
+            throw deleteSessionError
+        }
         return DeleteSessionResponse()
     }
 

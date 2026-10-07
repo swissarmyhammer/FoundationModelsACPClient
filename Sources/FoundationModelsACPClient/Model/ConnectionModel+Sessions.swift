@@ -6,9 +6,10 @@ import FoundationModelsACP
 // of the session, so a host never subscribes to the updates of a session
 // itself.
 //
-// Each request goes out in a client request span, through
-// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
-// and the W3C trace context in the `_meta` of the request.
+// Each request goes out through `sendRecordingAuth(_:through:)`: the client
+// request span, the request metrics, and the W3C trace context in the `_meta`
+// of the request of `ClientRequestSpan.send(_:parent:through:)`, and a
+// `-32000` answer of the agent recorded in `authState`.
 
 extension ConnectionModel {
     // MARK: - New session
@@ -50,7 +51,7 @@ extension ConnectionModel {
         try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.newSession)
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
-        let response = try await ClientRequestSpan.send(sent) { try await connection.newSession($0) }
+        let response = try await sendRecordingAuth(sent) { try await connection.newSession($0) }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
         // The list goes in before the stream task of the model can fold an
         // update, so a status update that the agent sends after the response
@@ -191,7 +192,7 @@ extension ConnectionModel {
         defer { resumeStarts.cancel() }
         let response: ResumeSessionResponse
         do {
-            response = try await ClientRequestSpan.send(request) { try await connection.resumeSession($0) }
+            response = try await sendRecordingAuth(request) { try await connection.resumeSession($0) }
         } catch {
             session.mcpServers = mcpServersBeforeResume
             await endReplay(of: session, afterFailure: error)
@@ -384,7 +385,7 @@ extension ConnectionModel {
     public func close(_ session: SessionModel) async throws {
         try requireCapability(canCloseSessions, method: ClientRequestSpan.Method.closeSession)
         let connection = try openConnection()
-        _ = try await ClientRequestSpan.send(CloseSessionRequest(sessionId: session.sessionId)) {
+        _ = try await sendRecordingAuth(CloseSessionRequest(sessionId: session.sessionId)) {
             try await connection.closeSession($0)
         }
         unregister(session.sessionId)
