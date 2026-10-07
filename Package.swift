@@ -89,7 +89,14 @@ let package = Package(
         // `ManifestTests` checks that no other target names it. The standard
         // `OTEL_*` environment variables configure it at run time. The floor
         // is the current release when this dependency was added.
-        .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.5.1"),
+        //
+        // The traits are `OTLPHTTP` alone. The default traits of swift-otel
+        // also hold `OTLPGRPC`, which compiles grpc-swift-2,
+        // grpc-swift-nio-transport and grpc-swift-protobuf. SwiftPM joins the
+        // enabled traits of all packages in a graph, so the default would
+        // turn gRPC on for each host of this package. Thus only the
+        // `http/protobuf` OTLP protocol is available.
+        .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.5.1", traits: ["OTLPHTTP"]),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,

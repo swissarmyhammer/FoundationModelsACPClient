@@ -454,7 +454,9 @@ stderr outside the terminal layer:
 
 - When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, and `OTEL_SDK_DISABLED` is not
   `true`, logs, traces and metrics go to the OTLP exporters of swift-otel.
-  The standard `OTEL_*` variables configure them. The swift-otel
+  The standard `OTEL_*` variables configure them. The package enables only
+  the `OTLPHTTP` trait of swift-otel, so `http/protobuf` is the only OTLP
+  protocol. `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` is not available. The swift-otel
   diagnostic messages below `warning` do not reach stderr, so a default
   run still writes nothing to stderr until it fails.
 - In all other cases, logging goes to `SwiftLogNoOpLogHandler`, and
