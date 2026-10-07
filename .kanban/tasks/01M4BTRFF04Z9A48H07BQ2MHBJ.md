@@ -87,8 +87,31 @@ comments:
     - note: only warning is "missing creator for mutated node" from the MLX bundle. The task accepts it.
     - next: review
   timestamp: 2026-10-07T19:24:28.792150+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4bx6jjm1x6gjv2d29yj0kq4
+  text: |-
+    ### commit — changed
+    - evidence: fcb5548 fix(model): keep authState when an auth call has no open connection
+    - next: review
+  timestamp: 2026-10-07T19:24:45.524133+00:00
+- actor: claude-code
+  id: 01m4bxepxndjetq85apa57maas
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (fcb5548). Counts: 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. 6 files reviewed; 2 .kanban files excluded by .reviewignore. Each of the 5 findings of 2026-10-07 14:08 is checked and is fixed in fcb5548: login(_:) and logout(_:) call openConnection() before the capability guard, the doc comments say this, the two new no-connection tests exist, and AuthFailureFixtures.unsupportedFailure(of:method:) replaces the duplicate fixtures.
+    - next: The orchestrator pushes, then tells agentviewkit-a3 the commit (open subtask). This is not a finding.
+  timestamp: 2026-10-07T19:29:12.117074+00:00
+- actor: claude-code
+  id: 01m4bxf39nwfb5zkesprp5qbxh
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 6 files; the 5 findings of 2026-10-07 14:08 are fixed
+    - test: green — swift test, 580 tests in 49 suites pass; IntegrationTests build passes
+    - commit: fcb5548
+    - review: clean — zero findings; task is done
+  timestamp: 2026-10-07T19:29:24.789897+00:00
+position_column: done
+position_ordinal: e380
 title: 'Model: record an unsupported login, logout or terminal login in authState'
 ---
 ## What
