@@ -85,10 +85,19 @@ struct ConnectedModel {
     ///     or `nil` to leave the member out.
     ///   - loginError: The error the agent refuses each login with, or `nil`
     ///     to accept each login.
+    ///   - loginGate: The gate that must open before each login answers, or
+    ///     `nil` to answer each login at once.
+    ///   - logoutError: The error the agent refuses each logout with, or
+    ///     `nil` to accept each logout.
+    ///   - logoutGate: The gate that must open before each logout answers, or
+    ///     `nil` to answer each logout at once.
     init(
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
-        loginError: RequestError? = nil
+        loginError: RequestError? = nil,
+        loginGate: UpdateGate? = nil,
+        logoutError: RequestError? = nil,
+        logoutGate: UpdateGate? = nil
     ) async {
         await self.init { connection in
             ScriptedStubAgent(
@@ -97,7 +106,10 @@ struct ConnectedModel {
                 script: [],
                 capabilities: capabilities,
                 authMethods: authMethods,
-                loginError: loginError
+                loginError: loginError,
+                loginGate: loginGate,
+                logoutError: logoutError,
+                logoutGate: logoutGate
             )
         }
     }

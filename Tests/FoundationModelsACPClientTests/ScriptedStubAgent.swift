@@ -63,15 +63,17 @@ import Synchronization
 ///
 /// The stub answers `initialize` with the capabilities and the auth methods
 /// that the test chose. The default is no capability and no auth method.
-/// `auth/login` succeeds, or refuses with the error that the test chose.
-/// `auth/logout` always succeeds. `ConnectionModelInitializeTests` uses these
-/// three to drive the capability flags and the auth state of
-/// ``ConnectionModel``.
+/// `auth/login` and `auth/logout` each succeed, or refuse with the error that
+/// the test chose. `ConnectionModelInitializeTests` uses these three to drive
+/// the capability flags and the auth state of ``ConnectionModel``.
 ///
 /// A stub built with a login gate holds each `auth/login` until the test
 /// opens that gate, so the login request stays in flight.
 /// `ConnectionModelElicitationTests` sends a request-scoped elicitation while
-/// the login waits, and then opens the gate to finish the request.
+/// the login waits, and then opens the gate to finish the request. A logout
+/// gate holds each `auth/logout` in the same way.
+/// `ConnectionModelInitializeTests` closes the connection while a login or a
+/// logout waits at its gate.
 ///
 /// A stub built with a new-session gate holds each `session/new` until the
 /// test opens that gate, in the same way. `ConnectionModelSessionTests` holds
@@ -202,6 +204,14 @@ final class ScriptedStubAgent: Agent {
     /// answer each login at once.
     private let loginGate: UpdateGate?
 
+    /// The error to refuse each `auth/logout` with, or `nil` to accept each
+    /// logout.
+    private let logoutError: RequestError?
+
+    /// The gate that must open before each `auth/logout` answers, or `nil`
+    /// to answer each logout at once.
+    private let logoutGate: UpdateGate?
+
     /// The gate that must open before each `session/new` answers, or `nil`
     /// to answer each new session at once.
     private let newSessionGate: UpdateGate?
@@ -272,6 +282,10 @@ final class ScriptedStubAgent: Agent {
     ///     to accept each login.
     ///   - loginGate: The gate that must open before each `auth/login`
     ///     answers, or `nil` to answer each login at once.
+    ///   - logoutError: The error to refuse each `auth/logout` with, or
+    ///     `nil` to accept each logout.
+    ///   - logoutGate: The gate that must open before each `auth/logout`
+    ///     answers, or `nil` to answer each logout at once.
     ///   - newSessionGate: The gate that must open before each `session/new`
     ///     answers, or `nil` to answer each new session at once.
     ///   - sessionListPages: The page that `session/list` answers, keyed by
@@ -298,6 +312,8 @@ final class ScriptedStubAgent: Agent {
         authMethods: [AuthMethod]? = nil,
         loginError: RequestError? = nil,
         loginGate: UpdateGate? = nil,
+        logoutError: RequestError? = nil,
+        logoutGate: UpdateGate? = nil,
         newSessionGate: UpdateGate? = nil,
         sessionListPages: [SessionListCursor?: ListSessionsResponse] = [:],
         sessionListGates: [SessionListCursor?: UpdateGate] = [:]
@@ -321,6 +337,8 @@ final class ScriptedStubAgent: Agent {
         self.authMethods = authMethods
         self.loginError = loginError
         self.loginGate = loginGate
+        self.logoutError = logoutError
+        self.logoutGate = logoutGate
         self.newSessionGate = newSessionGate
         self.sessionListPages = sessionListPages
         self.sessionListGates = sessionListGates
@@ -347,6 +365,10 @@ final class ScriptedStubAgent: Agent {
 
     func logoutAuth(_ params: LogoutAuthRequest) async throws -> LogoutAuthResponse {
         record(params.meta, of: ClientRequestSpan.Method.logout)
+        await logoutGate?.wait()
+        if let logoutError {
+            throw logoutError
+        }
         return LogoutAuthResponse()
     }
 

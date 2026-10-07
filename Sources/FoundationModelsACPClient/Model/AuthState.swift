@@ -18,8 +18,9 @@ public enum AuthState: Hashable, Sendable {
     /// The login with this auth method succeeded.
     case authenticated(AuthMethodId)
 
-    /// The agent refused the last login with this error.
-    case failed(RequestError)
+    /// The last auth operation failed. The record tells the operation and
+    /// the reason.
+    case failed(AuthFailure)
 
     /// Makes the state that an `initialize` answer gives.
     ///

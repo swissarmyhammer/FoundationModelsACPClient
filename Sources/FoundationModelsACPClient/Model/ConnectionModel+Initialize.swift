@@ -111,19 +111,18 @@ extension ConnectionModel {
     ///
     /// When the agent accepts the login, ``authState`` becomes
     /// ``AuthState/authenticated(_:)`` with the method of the request. When
-    /// the agent refuses it, ``authState`` becomes ``AuthState/failed(_:)``
-    /// with the error of the agent. A closed connection changes no state.
+    /// the request fails, ``authState`` becomes ``AuthState/failed(_:)`` with
+    /// the login operation and the JSON-RPC form of the error: the refusal of
+    /// the agent, a closed connection, a time-out, or a cancel. When no
+    /// connection is open, the call sends nothing and changes no state.
     ///
     /// - Parameter request: The login request.
     /// - Throws: `ConnectionError.closed` when no connection is open, the
     ///   `RequestError` of the agent, or the error of the connection.
     public func login(_ request: LoginAuthRequest) async throws {
         let connection = try openConnection()
-        do {
+        try await recordingFailure(of: .login(request.methodId)) {
             _ = try await ClientRequestSpan.send(request) { try await connection.loginAuth($0) }
-        } catch let refusal as RequestError {
-            authState = .failed(refusal)
-            throw refusal
         }
         authState = .authenticated(request.methodId)
     }
@@ -132,7 +131,10 @@ extension ConnectionModel {
     ///
     /// When the agent accepts the logout, ``authState`` becomes
     /// ``AuthState/required(_:)`` with the auth methods of the agent. When
-    /// ``canLogout`` is `false`, the call sends nothing.
+    /// the request fails, ``authState`` becomes ``AuthState/failed(_:)`` with
+    /// the logout operation and the JSON-RPC form of the error, and no other
+    /// state changes. When ``canLogout`` is `false`, or when no connection is
+    /// open, the call sends nothing and changes no state.
     ///
     /// - Parameter request: The logout request.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
@@ -141,8 +143,32 @@ extension ConnectionModel {
     public func logout(_ request: LogoutAuthRequest) async throws {
         try requireCapability(canLogout, method: ClientRequestSpan.Method.logout)
         let connection = try openConnection()
-        _ = try await ClientRequestSpan.send(request) { try await connection.logoutAuth($0) }
+        try await recordingFailure(of: .logout) {
+            _ = try await ClientRequestSpan.send(request) { try await connection.logoutAuth($0) }
+        }
         authState = .required(authMethods)
+    }
+
+    /// Runs one auth request, and records each error that it throws in
+    /// ``authState``.
+    ///
+    /// ``RequestError/init(reporting:)`` gives the reason, so each error has
+    /// one JSON-RPC form.
+    ///
+    /// - Parameters:
+    ///   - operation: The auth operation of the request.
+    ///   - send: Sends the request.
+    /// - Throws: The error that `send` threw, after the record.
+    private func recordingFailure(
+        of operation: AuthFailure.Operation,
+        _ send: () async throws -> Void
+    ) async throws {
+        do {
+            try await send()
+        } catch {
+            authState = .failed(AuthFailure(operation: operation, reason: .request(RequestError(reporting: error))))
+            throw error
+        }
     }
 
     // MARK: - Connection

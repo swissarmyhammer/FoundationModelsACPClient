@@ -116,7 +116,7 @@ extension RequestError {
     private static let connectionErrorDataKey = "connectionError"
 
     /// Gives the JSON-RPC form of an error that a request threw, for the
-    /// error entry of the transcript.
+    /// error entry of the transcript and for ``AuthFailure/Reason/request(_:)``.
     ///
     /// A `RequestError` stays as the peer sent it. A `ConnectionError` has no
     /// JSON-RPC code, so it becomes `internalError` with the name of its case

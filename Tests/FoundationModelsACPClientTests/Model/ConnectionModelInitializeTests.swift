@@ -40,8 +40,27 @@ enum InitializeFixtures {
     /// The error that the agent refuses a login with.
     static let loginRefusal = RequestError.authenticationRequired
 
+    /// The error that the agent refuses a logout with.
+    static let logoutRefusal = RequestError.invalidParams
+
     /// A login with the agent auth method.
     static let login = LoginAuthRequest(methodId: agentMethodId)
+
+    /// The failure that a login refused with ``loginRefusal`` records.
+    static let loginRefusalFailure = AuthFailure(operation: .login(agentMethodId), reason: .request(loginRefusal))
+
+    /// The failure that a logout refused with ``logoutRefusal`` records.
+    static let logoutRefusalFailure = AuthFailure(operation: .logout, reason: .request(logoutRefusal))
+
+    /// The failure that a request records when the connection closes before
+    /// the agent answers it.
+    ///
+    /// - Parameter operation: The auth operation of the request.
+    /// - Returns: The failure with the JSON-RPC form of
+    ///   `ConnectionError.closed`.
+    static func closedFailure(of operation: AuthFailure.Operation) -> AuthFailure {
+        AuthFailure(operation: operation, reason: .request(RequestError(reporting: ConnectionError.closed)))
+    }
 }
 
 /// The capability flags of a model, in one value, so a test compares them
@@ -231,7 +250,7 @@ struct ConnectionModelInitializeTests {
         #expect(connected.receivedMethods.contains(ClientRequestSpan.Method.login))
     }
 
-    @Test func aRefusedLoginFailsWithTheErrorOfTheAgent() async throws {
+    @Test func aRefusedLoginRecordsTheLoginOperationAndTheAgentError() async throws {
         let connected = await ConnectedModel(
             authMethods: [InitializeFixtures.agentMethod],
             loginError: InitializeFixtures.loginRefusal
@@ -242,7 +261,104 @@ struct ConnectionModelInitializeTests {
             try await connected.model.login(InitializeFixtures.login)
         }
 
-        #expect(connected.model.authState == .failed(InitializeFixtures.loginRefusal))
+        #expect(connected.model.authState == .failed(InitializeFixtures.loginRefusalFailure))
+    }
+
+    @Test func aLoginThatTheConnectionCloseEndsRecordsAFailure() async throws {
+        let loginGate = UpdateGate()
+        let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod], loginGate: loginGate)
+        try await connected.initialize()
+
+        try await closeTheConnection(of: connected, during: ClientRequestSpan.Method.login) { model in
+            try await model.login(InitializeFixtures.login)
+        }
+
+        let expected = InitializeFixtures.closedFailure(of: .login(InitializeFixtures.agentMethodId))
+        #expect(connected.model.authState == .failed(expected))
+        loginGate.open()
+    }
+
+    @Test func aRefusedLogoutRecordsTheLogoutOperation() async throws {
+        let connected = await ConnectedModel(
+            authMethods: [InitializeFixtures.agentMethod],
+            logoutError: InitializeFixtures.logoutRefusal
+        )
+        try await connected.initialize()
+
+        await #expect(throws: InitializeFixtures.logoutRefusal) {
+            try await connected.model.logout(LogoutAuthRequest())
+        }
+
+        #expect(connected.model.authState == .failed(InitializeFixtures.logoutRefusalFailure))
+    }
+
+    @Test func aLogoutThatTheConnectionCloseEndsRecordsAFailure() async throws {
+        let logoutGate = UpdateGate()
+        let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod], logoutGate: logoutGate)
+        try await connected.initialize()
+
+        try await closeTheConnection(of: connected, during: ClientRequestSpan.Method.logout) { model in
+            try await model.logout(LogoutAuthRequest())
+        }
+
+        #expect(connected.model.authState == .failed(InitializeFixtures.closedFailure(of: .logout)))
+        logoutGate.open()
+    }
+
+    @Test func aSuccessfulLoginAfterARefusedLogoutAuthenticates() async throws {
+        let connected = await ConnectedModel(
+            authMethods: [InitializeFixtures.agentMethod],
+            logoutError: InitializeFixtures.logoutRefusal
+        )
+        try await connected.initialize()
+        await #expect(throws: InitializeFixtures.logoutRefusal) {
+            try await connected.model.logout(LogoutAuthRequest())
+        }
+        try #require(connected.model.authState == .failed(InitializeFixtures.logoutRefusalFailure))
+
+        try await connected.model.login(InitializeFixtures.login)
+
+        #expect(connected.model.authState == .authenticated(InitializeFixtures.agentMethodId))
+    }
+
+    @Test func aSuccessfulLogoutAfterARefusedLoginRequiresAuth() async throws {
+        let connected = await ConnectedModel(
+            authMethods: [InitializeFixtures.agentMethod],
+            loginError: InitializeFixtures.loginRefusal
+        )
+        try await connected.initialize()
+        await #expect(throws: InitializeFixtures.loginRefusal) {
+            try await connected.model.login(InitializeFixtures.login)
+        }
+        try #require(connected.model.authState == .failed(InitializeFixtures.loginRefusalFailure))
+
+        try await connected.model.logout(LogoutAuthRequest())
+
+        #expect(connected.model.authState == .required([InitializeFixtures.agentMethod]))
+    }
+
+    @Test func aLoginWithNoOpenConnectionKeepsTheAuthState() async throws {
+        let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        try await connected.initialize()
+        connected.agentEnd.close()
+        try await waitUntil { connected.model.state == .disconnected }
+
+        await #expect(throws: ConnectionError.closed) {
+            try await connected.model.login(InitializeFixtures.login)
+        }
+
+        #expect(connected.model.authState == .required([InitializeFixtures.agentMethod]))
+    }
+
+    @Test func aLogoutWithNoCapabilityKeepsTheAuthState() async throws {
+        let connected = await ConnectedModel(authMethods: [InitializeFixtures.terminalMethod])
+        try await connected.initialize()
+
+        await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
+            try await connected.model.logout(LogoutAuthRequest())
+        }
+
+        #expect(connected.model.authState == .required([InitializeFixtures.terminalMethod]))
     }
 
     @Test func aLogoutRequiresAuthAgain() async throws {
@@ -269,5 +385,36 @@ struct ConnectionModelInitializeTests {
 
         #expect(connected.receivedMethods == [ClientRequestSpan.Method.initialize, ClientRequestSpan.Method.initialize])
         #expect(connected.model.authState == .notRequired)
+    }
+
+    // MARK: - Helpers
+
+    /// Sends a request through the model, closes the agent end of the pair
+    /// while the agent holds that request at its gate, and expects that the
+    /// request throws `ConnectionError.closed`.
+    ///
+    /// The agent records the method of the request before it waits at the
+    /// gate, so the record tells that the request is in flight. No sleep is
+    /// necessary.
+    ///
+    /// - Parameters:
+    ///   - connected: The connected model.
+    ///   - method: The ACP method of the request.
+    ///   - send: Sends the request through the model.
+    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    private func closeTheConnection(
+        of connected: ConnectedModel,
+        during method: String,
+        _ send: @escaping @Sendable @MainActor (ConnectionModel) async throws -> Void
+    ) async throws {
+        let model = connected.model
+        let request = Task { try await send(model) }
+        try await waitUntil { connected.receivedMethods.contains(method) }
+
+        connected.agentEnd.close()
+
+        await #expect(throws: ConnectionError.closed) {
+            try await request.value
+        }
     }
 }
