@@ -109,7 +109,7 @@ extension ConnectionModel {
     ///   ``initialize(_:)`` did not send `capabilities.auth.terminal`, or the
     ///   agent lists no `terminal` method with `methodId`.
     private func runnableTerminalMethod(_ methodId: AuthMethodId) throws -> AuthMethodTerminal {
-        guard advertisedTerminalAuth, let method = listedTerminalMethod(methodId) else {
+        guard hasAdvertisedTerminalAuth, let method = listedTerminalMethod(methodId) else {
             throw ConnectionModelError.unsupported(method: ConnectionModelError.terminalAuthOperation)
         }
         return method

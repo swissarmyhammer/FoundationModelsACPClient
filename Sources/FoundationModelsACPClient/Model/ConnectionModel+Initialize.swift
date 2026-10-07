@@ -175,7 +175,7 @@ extension ConnectionModel {
         let connection = try openConnection()
         let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
         initializeResponse = response
-        advertisedTerminalAuth = request.capabilities.auth?.terminal != nil
+        hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
         return response
     }

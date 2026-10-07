@@ -84,7 +84,7 @@ public final class ConnectionModel {
     /// method only when the client sent it. It is `false` before
     /// ``initialize(_:)`` succeeds, and each new connection sets it back to
     /// `false`.
-    @ObservationIgnored var advertisedTerminalAuth = false
+    @ObservationIgnored var hasAdvertisedTerminalAuth = false
 
     /// The open connection, or `nil` when no connection is open. A close
     /// that comes from an earlier connection changes nothing.
@@ -200,7 +200,7 @@ public final class ConnectionModel {
         state = .connecting
         initializeResponse = nil
         authState = .unknown
-        advertisedTerminalAuth = false
+        hasAdvertisedTerminalAuth = false
         stopWatchingRequests()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger

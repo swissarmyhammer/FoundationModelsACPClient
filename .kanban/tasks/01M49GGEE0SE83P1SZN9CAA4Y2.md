@@ -37,6 +37,31 @@ comments:
     - evidence: 10 files. New: Sources/FoundationModelsACPClient/Model/TerminalAuthRunner.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+TerminalAuth.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTerminalAuthTests.swift. Changed: Model/AuthState.swift, Model/ConnectionModelError.swift, Model/ConnectionModel.swift, Model/ConnectionModel+Initialize.swift, ACPClient.swift, Sources/AcpClientCore/AgentSession.swift, plan.md. `swift test --filter ConnectionModelTerminalAuthTests`: 9 passed, 0 failed. `swift test`: 568 tests in 49 suites passed, 0 failed; the only warning is the accepted MLX warning (task zws9qzt).
     - next: /review. The task stays in doing. Nothing is committed.
   timestamp: 2026-10-07T15:34:48.652683+00:00
+- actor: claude-code
+  id: 01m4bgwaj6n29ref1zv5fxp0gt
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (48db10c); 1 finding (1 confirmed, 0 refuted) — Sources/FoundationModelsACPClient/Model/ConnectionModel.swift:87 swift/naming-clarity
+    - next: rename `advertisedTerminalAuth` to `hasAdvertisedTerminalAuth` in all files, then commit and review again
+  timestamp: 2026-10-07T15:49:26.726045+00:00
+- actor: claude-code
+  id: 01m4bgwpdh4yp8h94pfz3mszcn
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 10 files
+    - test: green — swift test, 568 passed, 0 failed, 0 skipped; IntegrationTests builds
+    - commit: 48db10c
+    - review: findings — Sources/FoundationModelsACPClient/Model/ConnectionModel.swift:87
+  timestamp: 2026-10-07T15:49:38.865712+00:00
+- actor: claude-code
+  id: 01m4bh52azavw24bx1xjaxzpy6
+  text: |-
+    Finding swift/naming-clarity done. Renamed `advertisedTerminalAuth` to `hasAdvertisedTerminalAuth` at all 4 sites: the declaration and the reset in `connect(over:...)` (ConnectionModel.swift), the record in `initialize(_:)` (ConnectionModel+Initialize.swift), and the guard in `runnableTerminalMethod(_:)` (ConnectionModel+TerminalAuth.swift). The doc comment holds no old name. No test refers to the property. The other properties that this task added are not Boolean (`pendingTerminalLogin: AuthMethodId?`, `terminalMethod`, `environmentVariables`), so the same cause has no other site. Note: the `files` edit with `replace_all` changed only one site in ConnectionModel.swift; a second edit fixed the reset in `connect`. A check with `rg` after the edits found no old name outside `.kanban/`.
+
+    ### implement — changed
+    - evidence: 3 files — Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+TerminalAuth.swift. `swift test`: 568 tests in 49 suites passed, 0 failed; the only warning is the accepted MLX warning (task zws9qzt).
+    - next: /review. The task stays in doing. Nothing is committed.
+  timestamp: 2026-10-07T15:54:13.215188+00:00
 depends_on:
 - 01M49GF51TG4H90K3EX73C1NKK
 position_column: doing
@@ -103,3 +128,15 @@ Use /tdd — write failing tests first, then implement to make them pass.
 - [x] Add `loginWithTerminal(_:runner:)`, with the capability and method checks.
 - [x] Keep `pendingTerminalLogin` across `connect`, and apply it in `initialize`.
 - [x] Document the host duties: the runner, `auth.terminal`, the reconnect, the retry.
+
+## Review Findings (2026-10-07 10:38)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 9 file(s) reviewed, 5 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+> 1 file(s) not reviewed — no validator matched:
+> - `plan.md` — no validator matches this file
+
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel.swift:87` `swift/naming-clarity` — Boolean property name should read as an assertion about the receiver. `advertisedTerminalAuth` reads as a bare adjective or past-participle descriptor rather than an assertion. Follow the pattern of Swift API Design Guidelines: `isEmpty`, `isEnabled`, `hasPrefix(_:)`. Rename to `hasAdvertisedTerminalAuth` or `isTerminalAuthAdvertised` so it reads as an assertion: 'has advertised terminal auth' or 'is terminal auth advertised'. Rename `advertisedTerminalAuth` to `hasAdvertisedTerminalAuth`.
