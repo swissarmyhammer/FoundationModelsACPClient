@@ -38,10 +38,11 @@ struct MCPServerStatusUpdate {
     /// ``decode(_:)`` ignores it.
     ///
     /// - Parameter update: The session update.
-    /// - Returns: `true` for each update of the `_mcp_server_status` kind.
+    /// - Returns: `true` only for an update with the kind
+    ///   `_mcp_server_status`. Each other update, also an unknown update of
+    ///   another kind, gives `false`, so it goes to the merge engine.
     static func isStatusUpdate(_ update: SessionUpdate) -> Bool {
-        guard case .unknown(kind, _) = update else { return false }
-        return true
+        payload(of: update) != nil
     }
 
     /// Reads an `_mcp_server_status` update from the raw JSON of a
@@ -56,7 +57,7 @@ struct MCPServerStatusUpdate {
     /// - Returns: The status update, or `nil` for each other update and for
     ///   each status update that the decode ignores.
     static func decode(_ update: SessionUpdate) -> MCPServerStatusUpdate? {
-        guard case .unknown(kind, .object(let members)) = update,
+        guard case .object(let members)? = payload(of: update),
             case .string(let name) = members["name"],
             case .string(let transportValue) = members["transport"],
             let transport = MCPServerTransport(wireValue: transportValue),
@@ -68,6 +69,20 @@ struct MCPServerStatusUpdate {
             return nil
         }
         return MCPServerStatusUpdate(name: name, transport: transport, origin: origin, status: status)
+    }
+
+    /// Gives the raw payload of an update when its kind is exactly
+    /// `_mcp_server_status`.
+    ///
+    /// The comparison is case-sensitive. Each other kind gives `nil`, so the
+    /// caller does not take an update of another kind.
+    ///
+    /// - Parameter update: The session update.
+    /// - Returns: The payload of the update, or `nil` for each update of
+    ///   another kind.
+    private static func payload(of update: SessionUpdate) -> JSONValue? {
+        guard case .unknown(let updateKind, let payload) = update, updateKind == kind else { return nil }
+        return payload
     }
 
     /// Reads the optional `reason` member of an update.

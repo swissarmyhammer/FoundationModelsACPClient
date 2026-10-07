@@ -276,6 +276,20 @@ struct SessionModelMCPServerStatusTests {
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(MessageId(rawValue: "agent-1")))])
     }
 
+    @Test(arguments: ["future_update", "_mcp_server_status_v2", "_MCP_SERVER_STATUS"])
+    func anUnknownUpdateOfAnotherKindAddsItsUnknownEntry(kind: String) throws {
+        let model = StatusFixtures.modelWithClientServers()
+        let payload = JSONValue.object(StatusFixtures.exampleMembers)
+
+        model.apply(.unknown(kind, payload))
+
+        let entry = try #require(model.transcript.first?.unknown)
+        #expect(model.transcript.count == 1)
+        #expect(entry.type == kind)
+        #expect(entry.raw == payload)
+        #expect(model.mcpServers.map(\.status) == [.notReported, .notReported])
+    }
+
     @Test func theUpdateTapGivesTheRawStatusUpdate() async throws {
         let model = StatusFixtures.modelWithClientServers()
         var tap = model.updateTap().makeAsyncIterator()
