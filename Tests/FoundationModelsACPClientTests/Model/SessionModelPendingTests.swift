@@ -143,7 +143,8 @@ struct SessionModelPendingTests {
         #expect(secondResponse.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
         #expect(model.pendingPermissions.map(\.request.title) == ["First?"])
 
-        try await model.selectPermission(#require(model.pendingPermissions.first).id, option: rejectOptionId)
+        let first = try #require(model.pendingPermissions.first)
+        await model.selectPermission(first.id, option: rejectOptionId)
         let firstResponse = await firstTask.value
         #expect(firstResponse.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
         #expect(model.pendingPermissions.isEmpty)
