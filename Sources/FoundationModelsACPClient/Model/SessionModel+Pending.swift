@@ -175,8 +175,7 @@ extension SessionModel {
     /// - Parameter entry: The new transcript entry.
     func attachUnresolvedElicitationLinks(to entry: TranscriptEntry) {
         guard case .toolCall(let toolCall) = entry,
-            case .wire(.toolCall(let toolCallId)) = toolCall.id,
-            let ids = unresolvedElicitationLinks.removeValue(forKey: toolCallId)
+            let ids = unresolvedElicitationLinks.removeValue(forKey: toolCall.toolCallId)
         else { return }
         toolCall.linkedElicitationIDs.append(contentsOf: ids)
     }
@@ -189,8 +188,7 @@ extension SessionModel {
     /// linked across the reset.
     func detachElicitationLinksFromToolCalls() {
         for case .toolCall(let entry) in wireEntries.values where !entry.linkedElicitationIDs.isEmpty {
-            guard case .wire(.toolCall(let toolCallId)) = entry.id else { continue }
-            unresolvedElicitationLinks[toolCallId, default: []].append(contentsOf: entry.linkedElicitationIDs)
+            unresolvedElicitationLinks[entry.toolCallId, default: []].append(contentsOf: entry.linkedElicitationIDs)
         }
     }
 
@@ -236,12 +234,18 @@ extension SessionModel {
         unresolvedElicitationLinks[toolCallId] = waiting.isEmpty ? nil : waiting
     }
 
-    /// Finds the transcript entry of one tool call.
+    /// Finds the transcript entry of one tool call by the ACP id that the
+    /// agent sent.
     ///
-    /// - Parameter toolCallId: The id of the tool call.
-    /// - Returns: The entry, or `nil` when the agent did not add the tool call
-    ///   yet.
-    private func toolCallEntry(for toolCallId: ToolCallId) -> ToolCallEntry? {
+    /// The lookup reads the index of the wire entries, so it does not scan
+    /// ``transcript``. A transcript reset removes the entry. The replay then
+    /// adds a new object for the same tool call, and this lookup gives that
+    /// new object.
+    ///
+    /// - Parameter toolCallId: The ACP id of the tool call.
+    /// - Returns: The entry, or `nil` before the agent adds the tool call, and
+    ///   after a transcript reset until the replay adds the tool call again.
+    public func toolCallEntry(for toolCallId: ToolCallId) -> ToolCallEntry? {
         guard case .toolCall(let entry) = wireEntries[.toolCall(toolCallId)] else { return nil }
         return entry
     }

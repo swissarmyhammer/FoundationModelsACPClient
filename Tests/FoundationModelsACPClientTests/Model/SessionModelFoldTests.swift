@@ -44,6 +44,9 @@ private let otherToolCallId = ToolCallId(rawValue: "tool-2")
 /// running call (`inProgress`) must stay two states.
 private let everyToolCallStatus: [ToolCallStatus] = [.pending, .inProgress, .completed, .failed, .cancelled]
 
+/// The replay cursor that asks for the full retained history.
+private let replayFromStart: ReplayFrom = .start(ReplayFromStart())
+
 /// Makes a model for the test session, and folds each update into it.
 ///
 /// The model has no coalescing cadence, so each chunk that a test applies to
@@ -252,6 +255,53 @@ struct SessionModelFoldTests {
         let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, status))
 
         #expect(try #require(model.transcript.first?.toolCall).status == status)
+    }
+
+    @Test func aToolCallEntryHasTheToolCallIdOfTheAgent() throws {
+        let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, .pending))
+
+        #expect(try #require(model.transcript.first?.toolCall).toolCallId == toolCallId)
+    }
+
+    @Test func aToolCallUpdateKeepsTheToolCallId() throws {
+        let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, .pending))
+        let entry = try #require(model.transcript.first?.toolCall)
+
+        model.apply(toolCallStatus(id: toolCallId.rawValue, .completed))
+
+        #expect(model.transcript.first?.toolCall === entry)
+        #expect(entry.toolCallId == toolCallId)
+    }
+
+    @Test func toolCallEntryForAnIdFindsTheEntry() throws {
+        let model = foldedModel(
+            toolCallStatus(id: toolCallId.rawValue, .pending),
+            toolCallStatus(id: otherToolCallId.rawValue, .pending)
+        )
+        let entry = try #require(model.transcript.last?.toolCall)
+
+        #expect(model.toolCallEntry(for: otherToolCallId) === entry)
+    }
+
+    @Test func toolCallEntryForAnUnknownIdIsNil() {
+        let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, .pending))
+
+        #expect(model.toolCallEntry(for: otherToolCallId) == nil)
+    }
+
+    @Test func toolCallEntryForAnIdFindsTheReplayedEntryAfterAReset() throws {
+        let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, .pending))
+        let entryBeforeReset = try #require(model.toolCallEntry(for: toolCallId))
+
+        model.beginReplay(replayFrom: replayFromStart)
+        #expect(model.toolCallEntry(for: toolCallId) == nil)
+        model.apply(toolCallStatus(id: toolCallId.rawValue, .completed))
+        model.endReplay(succeeded: true)
+
+        let replayedEntry = try #require(model.toolCallEntry(for: toolCallId))
+        #expect(replayedEntry !== entryBeforeReset)
+        #expect(model.transcript.first?.toolCall === replayedEntry)
+        #expect(replayedEntry.status == .completed)
     }
 
     // MARK: - Terminals

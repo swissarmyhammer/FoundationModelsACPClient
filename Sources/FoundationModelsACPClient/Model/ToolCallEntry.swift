@@ -12,6 +12,9 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The ACP id of the tool call, as the agent sent it. It never changes.
+    public nonisolated let toolCallId: ToolCallId
+
     /// The name of the tool that the agent calls.
     public internal(set) var name: String?
 
@@ -45,9 +48,12 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
 
     /// Makes the entry for a tool call from the wire.
     ///
-    /// - Parameter entry: The engine entry of the tool call.
-    init(wire entry: FoundationModelsACP.SessionEntry) {
+    /// - Parameters:
+    ///   - entry: The engine entry of the tool call.
+    ///   - toolCallId: The ACP id of the tool call, as the agent sent it.
+    init(wire entry: FoundationModelsACP.SessionEntry, toolCallId: ToolCallId) {
         self.id = .wire(entry.id)
+        self.toolCallId = toolCallId
         update(from: entry)
     }
 

@@ -110,7 +110,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .userMessage: self = .userMessage(UserMessageEntry(wire: entry))
         case .agentMessage: self = .agentMessage(AgentMessageEntry(wire: entry))
         case .agentThought: self = .thought(ThoughtEntry(wire: entry))
-        case .toolCall: self = .toolCall(ToolCallEntry(wire: entry))
+        case .toolCall(let toolCall): self = .toolCall(ToolCallEntry(wire: entry, toolCallId: toolCall.toolCallId))
         case .terminal: self = .terminal(TerminalEntry(wire: entry))
         case .plan: self = .plan(PlanTranscriptEntry(wire: entry))
         case .unknown: self = .unknown(UnknownEntry(wire: entry))

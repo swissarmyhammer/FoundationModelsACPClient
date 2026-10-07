@@ -52,10 +52,26 @@ comments:
     - evidence: 2 files changed: Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. `swift test`: 516 tests in 45 suites passed, 0 failed. The only warning is the accepted SwiftPM MLX "missing creator for mutated node" warning (^zws9qzt). Both 2026-10-07 07:20 findings are checked.
     - next: /review
   timestamp: 2026-10-07T12:29:29.904464+00:00
+- actor: claude-code
+  id: 01m4b5r3crx2cm5b5grt4drv5w
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (3e66f65), 0 findings (7 attempted, 0 failed). All prior Review Findings items are checked.
+    - next: none. Task moved to done.
+  timestamp: 2026-10-07T12:34:53.976123+00:00
+- actor: claude-code
+  id: 01m4b5rcedmxbv8zn5xesvwzwz
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 2 files (one shared helper `removingUnadvertisedMCPServers(from:)`, plus a test)
+    - test: green — swift test, 516 passed, 0 failed, 0 skipped
+    - commit: 3e66f65
+    - review: clean — 0 findings; both earlier findings (ConnectionModel+Sessions.swift:46, :125) are checked; task moved to done
+  timestamp: 2026-10-07T12:35:03.245721+00:00
 depends_on:
 - 01M49F8ES2T6QBK5BAPK8SKZ98
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: d580
 title: 'Model: send only the MCP servers whose transport the agent advertises'
 ---
 ## What

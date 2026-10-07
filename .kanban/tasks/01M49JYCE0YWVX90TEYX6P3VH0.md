@@ -1,8 +1,27 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: 8c80
+comments:
+- actor: claude-code
+  id: 01m4b606z15xqj3yqdyrcq98xt
+  text: |-
+    Research and implementation notes:
+    - `SessionEntry.Kind.toolCall` holds a `ToolCallUpdate`. Its `toolCallId` is the ACP id. `TranscriptEntry(wire:)` is the only caller of `ToolCallEntry(wire:)`, so the signature change touches one site.
+    - `toolCallEntry(for:)` reads `wireEntries[.toolCall(id)]`. `resetTranscript()` clears `wireEntries`. Thus the lookup gives `nil` after `beginReplay(replayFrom:)` with a cursor and a transcript that is not empty, and gives the new object after the replay adds the tool call again.
+    - RED: the five new tests did not compile. The errors were "value of type 'ToolCallEntry' has no member 'toolCallId'" and "'toolCallEntry' is inaccessible due to 'private' protection level".
+    - GREEN: `swift test --filter SessionModelFoldTests` gave 45 of 45 tests passed.
+    - Refactor: `attachUnresolvedElicitationLinks(to:)` and `detachElicitationLinksFromToolCalls()` now read `ToolCallEntry.toolCallId`. They do not pattern-match `entry.id` as `.wire(.toolCall(id))` now. The behavior did not change.
+    - The SwiftPM warning "missing creator for mutated node: .../mlx-swift_Cmlx.bundle/Contents/MacOS" shows in `swift build` and `swift test`. It comes from a dependency bundle node at build step 1, before this package compiles. This change did not cause it.
+  timestamp: 2026-10-07T12:39:19.777608+00:00
+- actor: claude-code
+  id: 01m4b609a4ds6dt33q5k9wbtfz
+  text: |-
+    ### implement — changed
+    - evidence: 4 files — Sources/FoundationModelsACPClient/Model/ToolCallEntry.swift, Sources/FoundationModelsACPClient/Model/TranscriptEntry.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Pending.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelFoldTests.swift. `swift test --filter SessionModelFoldTests`: 45 passed, 0 failed. `swift test`: 521 tests in 45 suites passed, 0 failed. `swift build`: complete, no new warning (only the dependency warning "missing creator for mutated node" for mlx-swift_Cmlx.bundle, which this change did not cause).
+    - next: /review. The task stays in doing.
+  timestamp: 2026-10-07T12:39:22.180108+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'Model: ToolCallEntry exposes the ACP toolCallId, and SessionModel finds a tool call entry by it'
 ---
 ## What
@@ -19,11 +38,11 @@ The ACP `toolCallId` of a tool call never changes, so it is a constant, not an o
 
 ## Acceptance Criteria
 
-- [ ] A tool call entry that a `tool_call` update makes has `toolCallId` equal to the `toolCallId` of the update.
-- [ ] Later updates for the same tool call keep the same `toolCallId` and the same object.
-- [ ] `session.toolCallEntry(for: id)` gives that object, and `nil` for an id that the agent did not send.
-- [ ] After a resume replay, `toolCallEntry(for:)` gives the new object of the replayed tool call.
-- [ ] `swift build` gives no new warning.
+- [x] A tool call entry that a `tool_call` update makes has `toolCallId` equal to the `toolCallId` of the update.
+- [x] Later updates for the same tool call keep the same `toolCallId` and the same object.
+- [x] `session.toolCallEntry(for: id)` gives that object, and `nil` for an id that the agent did not send.
+- [x] After a resume replay, `toolCallEntry(for:)` gives the new object of the replayed tool call.
+- [x] `swift build` gives no new warning.
 
 ## Tests
 
@@ -41,6 +60,6 @@ Use /tdd — write failing tests first, then implement to make them pass.
 
 ## Subtasks
 
-- [ ] Write the five failing tests.
-- [ ] Add `ToolCallEntry.toolCallId` and pass it from `TranscriptEntry(wire:)`.
-- [ ] Make `SessionModel.toolCallEntry(for:)` public, with its doc comment.
+- [x] Write the five failing tests.
+- [x] Add `ToolCallEntry.toolCallId` and pass it from `TranscriptEntry(wire:)`.
+- [x] Make `SessionModel.toolCallEntry(for:)` public, with its doc comment.
