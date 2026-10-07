@@ -27,8 +27,10 @@ public enum ACPClient {
     /// gives the user no terminal to type into. An omitted `auth` field
     /// tells the agent to put no `terminal` entry in its `authMethods`, so
     /// this client never has such a method to run. A host that does own a
-    /// terminal builds its own `ClientCapabilities` value, and handles the
-    /// `terminal` authentication method itself.
+    /// terminal builds its own `ClientCapabilities` value with
+    /// `auth.terminal`, and runs a `terminal` authentication method through
+    /// ``ConnectionModel/loginWithTerminal(_:runner:)`` with a
+    /// ``TerminalAuthRunner`` of its own.
     public static let advertisedCapabilities = ClientCapabilities(
         elicitation: ElicitationCapabilities(
             form: ElicitationFormCapabilities(),

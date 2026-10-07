@@ -66,7 +66,25 @@ public final class ConnectionModel {
     /// come after a successful login too, for example when the login
     /// expired. A later successful ``login(_:)`` gives
     /// ``AuthState/authenticated(_:)`` again.
+    ///
+    /// A successful ``loginWithTerminal(_:runner:)`` gives
+    /// ``AuthState/reconnectRequired(_:)``. The ``initialize(_:)`` of the
+    /// next connection then gives ``AuthState/authenticated(_:)``.
     public internal(set) var authState: AuthState = .unknown
+
+    /// The `terminal` auth method whose terminal login succeeded, or `nil`
+    /// when there is none. The login does not authenticate the connection
+    /// that was open, so the model keeps the method across
+    /// ``connect(over:logger:bufferLimits:client:)`` until the next
+    /// ``initialize(_:)`` succeeds.
+    @ObservationIgnored var pendingTerminalLogin: AuthMethodId?
+
+    /// Tells whether the last successful ``initialize(_:)`` sent
+    /// `capabilities.auth.terminal`. The agent can list a `terminal` auth
+    /// method only when the client sent it. It is `false` before
+    /// ``initialize(_:)`` succeeds, and each new connection sets it back to
+    /// `false`.
+    @ObservationIgnored var advertisedTerminalAuth = false
 
     /// The open connection, or `nil` when no connection is open. A close
     /// that comes from an earlier connection changes nothing.
@@ -155,6 +173,8 @@ public final class ConnectionModel {
     /// call this method again with a new transport. Each call forgets the
     /// `initialize` answer and the auth state of the last connection, so
     /// each capability flag is `false` until ``initialize(_:)`` runs again.
+    /// Each call keeps the method of a successful terminal login, so the
+    /// next ``initialize(_:)`` can give ``AuthState/authenticated(_:)``.
     /// Each call also cancels each pending elicitation of the last
     /// connection, because the model no longer reads the events of its
     /// requests.
@@ -180,6 +200,7 @@ public final class ConnectionModel {
         state = .connecting
         initializeResponse = nil
         authState = .unknown
+        advertisedTerminalAuth = false
         stopWatchingRequests()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger

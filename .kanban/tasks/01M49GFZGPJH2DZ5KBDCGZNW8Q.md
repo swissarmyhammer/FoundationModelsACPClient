@@ -31,10 +31,26 @@ comments:
     - evidence: 7 files — Sources/FoundationModelsACPClient/Model/ConnectionSessionRequestSender.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+AuthRequired.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/AuthState.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelAuthRequiredTests.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift. `swift test --filter ConnectionModelAuthRequiredTests`: 12 passed. `swift test`: 559 tests in 48 suites passed, 0 failures. The only warning is the accepted MLX "missing creator for mutated node" (task zws9qzt).
     - next: /review. The task stays in doing. Nothing is committed.
   timestamp: 2026-10-07T15:18:38.781033+00:00
+- actor: claude-code
+  id: 01m4bfgr619hdv4ghxmy35m738
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (efcc03e). 0 findings, 0 confirmed, 1 refuted. 7 files reviewed. 4 .kanban files not reviewed (.reviewignore). No prior Review Findings sections.
+    - next: none. The task is in done.
+  timestamp: 2026-10-07T15:25:38.881791+00:00
+- actor: claude-code
+  id: 01m4bfh0yp4qvvbbjfs2akx4hj
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 7 files
+    - test: green — swift test, 559 passed, 0 failed, 0 skipped
+    - commit: efcc03e
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-07T15:25:47.862338+00:00
 depends_on:
 - 01M49GFK1YCGWDKQKPWFXA80AF
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: de80
 title: 'Model: a -32000 answer to a session prompt or config request sets authState to .required'
 ---
 ## What

@@ -158,6 +158,15 @@ extension ConnectionModel {
     /// ``authState``: ``AuthState/notRequired`` when the agent lists no auth
     /// method, and ``AuthState/required(_:)`` with the methods otherwise.
     ///
+    /// After a successful ``loginWithTerminal(_:runner:)``, when the answer
+    /// still lists that `terminal` method, ``authState`` becomes
+    /// ``AuthState/authenticated(_:)`` with the method. Each successful
+    /// `initialize` forgets the terminal login, so it applies one time only.
+    ///
+    /// The model records whether `request` sends
+    /// `capabilities.auth.terminal`. ``loginWithTerminal(_:runner:)`` runs a
+    /// method only when it does.
+    ///
     /// - Parameter request: The initialize request.
     /// - Returns: The answer of the agent.
     /// - Throws: `ConnectionError.closed` when no connection is open, or the
@@ -166,7 +175,8 @@ extension ConnectionModel {
         let connection = try openConnection()
         let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
         initializeResponse = response
-        authState = AuthState(advertising: authMethods)
+        advertisedTerminalAuth = request.capabilities.auth?.terminal != nil
+        authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
         return response
     }
 

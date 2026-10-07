@@ -273,14 +273,19 @@ decision below).
   never driven" for the evidence), so this package renders it and never drives it.
 - **No filesystem surface (decided by v2):** `fs/*` is gone; agents use MCP. This
   package does not touch the user's files, so it needs no confinement policy.
-- **No terminal authentication (decided).** `schema-v2.0.0-alpha.3` added the
-  `auth` client capability and the `terminal` authentication method. A client
+- **No terminal authentication in the default capabilities (decided).**
+  `schema-v2.0.0-alpha.3` added the `auth` client capability and the `terminal`
+  authentication method. A client
   advertises `auth.terminal` only when it can run the configured agent
   invocation again in an interactive terminal. `AgentProcess` spawns the agent
   with `posix_spawn` on pipes, which gives the user no terminal to type into.
   Thus `ACPClient.advertisedCapabilities` omits `auth`, which tells the agent to
   put no `terminal` entry in its `authMethods`. A test pins the omission. A host
-  that owns a terminal builds its own `ClientCapabilities` value.
+  that owns a terminal builds its own `ClientCapabilities` value, and runs a
+  `terminal` method through `ConnectionModel.loginWithTerminal(_:runner:)` with
+  a `TerminalAuthRunner` of its own. A successful run gives
+  `AuthState.reconnectRequired`. The host then connects again, sends
+  `initialize`, and retries the operation that needed the login.
 
 ## Milestones
 

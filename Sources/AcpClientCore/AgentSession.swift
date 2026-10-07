@@ -279,6 +279,8 @@ struct AgentSession {
             switch unsent {
             case .unsupported:
                 true
+            case .terminalAuthFailed:
+                false
             }
         default:
             false
