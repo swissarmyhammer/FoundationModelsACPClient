@@ -61,6 +61,13 @@ extension ConnectionModel {
         agentCapabilities?.session?.delete != nil
     }
 
+    /// Tells whether the agent accepts the `additionalDirectories` field of
+    /// `session/new` and `session/resume`. It is `false` before
+    /// ``initialize(_:)`` succeeds.
+    public var canUseAdditionalDirectories: Bool {
+        agentCapabilities?.session?.additionalDirectories != nil
+    }
+
     /// Tells whether the agent serves `auth/logout`. It is `false` before
     /// ``initialize(_:)`` succeeds.
     public var canLogout: Bool {

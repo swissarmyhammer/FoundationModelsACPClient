@@ -217,6 +217,49 @@ private enum SessionFactoryFixtures {
         session.mcpServers.map(MCPServerRecord.init(item:))
     }
 
+    /// The working directory of the sessions of the additional-directory
+    /// tests. It is not ``workingDirectory``, so a test can see that the
+    /// model took it from the request.
+    static let projectDirectory = AbsolutePath(rawValue: "/work/project")
+
+    /// The additional directory of the new-session request of the
+    /// additional-directory tests.
+    static let sharedDirectory = AbsolutePath(rawValue: "/work/shared")
+
+    /// The additional directory of the resume request of the
+    /// additional-directory tests.
+    static let documentsDirectory = AbsolutePath(rawValue: "/work/documents")
+
+    /// The new-session request that sends ``projectDirectory`` and
+    /// ``sharedDirectory``.
+    static let newSessionRequestWithDirectories = NewSessionRequest(
+        cwd: projectDirectory,
+        additionalDirectories: [sharedDirectory]
+    )
+
+    /// The resume request of the test session that sends
+    /// ``projectDirectory`` and ``documentsDirectory``, with a replay from
+    /// the start.
+    static let resumeRequestWithDirectories = ResumeSessionRequest(
+        cwd: projectDirectory,
+        sessionId: testSession,
+        additionalDirectories: [documentsDirectory],
+        replayFrom: replayFromStart
+    )
+
+    /// The resume request of the test session that sends
+    /// ``projectDirectory`` and no additional directory, with a replay from
+    /// the start.
+    static let resumeRequestWithNoDirectories = ResumeSessionRequest(
+        cwd: projectDirectory,
+        sessionId: testSession,
+        replayFrom: replayFromStart
+    )
+
+    /// The error of a new session with additional directories that the agent
+    /// does not advertise.
+    static let newSessionUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.newSession)
+
     /// The error of a close that the agent does not advertise.
     static let closeUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.closeSession)
 
@@ -955,6 +998,83 @@ struct ConnectionModelSessionTests {
         // the request stays as the caller made it.
         #expect(newSession == expectedNewSession)
         #expect(resume == SessionFactoryFixtures.resumeRequestWithServers)
+    }
+
+    // MARK: - The working directory and the additional directories
+
+    @Test func newSessionHoldsTheCwdAndTheAdditionalDirectories() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: InitializeFixtures.additionalDirectoriesCapabilities
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
+
+        #expect(session.cwd == SessionFactoryFixtures.projectDirectory)
+        #expect(session.cwd == connected.lastWorkingDirectory)
+        #expect(session.additionalDirectories == [SessionFactoryFixtures.sharedDirectory])
+    }
+
+    @Test func resumeSessionHoldsTheValuesOfANewModel() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: InitializeFixtures.additionalDirectoriesCapabilities
+        )
+
+        let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
+
+        #expect(session.cwd == SessionFactoryFixtures.projectDirectory)
+        #expect(session.additionalDirectories == [SessionFactoryFixtures.documentsDirectory])
+    }
+
+    @Test func resumeOfAnOpenSessionReplacesTheValues() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: InitializeFixtures.additionalDirectoriesCapabilities
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
+
+        let resumed = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
+
+        #expect(resumed === session)
+        #expect(session.cwd == SessionFactoryFixtures.projectDirectory)
+        #expect(session.additionalDirectories == [SessionFactoryFixtures.documentsDirectory])
+
+        // A resume with no list activates no additional root, so the model
+        // then holds an empty list.
+        _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithNoDirectories)
+
+        #expect(session.additionalDirectories.isEmpty)
+    }
+
+    @Test func aFailedResumeKeepsTheValues() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: InitializeFixtures.additionalDirectoriesCapabilities,
+            resumeSessionError: SessionFactoryFixtures.resumeRefusal
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
+
+        await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
+        }
+
+        #expect(session.cwd == SessionFactoryFixtures.projectDirectory)
+        #expect(session.additionalDirectories == [SessionFactoryFixtures.sharedDirectory])
+    }
+
+    @Test func additionalDirectoriesWithNoCapabilityThrowsAndSendsNothing() async throws {
+        let connected = try await SessionFactoryFixtures.connect(capabilities: InitializeFixtures.baselineCapabilities)
+
+        await #expect(throws: SessionFactoryFixtures.newSessionUnsupported) {
+            try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
+        }
+        await #expect(throws: SessionFactoryFixtures.resumeUnsupported) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
+        }
+        // A second initialize makes a round trip after the refused requests,
+        // so a request that went out would be in the record before its answer.
+        try await connected.initialize()
+
+        #expect(!connected.receivedMethods.contains(ClientRequestSpan.Method.newSession))
+        #expect(!connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession))
+        #expect(connected.model.openSessions.isEmpty)
     }
 
     // MARK: - The request sender

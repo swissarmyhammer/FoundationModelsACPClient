@@ -20,8 +20,24 @@ comments:
     - evidence: 4 files — Sources/FoundationModelsACPClient/Model/ToolCallEntry.swift, Sources/FoundationModelsACPClient/Model/TranscriptEntry.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Pending.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelFoldTests.swift. `swift test --filter SessionModelFoldTests`: 45 passed, 0 failed. `swift test`: 521 tests in 45 suites passed, 0 failed. `swift build`: complete, no new warning (only the dependency warning "missing creator for mutated node" for mlx-swift_Cmlx.bundle, which this change did not cause).
     - next: /review. The task stays in doing.
   timestamp: 2026-10-07T12:39:22.180108+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4b6c0vjnhybf96zvprwwg7r
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (2769f3b): 0 findings, 0 confirmed, 0 refuted; 7 validator runs attempted, 0 failed. No prior Review Findings sections.
+    - next: none. The task is in done.
+  timestamp: 2026-10-07T12:45:46.738607+00:00
+- actor: claude-code
+  id: 01m4b6c844f836h3gwb77awdv0
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files
+    - test: green — swift test, 521 passed, 0 failed, 0 skipped
+    - commit: 2769f3b
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-07T12:45:54.180169+00:00
+position_column: done
+position_ordinal: d680
 title: 'Model: ToolCallEntry exposes the ACP toolCallId, and SessionModel finds a tool call entry by it'
 ---
 ## What

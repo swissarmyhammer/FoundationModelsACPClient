@@ -26,6 +26,12 @@ enum InitializeFixtures {
     /// no `session/delete`.
     static let baselineCapabilities = AgentCapabilities(session: SessionCapabilities())
 
+    /// The capabilities of an agent that advertises the session baseline and
+    /// `session.additionalDirectories`.
+    static let additionalDirectoriesCapabilities = AgentCapabilities(
+        session: SessionCapabilities(additionalDirectories: SessionAdditionalDirectoriesCapabilities())
+    )
+
     /// The id of the auth method that the agent handles through `auth/login`.
     static let agentMethodId = AuthMethodId(rawValue: "api-key")
 
@@ -172,6 +178,18 @@ struct ConnectionModelInitializeTests {
             canLogout: false
         )
         #expect(CapabilityFlags(of: connected.model) == expected)
+    }
+
+    @Test func canUseAdditionalDirectoriesFollowsTheCapability() async throws {
+        let baseline = await ConnectedModel(capabilities: InitializeFixtures.baselineCapabilities)
+        let advertising = await ConnectedModel(capabilities: InitializeFixtures.additionalDirectoriesCapabilities)
+        #expect(!advertising.model.canUseAdditionalDirectories)
+
+        try await baseline.initialize()
+        try await advertising.initialize()
+
+        #expect(!baseline.model.canUseAdditionalDirectories)
+        #expect(advertising.model.canUseAdditionalDirectories)
     }
 
     @Test func terminalAuthMethodsAloneCannotLogout() async throws {

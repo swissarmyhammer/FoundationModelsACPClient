@@ -59,6 +59,35 @@ public final class SessionModel {
     /// The identifier of the session.
     public let sessionId: SessionId
 
+    /// The working directory of the session: the `cwd` of the last
+    /// successful `session/new` or `session/resume` request. `nil` means
+    /// only that no such request set it, for example in a model that a unit
+    /// test makes directly.
+    ///
+    /// Keep this value, ``sessionId``, and ``additionalDirectories`` to
+    /// resume the session later:
+    ///
+    /// ```swift
+    /// let request = ResumeSessionRequest(
+    ///     cwd: session.cwd!,
+    ///     sessionId: session.sessionId,
+    ///     additionalDirectories: session.additionalDirectories
+    /// )
+    /// ```
+    ///
+    /// The `cwd` of a `session/resume` request must be the `cwd` of the
+    /// session, and the agent refuses another `cwd`. The resume request must
+    /// also send the full list of additional directories again: an omitted
+    /// or empty list activates no additional root.
+    public internal(set) var cwd: AbsolutePath?
+
+    /// The additional workspace roots of the session: the
+    /// `additionalDirectories` of the last successful `session/new` or
+    /// `session/resume` request, in request order. An empty list means that
+    /// the session has no additional root. See ``cwd`` for the resume
+    /// contract.
+    public internal(set) var additionalDirectories: [AbsolutePath] = []
+
     /// The transcript, in the order of first appearance. An entry keeps its
     /// object and its position for the life of the model.
     public private(set) var transcript: [TranscriptEntry] = []
@@ -351,6 +380,18 @@ public final class SessionModel {
     /// - Parameter servers: The `mcpServers` field of the request.
     func setMCPServers(_ servers: [MCPServer]) {
         mcpServers = servers.compactMap(MCPServerItem.init(clientServer:))
+    }
+
+    /// Replaces ``cwd`` and ``additionalDirectories`` with the values of a
+    /// `session/new` or `session/resume` request that the agent accepted.
+    ///
+    /// An omitted list gives an empty list, because the agent then activates
+    /// no additional root.
+    ///
+    /// - Parameter request: The request that the agent accepted.
+    func setWorkspace(of request: some SessionWorkspaceRequest) {
+        cwd = request.cwd
+        additionalDirectories = request.additionalDirectories ?? []
     }
 
     /// Applies one `_mcp_server_status` update of the agent to

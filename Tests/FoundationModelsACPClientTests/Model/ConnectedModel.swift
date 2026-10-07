@@ -48,6 +48,12 @@ struct ConnectedModel {
         builtAgents.elements.last?.deleteRequests ?? []
     }
 
+    /// The working directory of the last `session/new` that the agent got,
+    /// or `nil` when the agent got none.
+    var lastWorkingDirectory: AbsolutePath? {
+        builtAgents.elements.last?.lastWorkingDirectory
+    }
+
     /// The `mcpServers` field of each `session/new` that the agent got, in
     /// arrival order. A `nil` item is a request with no field.
     var newSessionMCPServers: [[MCPServer]?] {

@@ -29,7 +29,9 @@ extension ConnectionModel {
     /// The commands and the configuration options of the response seed the
     /// model, and the model goes into ``openSessions``. The MCP servers of the
     /// request go into ``SessionModel/mcpServers`` before the model folds an
-    /// update.
+    /// update. The `cwd` and the `additionalDirectories` of the request go
+    /// into ``SessionModel/cwd`` and ``SessionModel/additionalDirectories``,
+    /// so a host can resume the session later.
     ///
     /// When the connection closes, or a new connection takes its place,
     /// after the response arrives but before this call reads it, the model
@@ -37,11 +39,15 @@ extension ConnectionModel {
     ///
     /// - Parameter request: The new-session request.
     /// - Returns: The open model of the new session.
-    /// - Throws: `ConnectionError.closed` when no connection is open, or when
-    ///   the connection of the request is no longer the open connection; the
-    ///   `RequestError` of the agent; or the error of the connection. On an
-    ///   error, the model registers no session.
+    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when the
+    ///   request has additional directories and
+    ///   ``canUseAdditionalDirectories`` is `false`, so the call sends
+    ///   nothing; `ConnectionError.closed` when no connection is open, or
+    ///   when the connection of the request is no longer the open
+    ///   connection; the `RequestError` of the agent; or the error of the
+    ///   connection. On an error, the model registers no session.
     public func newSession(_ request: NewSessionRequest) async throws -> SessionModel {
+        try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.newSession)
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
         let response = try await ClientRequestSpan.send(sent) { try await connection.newSession($0) }
@@ -50,6 +56,7 @@ extension ConnectionModel {
         // update, so a status update that the agent sends after the response
         // always finds it.
         session.setMCPServers(sent.mcpServers ?? [])
+        session.setWorkspace(of: sent)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         try register(session, openedOver: connection)
         return session
@@ -83,9 +90,16 @@ extension ConnectionModel {
     /// request goes out, also for an open model, and each item starts again
     /// at ``MCPServerStatus/notReported``.
     ///
+    /// After a successful response, the `cwd` and the
+    /// `additionalDirectories` of the request replace
+    /// ``SessionModel/cwd`` and ``SessionModel/additionalDirectories``, also
+    /// for an open model. An omitted list gives an empty list, because the
+    /// agent then activates no additional root.
+    ///
     /// On a failure, the replay ends as a failure and the call throws. An
-    /// open model stays open, and gets back the MCP servers that it had
-    /// before the call. A new model is closed and does not go into
+    /// open model stays open, gets back the MCP servers that it had before
+    /// the call, and keeps its `cwd` and its additional directories. A new
+    /// model is closed and does not go into
     /// ``openSessions``. When the connection closes, or a new connection
     /// takes its place, after the response arrives but before this call reads
     /// it, a new model is closed too.
@@ -100,12 +114,15 @@ extension ConnectionModel {
     /// - Parameter request: The resume-session request.
     /// - Returns: The open model of the session.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
-    ///   ``canResumeSessions`` is `false`, so the call sends nothing;
-    ///   `ConnectionError.closed` when no connection is open, or when the
-    ///   connection of the request is no longer the open connection; the
-    ///   `RequestError` of the agent; or the error of the connection.
+    ///   ``canResumeSessions`` is `false`, or when the request has additional
+    ///   directories and ``canUseAdditionalDirectories`` is `false`, so the
+    ///   call sends nothing; `ConnectionError.closed` when no connection is
+    ///   open, or when the connection of the request is no longer the open
+    ///   connection; the `RequestError` of the agent; or the error of the
+    ///   connection.
     public func resumeSession(_ request: ResumeSessionRequest) async throws -> SessionModel {
         try requireCapability(canResumeSessions, method: ClientRequestSpan.Method.resumeSession)
+        try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.resumeSession)
         return try await resumeTurns.run(for: request.sessionId) {
             try await resumeInTurn(request)
         }
@@ -144,6 +161,9 @@ extension ConnectionModel {
     /// The call returns after the model read the marker of the request, so
     /// the model then holds each replayed update.
     ///
+    /// Only a successful response sets the `cwd` and the additional
+    /// directories of the model, so a failure keeps the earlier values.
+    ///
     /// The model learns the wire id of the request from the outgoing-request
     /// events, and only the marker with that id ends the replay. The marker
     /// of an earlier `session/resume` request that its caller cancelled can
@@ -178,6 +198,7 @@ extension ConnectionModel {
             throw error
         }
         await session.waitForReplayEnd()
+        session.setWorkspace(of: request)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
     }
 
@@ -295,6 +316,29 @@ extension ConnectionModel {
             + "because the agent does not advertise that transport"
     }
 
+    // MARK: - Additional directories
+
+    /// Throws when a request has additional directories and the agent does
+    /// not advertise `session.additionalDirectories`.
+    ///
+    /// ``newSession(_:)`` and ``resumeSession(_:)`` call this before they
+    /// send the request, so a request that the agent cannot read sends
+    /// nothing. A request with an omitted or empty list needs no capability.
+    ///
+    /// - Parameters:
+    ///   - request: The request as the caller made it.
+    ///   - method: The ACP wire method of the request, for the error.
+    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
+    ///   `request` has additional directories and
+    ///   ``canUseAdditionalDirectories`` is `false`.
+    private func requireAdditionalDirectoriesCapability(
+        for request: some SessionWorkspaceRequest,
+        method: String
+    ) throws {
+        guard request.hasAdditionalDirectories else { return }
+        try requireCapability(canUseAdditionalDirectories, method: method)
+    }
+
     // MARK: - Registration
 
     /// Adds the model of a session that a request opened to
@@ -362,6 +406,34 @@ protocol MCPServerListRequest {
 extension NewSessionRequest: MCPServerListRequest {}
 
 extension ResumeSessionRequest: MCPServerListRequest {}
+
+/// A request that sets the working directory and the additional workspace
+/// roots of a session.
+///
+/// ``ConnectionModel`` checks the additional directories of each request of
+/// this kind against the capability of the agent, and
+/// ``SessionModel/setWorkspace(of:)`` keeps both values, so a host can
+/// resume the session later.
+protocol SessionWorkspaceRequest {
+    /// The working directory of the session.
+    var cwd: AbsolutePath { get }
+
+    /// The additional workspace roots of the session, or `nil` when the
+    /// request sends no list.
+    var additionalDirectories: [AbsolutePath]? { get }
+}
+
+extension SessionWorkspaceRequest {
+    /// Tells whether the request sends at least one additional directory.
+    /// An omitted list and an empty list activate no additional root.
+    var hasAdditionalDirectories: Bool {
+        !(additionalDirectories ?? []).isEmpty
+    }
+}
+
+extension NewSessionRequest: SessionWorkspaceRequest {}
+
+extension ResumeSessionRequest: SessionWorkspaceRequest {}
 
 extension MCPServer {
     /// The name and the wire transport of the server, for a log message.
