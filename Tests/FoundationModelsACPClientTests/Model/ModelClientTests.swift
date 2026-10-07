@@ -5,7 +5,9 @@ import Testing
 
 // The tests of `ModelClient`, the router that a `ConnectionModel` serves: each
 // route of a permission request, an elicitation and an `elicitation/complete`
-// to the open session models, and each fallback.
+// to the open session models, and each fallback. A cancel of the turn sends
+// the `cancelled` outcome of each pending permission request back to the
+// agent.
 //
 // `InMemoryTransport.pair()` gives the real ACP wire, with a
 // `ScriptedStubAgent` on the agent end. The test sends each request through
@@ -80,6 +82,9 @@ struct ModelClientTests {
     /// The form values that the user gives to an accepted form elicitation.
     private let formContent: JSONValue = .object(["name": .string("orion")])
 
+    /// The working directory of the session that a test opens over the wire.
+    private let workingDirectory = AbsolutePath(rawValue: "/")
+
     // MARK: - Permission requests
 
     @Test func aPermissionRequestForAnOpenSessionLandsInItsModelAndTheChoiceReachesTheAgent() async throws {
@@ -112,6 +117,31 @@ struct ModelClientTests {
 
         #expect(response.outcome == .cancelled)
         #expect(routed.loggedMessages.count == 1)
+    }
+
+    @Test func cancelSendsTheCancelledOutcomeToTheAgent() async throws {
+        let connected = await ConnectedModel { connection in
+            ScriptedStubAgent(
+                connection: connection,
+                session: testSession,
+                script: [],
+                permissionRequest: SessionModelFixtures.permissionRequest()
+            )
+        }
+        try await connected.initialize()
+        let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
+        let turn = Task { try await session.prompt([textBlock("Deploy the build.")]) }
+        try await waitUntil { !session.pendingPermissions.isEmpty }
+
+        try await session.cancel()
+
+        // The require stops the test before the await below, which would
+        // suspend until the time limit when the permission stays pending.
+        try #require(session.pendingPermissions.isEmpty)
+        // The stub agent answers the prompt only after the permission request
+        // returned, so the outcome is in the record when the turn ends.
+        _ = try await turn.value
+        #expect(connected.permissionOutcomes == [.cancelled])
     }
 
     // MARK: - Elicitations

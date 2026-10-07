@@ -60,6 +60,12 @@ struct ConnectedModel {
         builtAgents.elements.last?.newSessionMCPServers ?? []
     }
 
+    /// The outcome of each permission request that the client answered, in
+    /// answer order.
+    var permissionOutcomes: [RequestPermissionOutcome] {
+        builtAgents.elements.last?.permissionOutcomes ?? []
+    }
+
     /// The `mcpServers` field of each `session/resume` that the agent got,
     /// in arrival order. A `nil` item is a request with no field.
     var resumeSessionMCPServers: [[MCPServer]?] {

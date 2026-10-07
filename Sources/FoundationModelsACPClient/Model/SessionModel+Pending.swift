@@ -14,6 +14,11 @@ extension SessionModel {
     /// More than one request can be pending at the same time. Resolve one
     /// request with ``selectPermission(_:option:)`` or with
     /// ``cancelPermission(_:)``.
+    ///
+    /// A cancel of the turn with ``cancel(meta:)`` answers each request with
+    /// the `cancelled` outcome and makes this list empty, as the ACP prompt
+    /// lifecycle requires. Thus the UI does not need to remove the requests
+    /// itself after a cancel.
     public var pendingPermissions: [PendingPermissionRequest] {
         permissions.items
     }
@@ -36,11 +41,13 @@ extension SessionModel {
     /// resolutions arrives:
     ///
     /// - ``selectPermission(_:option:)`` answers with the selected option.
-    /// - ``cancelPermission(_:)`` and ``cancelAllPending()`` answer
-    ///   `cancelled`.
+    /// - ``cancelPermission(_:)``, ``cancelAllPending()``, and
+    ///   ``cancel(meta:)`` answer `cancelled`.
     /// - Cancellation of the surrounding task answers `cancelled`. The
     ///   connection cancels that task when the agent withdraws the request,
-    ///   when the turn gets cancelled, or when the transport closes.
+    ///   or when the transport closes. A `session/cancel` that the client
+    ///   sends does not cancel that task, so ``cancel(meta:)`` answers the
+    ///   request itself.
     ///
     /// - Parameter request: The permission request from the agent.
     /// - Returns: The user's decision, or the `cancelled` outcome.

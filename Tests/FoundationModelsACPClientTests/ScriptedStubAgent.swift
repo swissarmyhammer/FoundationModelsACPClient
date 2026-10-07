@@ -48,7 +48,8 @@ import Synchronization
 /// before it sends the script. The prompt turn then ends only after the
 /// client answered, which is how a test proves that a headless client
 /// refuses at once rather than waiting for a person. A stub built with a
-/// permission request asks for that permission first, in the same way.
+/// permission request asks for that permission first, in the same way, and
+/// records the outcome of the answer in ``permissionOutcomes``.
 ///
 /// A stub built with a prompt error refuses each prompt with that error, and
 /// sends no update. `ContentSafetyTests` uses it to prove that the message
@@ -179,6 +180,19 @@ final class ScriptedStubAgent: Agent {
     /// The permission request to send when a prompt arrives, or `nil` to
     /// send none.
     private let permissionRequest: RequestPermissionRequest?
+
+    /// The outcome of each permission request that the client answered, in
+    /// answer order.
+    ///
+    /// The connection serves `session/prompt` on a task of its own, so the
+    /// record must tolerate a write from a thread other than the test body's.
+    private let permissionOutcomeRecord = ThreadSafeBuffer<RequestPermissionOutcome>()
+
+    /// The outcome of each permission request that the client answered, in
+    /// answer order.
+    var permissionOutcomes: [RequestPermissionOutcome] {
+        permissionOutcomeRecord.elements
+    }
 
     /// The error to refuse each prompt with, or `nil` to answer each prompt.
     private let promptError: RequestError?
@@ -471,7 +485,8 @@ final class ScriptedStubAgent: Agent {
             throw promptError
         }
         if let permissionRequest {
-            _ = try await connection.requestPermission(permissionRequest)
+            let response = try await connection.requestPermission(permissionRequest)
+            permissionOutcomeRecord.append(response.outcome)
         }
         if let elicitation {
             _ = try await connection.createElicitation(elicitation)

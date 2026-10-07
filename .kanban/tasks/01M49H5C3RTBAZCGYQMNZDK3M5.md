@@ -1,8 +1,34 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: 8a80
+comments:
+- actor: claude-code
+  id: 01m4b7akafb13pkns5yrnty3yt
+  text: |-
+    Research:
+    - `ClientSideConnection.sessionCancel` (FoundationModelsACP) only sends the notification. It does not cancel the inbound `session/request_permission` handler tasks. Thus over the wire, a pending permission stays suspended after `session/cancel` until the model resolves it.
+    - `ScriptedStubAgent.prompt` sends `permissionRequest` and discards the response. The wire test needs a record of the outcome: add `permissionOutcomes` to the stub and to `ConnectedModel`.
+    - `FakeSessionRequestSender.cancel` cannot fail now. Add a way to make it throw (`failCancels(with:)`).
+    - `ConnectionError` is Hashable, so `#expect(throws: ConnectionError.closed)` works.
+    - The session-scoped elicitations stay pending already; `cancelKeepsPendingElicitations` is a guard test for the decision and passes before the change.
+  timestamp: 2026-10-07T13:02:28.687528+00:00
+- actor: claude-code
+  id: 01m4b7hr4038bmat1k8k3sy0gh
+  text: |-
+    Implementation landed (TDD).
+    - RED: `cancelAnswersEachPendingPermissionWithCancelled`, `aCancelThatFailsToSendStillCancelsThePermissions` and `cancelSendsTheCancelledOutcomeToTheAgent` failed at `pendingPermissions.isEmpty`. `cancelKeepsPendingElicitations` passed before the change, because it guards the elicitation decision; it did not fail first.
+    - Each test uses `try #require(pendingPermissions.isEmpty)` before it awaits the permission task, so a regression fails at once and does not wait until the 1-minute suite time limit.
+    - GREEN: `SessionModel.cancel(meta:)` calls `permissions.cancelAll()` before `requestSender.cancel(...)`. Doc comments of `cancel(meta:)`, `pendingPermissions`, `awaitPermissionDecision(for:)` and the file headers are updated. The old bullet on `awaitPermissionDecision(for:)` said the connection cancels the task "when the turn gets cancelled". That was not true, so the bullet is corrected.
+    - Only production caller: `TurnRunner` (Ctrl-C). The CLI declines each permission at once, so nothing changes there.
+    - Test support: `FakeSessionRequestSender.failCancels(with:)`, `ScriptedStubAgent.permissionOutcomes`, `ConnectedModel.permissionOutcomes`.
+    - Found during the work: SwiftPM shows `warning: missing creator for mutated node ... mlx-swift_Cmlx.bundle` again. This is a dependency build warning, not a warning from this change. It is recorded as the new task ^9r2wsag.
+
+    ### implement — changed
+    - evidence: 7 files — Sources/FoundationModelsACPClient/Model/SessionModel+Prompt.swift, Sources/FoundationModelsACPClient/Model/SessionModel+Pending.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelPendingTests.swift, Tests/FoundationModelsACPClientTests/Model/ModelClientTests.swift, Tests/FoundationModelsACPClientTests/Model/FakeSessionRequestSender.swift, Tests/FoundationModelsACPClientTests/Model/ConnectedModel.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift. `swift test --filter "SessionModelPendingTests|ModelClientTests"`: 29 tests passed. `swift test`: 531 tests in 45 suites passed, 0 failures. One SwiftPM build warning from the mlx-swift dependency (see ^9r2wsag).
+    - next: /review
+  timestamp: 2026-10-07T13:06:22.976315+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'Model: SessionModel.cancel answers each pending permission request with the cancelled outcome (ACP MUST)'
 ---
 ## What
@@ -18,11 +44,11 @@ Now `SessionModel.cancel(meta:)` (`Sources/FoundationModelsACPClient/Model/Sessi
 
 ## Acceptance Criteria
 
-- [ ] After `cancel(meta:)`, `pendingPermissions` is empty.
-- [ ] Each suspended `awaitPermissionDecision(for:)` returns the `cancelled` outcome.
-- [ ] Over a real connection, the agent gets the `cancelled` outcome for each pending `session/request_permission`.
-- [ ] Pending session-scoped elicitations stay pending.
-- [ ] When the notification send throws, the permissions are still cancelled and the call throws the error.
+- [x] After `cancel(meta:)`, `pendingPermissions` is empty.
+- [x] Each suspended `awaitPermissionDecision(for:)` returns the `cancelled` outcome.
+- [x] Over a real connection, the agent gets the `cancelled` outcome for each pending `session/request_permission`.
+- [x] Pending session-scoped elicitations stay pending.
+- [x] When the notification send throws, the permissions are still cancelled and the call throws the error.
 
 ## Tests
 
@@ -39,6 +65,6 @@ Use /tdd — write failing tests first, then implement to make them pass.
 
 ## Subtasks
 
-- [ ] Write the four failing tests.
-- [ ] Cancel the pending permissions in `cancel(meta:)`, before the notification.
-- [ ] Update the doc comments with the spec rule and the elicitation decision.
+- [x] Write the four failing tests.
+- [x] Cancel the pending permissions in `cancel(meta:)`, before the notification.
+- [x] Update the doc comments with the spec rule and the elicitation decision.

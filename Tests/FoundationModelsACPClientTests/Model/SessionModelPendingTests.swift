@@ -8,8 +8,9 @@ import Testing
 // session-scoped elicitations become observable pending state on the model. A
 // resolution from the UI, a cancellation of the agent's call, and
 // `cancelAllPending()` each remove the item and resume its continuation one
-// time. An elicitation that names a tool call links to the entry of that tool
-// call while it is pending.
+// time. A cancel of the turn answers each permission request and keeps each
+// elicitation. An elicitation that names a tool call links to the entry of
+// that tool call while it is pending.
 //
 // The wire round trips and the capability test of `PermissionRequestTests` and
 // `ElicitationTests` test the `Client` conformance, which the model does not
@@ -324,5 +325,56 @@ struct SessionModelPendingTests {
         #expect(formResponse == cancel)
         let urlResponse = await urlTask.value
         #expect(urlResponse == cancel)
+    }
+
+    // MARK: - Cancel of the turn
+
+    @Test func cancelAnswersEachPendingPermissionWithCancelled() async throws {
+        let sender = FakeSessionRequestSender()
+        let model = SessionModel(sessionId: testSession, requestSender: sender)
+        let firstTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
+        let secondTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
+
+        try await model.cancel()
+
+        // The require stops the test before the awaits below, which would
+        // suspend until the time limit when a permission stays pending.
+        try #require(model.pendingPermissions.isEmpty)
+        let firstResponse = await firstTask.value
+        #expect(firstResponse.outcome == .cancelled)
+        let secondResponse = await secondTask.value
+        #expect(secondResponse.outcome == .cancelled)
+        #expect(sender.cancelNotifications.count == 1)
+    }
+
+    @Test func cancelKeepsPendingElicitations() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        let request = sessionFormRequest()
+        let task = try await startElicitation(on: model, request)
+
+        try await model.cancel()
+
+        // A session-scoped elicitation can belong to work that is not the
+        // turn, so the cancel of the turn does not answer it.
+        #expect(model.pendingElicitations.map(\.request) == [request])
+        model.cancelElicitation(try #require(model.pendingElicitations.first).id)
+        _ = await task.value
+    }
+
+    @Test func aCancelThatFailsToSendStillCancelsThePermissions() async throws {
+        let sender = FakeSessionRequestSender()
+        sender.failCancels(with: ConnectionError.closed)
+        let model = SessionModel(sessionId: testSession, requestSender: sender)
+        let task = try await SessionModelFixtures.startPermission(on: model)
+
+        await #expect(throws: ConnectionError.closed) {
+            try await model.cancel()
+        }
+
+        // The user asked to stop the turn, so the permission does not wait
+        // for an agent that the notification did not reach.
+        try #require(model.pendingPermissions.isEmpty)
+        let response = await task.value
+        #expect(response.outcome == .cancelled)
     }
 }

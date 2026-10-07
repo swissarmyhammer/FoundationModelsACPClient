@@ -2,9 +2,10 @@ import Foundation
 import FoundationModelsACP
 
 // The requests of a session: the prompt, with its local pending user message
-// and its error entry, the cancel notification, and the set-config-option
-// request. Each request goes through the injected `SessionRequestSender`.
-// A `_meta` parameter lets the caller give the trace parent of the request.
+// and its error entry, the cancel of the turn, which also answers the pending
+// permission requests, and the set-config-option request. Each request goes
+// through the injected `SessionRequestSender`. A `_meta` parameter lets the
+// caller give the trace parent of the request.
 
 extension SessionModel {
     /// Sends `session/prompt` with the content as the user message.
@@ -62,7 +63,20 @@ extension SessionModel {
         appendLocalEntry(.error(ErrorEntry(code: code, message: message, data: data)))
     }
 
-    /// Sends the `session/cancel` notification for this session.
+    /// Cancels the turn: answers each pending permission request with the
+    /// `cancelled` outcome, and then sends the `session/cancel` notification
+    /// for this session.
+    ///
+    /// The ACP prompt lifecycle says that the client MUST respond to all
+    /// pending `session/request_permission` requests with the `cancelled`
+    /// outcome when it cancels a turn. Thus ``pendingPermissions`` is empty
+    /// before the notification goes out. The permissions are cancelled also
+    /// when the send fails, because the user asked to stop the turn.
+    ///
+    /// The pending session-scoped elicitations stay pending. The spec gives
+    /// no such rule for elicitations, and an elicitation can belong to work
+    /// that is not the turn. Use ``cancelElicitation(_:)`` or
+    /// ``cancelAllPending()`` to answer them.
     ///
     /// The agent confirms the cancellation with an idle `state_update` that
     /// has the `cancelled` stop reason, and not with this call.
@@ -77,6 +91,7 @@ extension SessionModel {
     /// - Throws: The error of the sender: `ConnectionError` after a
     ///   disconnect.
     public func cancel(meta: JSONValue? = nil) async throws {
+        permissions.cancelAll()
         try await requestSender.cancel(CancelSessionNotification(sessionId: sessionId, meta: meta))
     }
 

@@ -23,6 +23,10 @@ final class FakeSessionRequestSender: SessionRequestSender {
         /// The cancel notifications, in arrival order.
         var cancelNotifications: [CancelSessionNotification] = []
 
+        /// The error that each cancel throws after the fake records it, or
+        /// `nil` to send each cancel.
+        var cancelError: (any Error)?
+
         /// The set-config-option requests, in arrival order.
         var configOptionRequests: [SetSessionConfigOptionRequest] = []
 
@@ -92,11 +96,26 @@ final class FakeSessionRequestSender: SessionRequestSender {
         }
     }
 
+    /// Makes each later cancel throw an error, as a send that fails after a
+    /// disconnect does.
+    ///
+    /// - Parameter error: The error that each cancel throws.
+    func failCancels(with error: any Error) {
+        state.withLock { $0.cancelError = error }
+    }
+
     /// Records the cancel notification.
     ///
     /// - Parameter notification: The cancel notification.
+    /// - Throws: The error of ``failCancels(with:)``, when the test set one.
     func cancel(_ notification: CancelSessionNotification) async throws {
-        state.withLock { $0.cancelNotifications.append(notification) }
+        let error = state.withLock { state -> (any Error)? in
+            state.cancelNotifications.append(notification)
+            return state.cancelError
+        }
+        if let error {
+            throw error
+        }
     }
 
     /// Records the set-config-option request.
