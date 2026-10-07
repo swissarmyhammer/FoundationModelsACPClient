@@ -29,8 +29,24 @@ comments:
     - evidence: 3 files — Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelInitializeTests.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelElicitationTests.swift. `swift test --filter ConnectionModelInitializeTests`: 27 passed. `swift test`: 549 tests in 46 suites passed, 0 failed. The only warning is the accepted MLX "missing creator for mutated node" warning (^zws9qzt).
     - next: /review. The task stays in doing.
   timestamp: 2026-10-07T13:50:43.274718+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4bae80fc8v215cw3tefcf1g
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (8c12a70): 0 findings, 0 confirmed, 0 refuted; 3 files reviewed, 4 .kanban files excluded by .reviewignore. No prior Review Findings sections.
+    - next: task moved to done.
+  timestamp: 2026-10-07T13:56:53.903383+00:00
+- actor: claude-code
+  id: 01m4baej0mzjs2m8nycs1d0na1
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files
+    - test: green — swift test, 549 passed, 0 failed, 0 skipped
+    - commit: 8c12a70
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-07T13:57:04.148432+00:00
+position_column: done
+position_ordinal: db80
 title: 'Model: canLogout follows the ACP rule, and login refuses a terminal method (ACP MUST NOT)'
 ---
 ## What
