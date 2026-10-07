@@ -62,10 +62,26 @@ comments:
     - evidence: 3 files — Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+TerminalAuth.swift. `swift test`: 568 tests in 49 suites passed, 0 failed; the only warning is the accepted MLX warning (task zws9qzt).
     - next: /review. The task stays in doing. Nothing is committed.
   timestamp: 2026-10-07T15:54:13.215188+00:00
+- actor: claude-code
+  id: 01m4bhg6781evt7m95pswgf6nv
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (36f3249), 0 findings (3 files reviewed, 7 validator runs attempted, 0 failed). All prior items are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-07T16:00:17.640767+00:00
+- actor: claude-code
+  id: 01m4bhgdr5pa2x3se01vnc0nj4
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 3 files (rename `advertisedTerminalAuth` to `hasAdvertisedTerminalAuth`)
+    - test: green — swift test, 568 passed, 0 failed, 0 skipped
+    - commit: 36f3249
+    - review: clean — 0 findings; the earlier finding at ConnectionModel.swift:87 is checked; task moved to done
+  timestamp: 2026-10-07T16:00:25.349679+00:00
 depends_on:
 - 01M49GF51TG4H90K3EX73C1NKK
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: df80
 title: 'Model: run a terminal auth method through a host runner, then require a reconnect and an initialize'
 ---
 ## What

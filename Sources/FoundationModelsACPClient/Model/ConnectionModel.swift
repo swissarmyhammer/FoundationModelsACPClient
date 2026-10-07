@@ -240,8 +240,11 @@ public final class ConnectionModel {
     /// close a session cleanly calls ``close(_:)`` for it before this call.
     ///
     /// The close stops the read of the transport, which ends its byte
-    /// stream. For an ``AgentProcess`` transport, the end of that stream
-    /// ends the agent process.
+    /// stream. The agent then sees the end of its input. For an
+    /// ``AgentProcess`` transport, the end of that stream ends the agent
+    /// process. For an `InMemoryTransport` pair, the stream of the agent end
+    /// ends too, so an in-process agent connection closes with
+    /// `ConnectionCloseReason.endOfInput`.
     ///
     /// With no open connection, the call returns at once and changes
     /// nothing. After this call, ``connect(over:logger:bufferLimits:client:)``

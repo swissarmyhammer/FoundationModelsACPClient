@@ -33,6 +33,14 @@ extension ConnectionState {
     }
 }
 
+extension ConnectionCloseReason {
+    /// Whether the input stream of the transport finished.
+    fileprivate var isEndOfInput: Bool {
+        guard case .endOfInput = self else { return false }
+        return true
+    }
+}
+
 /// A transport whose byte stream fails when the test calls ``fail(with:)``.
 ///
 /// A write goes nowhere: the tests of this file send no request.
@@ -370,6 +378,20 @@ struct ConnectionModelTests {
         // end can come a short time after the close.
         try await waitUntil { transport.hasEnded }
         #expect(model.state == .disconnected)
+    }
+
+    @Test func disconnectEndsAnInProcessAgent() async {
+        let model = ConnectionModel()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let agentConnection = await makeAgentConnection(over: agentEnd)
+        _ = await model.connect(over: clientEnd)
+
+        await model.disconnect()
+
+        // The stop of the client read ends the byte stream of the agent end.
+        // Without that end, this wait never ends, and the suite time limit
+        // records a time-out.
+        #expect(await agentConnection.closed.isEndOfInput)
     }
 
     @Test func disconnectTwiceOrWithNoConnectionChangesNothing() async {
