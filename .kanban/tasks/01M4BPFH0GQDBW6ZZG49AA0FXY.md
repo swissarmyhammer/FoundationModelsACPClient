@@ -37,8 +37,31 @@ comments:
     - note: the only warning is "missing creator for mutated node" from the MLX bundle. The task accepts it. No warning came from .build/checkouts.
     - next: review. I made no code change.
   timestamp: 2026-10-07T18:07:17.970087+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4brsa07knr3f1gb38eseg86
+  text: |-
+    ### commit — changed
+    - evidence: c4869c8 feat(model)!: decode an _mcp_server_status update that has no transport member
+    - next: review
+  timestamp: 2026-10-07T18:07:36.455831+00:00
+- actor: claude-code
+  id: 01m4bs1tj13pjk715cbqwfc0q3
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit c4869c8). Zero findings (attempted 7, confirmed 0, refuted 0, failed 0). 5 files reviewed. 4 .kanban files not reviewed because .reviewignore excludes them.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-07T18:12:15.553548+00:00
+- actor: claude-code
+  id: 01m4bs21aajkzqzkva889xw579
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files
+    - test: green — swift test, 572 tests in 49 suites pass; IntegrationTests build passes
+    - commit: c4869c8
+    - review: clean — zero findings; task is done
+  timestamp: 2026-10-07T18:12:22.474033+00:00
+position_column: done
+position_ordinal: e280
 title: 'Model: decode an _mcp_server_status update that has no transport member'
 ---
 ## What

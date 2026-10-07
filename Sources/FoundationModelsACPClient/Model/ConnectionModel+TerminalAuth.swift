@@ -51,7 +51,10 @@ extension ConnectionModel {
     ///
     /// When the last ``initialize(_:)`` did not send
     /// `capabilities.auth.terminal`, or the agent lists no `terminal` method
-    /// with `methodId`, the call does not call `runner` and changes no state.
+    /// with `methodId`, the call does not call `runner`, and ``authState``
+    /// becomes ``AuthState/failed(_:)`` with the terminal login operation and
+    /// ``AuthFailure/Reason/unsupported(method:)`` with
+    /// ``ConnectionModelError/terminalAuthOperation``.
     ///
     /// - Parameters:
     ///   - methodId: The id of a `terminal` auth method that the agent lists.
@@ -103,6 +106,9 @@ extension ConnectionModel {
 
     /// Gives the `terminal` method that the model can run.
     ///
+    /// When the model must not run the method, ``authState`` records the
+    /// unsupported terminal login before the call throws.
+    ///
     /// - Parameter methodId: The id of the method.
     /// - Returns: The `terminal` method that the agent lists with `methodId`.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when the last
@@ -110,7 +116,7 @@ extension ConnectionModel {
     ///   agent lists no `terminal` method with `methodId`.
     private func runnableTerminalMethod(_ methodId: AuthMethodId) throws -> AuthMethodTerminal {
         guard hasAdvertisedTerminalAuth, let method = listedTerminalMethod(methodId) else {
-            throw ConnectionModelError.unsupported(method: ConnectionModelError.terminalAuthOperation)
+            throw recordUnsupported(of: .terminalLogin(methodId), method: ConnectionModelError.terminalAuthOperation)
         }
         return method
     }

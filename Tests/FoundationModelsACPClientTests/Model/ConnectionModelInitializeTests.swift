@@ -71,6 +71,39 @@ enum InitializeFixtures {
     static func closedFailure(of operation: AuthFailure.Operation) -> AuthFailure {
         AuthFailure(operation: operation, reason: .request(RequestError(reporting: ConnectionError.closed)))
     }
+
+    /// The failure that a login records when the model must not send it.
+    ///
+    /// - Parameter methodId: The method id of the login request.
+    /// - Returns: The failure of the login, with the unsupported reason of
+    ///   `auth/login`.
+    static func unsupportedLoginFailure(of methodId: AuthMethodId) -> AuthFailure {
+        AuthFailure(operation: .login(methodId), reason: .unsupported(method: ClientRequestSpan.Method.login))
+    }
+
+    /// The failure that a logout records when the agent does not serve
+    /// `auth/logout`.
+    static let unsupportedLogoutFailure = AuthFailure(
+        operation: .logout,
+        reason: .unsupported(method: ClientRequestSpan.Method.logout)
+    )
+
+    /// The exit status of a terminal auth process that failed, for the
+    /// message tests.
+    static let failedExitStatus: Int32 = 1
+
+    /// The message of a terminal reason that has one.
+    static let terminalMessage = "The browser did not open."
+
+    /// One reason of each kind, and each form of the terminal reason.
+    static let reasons: [AuthFailure.Reason] = [
+        .request(loginRefusal),
+        .terminal(exitStatus: failedExitStatus, message: terminalMessage),
+        .terminal(exitStatus: failedExitStatus, message: nil),
+        .terminal(exitStatus: nil, message: nil),
+        .unsupported(method: ClientRequestSpan.Method.login),
+        .unsupported(method: ConnectionModelError.terminalAuthOperation),
+    ]
 }
 
 /// The capability flags of a model, in one value, so a test compares them
@@ -398,7 +431,19 @@ struct ConnectionModelInitializeTests {
         #expect(connected.model.authState == .required([InitializeFixtures.agentMethod]))
     }
 
-    @Test func aLogoutWithNoCapabilityKeepsTheAuthState() async throws {
+    @Test func anUnsupportedLoginRecordsTheFailure() async throws {
+        let connected = await ConnectedModel()
+        try await connected.initialize()
+
+        await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.login)) {
+            try await connected.model.login(InitializeFixtures.login)
+        }
+
+        let expected = InitializeFixtures.unsupportedLoginFailure(of: InitializeFixtures.agentMethodId)
+        #expect(connected.model.authState == .failed(expected))
+    }
+
+    @Test func anUnsupportedLogoutRecordsTheFailure() async throws {
         let connected = await ConnectedModel()
         try await connected.initialize()
 
@@ -406,7 +451,29 @@ struct ConnectionModelInitializeTests {
             try await connected.model.logout(LogoutAuthRequest())
         }
 
-        #expect(connected.model.authState == .notRequired)
+        #expect(connected.model.authState == .failed(InitializeFixtures.unsupportedLogoutFailure))
+    }
+
+    // MARK: - Failure messages
+
+    @Test(arguments: InitializeFixtures.reasons)
+    func eachReasonHasAMessage(_ reason: AuthFailure.Reason) {
+        #expect(!reason.message.isEmpty)
+    }
+
+    @Test func aRequestReasonGivesTheMessageOfTheError() {
+        let reason = AuthFailure.Reason.request(InitializeFixtures.loginRefusal)
+
+        #expect(reason.message == InitializeFixtures.loginRefusal.message)
+    }
+
+    @Test func aTerminalReasonWithAMessageGivesThatMessage() {
+        let reason = AuthFailure.Reason.terminal(
+            exitStatus: InitializeFixtures.failedExitStatus,
+            message: InitializeFixtures.terminalMessage
+        )
+
+        #expect(reason.message == InitializeFixtures.terminalMessage)
     }
 
     @Test func loginWithATerminalMethodThrowsAndSendsNothing() async throws {
@@ -453,7 +520,7 @@ struct ConnectionModelInitializeTests {
 
     /// Sends a login that the model must refuse, and expects that the model
     /// throws ``ConnectionModelError/unsupported(method:)``, sends no frame,
-    /// and keeps the auth state.
+    /// and records the unsupported login in the auth state.
     ///
     /// A second initialize makes a round trip after the refused login, so a
     /// login that went out would be in the record before its answer. No sleep
@@ -470,7 +537,7 @@ struct ConnectionModelInitializeTests {
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.login)) {
             try await connected.model.login(request)
         }
-        #expect(connected.model.authState == .required(methods))
+        #expect(connected.model.authState == .failed(InitializeFixtures.unsupportedLoginFailure(of: request.methodId)))
         try await connected.initialize()
 
         #expect(connected.receivedMethods == [ClientRequestSpan.Method.initialize, ClientRequestSpan.Method.initialize])

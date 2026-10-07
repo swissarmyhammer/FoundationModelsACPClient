@@ -192,9 +192,10 @@ extension ConnectionModel {
     ///
     /// The client sends only the id of an `agent` method that the agent
     /// lists. When `request.methodId` is the id of a `terminal` method, or an
-    /// id that the agent does not list, the call sends nothing and changes no
-    /// state. When no connection is open, the call sends nothing and changes
-    /// no state.
+    /// id that the agent does not list, the call sends nothing, and
+    /// ``authState`` becomes ``AuthState/failed(_:)`` with the login
+    /// operation and ``AuthFailure/Reason/unsupported(method:)``. When no
+    /// connection is open, the call sends nothing and changes no state.
     ///
     /// - Parameter request: The login request.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
@@ -202,7 +203,9 @@ extension ConnectionModel {
     ///   `ConnectionError.closed` when no connection is open, the
     ///   `RequestError` of the agent, or the error of the connection.
     public func login(_ request: LoginAuthRequest) async throws {
-        try requireCapability(canLogin(with: request.methodId), method: ClientRequestSpan.Method.login)
+        guard canLogin(with: request.methodId) else {
+            throw recordUnsupported(of: .login(request.methodId), method: ClientRequestSpan.Method.login)
+        }
         let connection = try openConnection()
         try await recordingFailure(of: .login(request.methodId)) {
             _ = try await ClientRequestSpan.send(request) { try await connection.loginAuth($0) }
@@ -216,15 +219,19 @@ extension ConnectionModel {
     /// ``AuthState/required(_:)`` with the auth methods of the agent. When
     /// the request fails, ``authState`` becomes ``AuthState/failed(_:)`` with
     /// the logout operation and the JSON-RPC form of the error, and no other
-    /// state changes. When ``canLogout`` is `false`, or when no connection is
-    /// open, the call sends nothing and changes no state.
+    /// state changes. When ``canLogout`` is `false`, the call sends nothing,
+    /// and ``authState`` becomes ``AuthState/failed(_:)`` with the logout
+    /// operation and ``AuthFailure/Reason/unsupported(method:)``. When no
+    /// connection is open, the call sends nothing and changes no state.
     ///
     /// - Parameter request: The logout request.
     /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
     ///   ``canLogout`` is `false`, `ConnectionError.closed` when no connection
     ///   is open, or the error of the agent or of the connection.
     public func logout(_ request: LogoutAuthRequest) async throws {
-        try requireCapability(canLogout, method: ClientRequestSpan.Method.logout)
+        guard canLogout else {
+            throw recordUnsupported(of: .logout, method: ClientRequestSpan.Method.logout)
+        }
         let connection = try openConnection()
         try await recordingFailure(of: .logout) {
             _ = try await ClientRequestSpan.send(request) { try await connection.logoutAuth($0) }
@@ -252,6 +259,26 @@ extension ConnectionModel {
             authState = .failed(AuthFailure(operation: operation, reason: .request(RequestError(reporting: error))))
             throw error
         }
+    }
+
+    /// Records in ``authState`` an auth operation that the agent does not
+    /// advertise, and gives the error that the operation throws.
+    ///
+    /// A call that the agent does not advertise sends nothing, but a UI that
+    /// shows only ``authState`` must see the refusal. Thus ``authState``
+    /// becomes ``AuthState/failed(_:)`` with
+    /// ``AuthFailure/Reason/unsupported(method:)``.
+    ///
+    /// - Parameters:
+    ///   - operation: The auth operation that the model refuses.
+    ///   - method: The ACP wire method of the operation, or
+    ///     ``ConnectionModelError/terminalAuthOperation`` for a terminal
+    ///     login.
+    /// - Returns: ``ConnectionModelError/unsupported(method:)`` with
+    ///   `method`, for the caller to throw.
+    func recordUnsupported(of operation: AuthFailure.Operation, method: String) -> ConnectionModelError {
+        authState = .failed(AuthFailure(operation: operation, reason: .unsupported(method: method)))
+        return .unsupported(method: method)
     }
 
     // MARK: - Connection

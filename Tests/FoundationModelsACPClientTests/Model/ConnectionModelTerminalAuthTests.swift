@@ -65,6 +65,19 @@ private enum TerminalAuthFixtures {
             reason: .terminal(exitStatus: exitStatus, message: message)
         )
     }
+
+    /// The failure that a terminal login records when the model must not run
+    /// the method.
+    ///
+    /// - Parameter methodId: The method id of the terminal login.
+    /// - Returns: The failure of the terminal login, with the unsupported
+    ///   reason of ``ConnectionModelError/terminalAuthOperation``.
+    static func unsupportedFailure(of methodId: AuthMethodId) -> AuthFailure {
+        AuthFailure(
+            operation: .terminalLogin(methodId),
+            reason: .unsupported(method: ConnectionModelError.terminalAuthOperation)
+        )
+    }
 }
 
 /// The error of a ``FakeTerminalAuthRunner`` that did not start the program.
@@ -248,7 +261,8 @@ struct ConnectionModelTerminalAuthTests {
         }
 
         #expect(runner.calls.isEmpty)
-        #expect(connected.model.authState == .required(TerminalAuthFixtures.authMethods))
+        let expected = TerminalAuthFixtures.unsupportedFailure(of: InitializeFixtures.terminalMethodId)
+        #expect(connected.model.authState == .failed(expected))
     }
 
     @Test func anAgentMethodIdIsNotRunInATerminal() async throws {
@@ -260,7 +274,21 @@ struct ConnectionModelTerminalAuthTests {
         }
 
         #expect(runner.calls.isEmpty)
-        #expect(connected.model.authState == .required(TerminalAuthFixtures.authMethods))
+        let expected = TerminalAuthFixtures.unsupportedFailure(of: InitializeFixtures.agentMethodId)
+        #expect(connected.model.authState == .failed(expected))
+    }
+
+    @Test func anUnsupportedTerminalLoginRecordsTheFailure() async throws {
+        let connected = try await initializedModel()
+        let runner = FakeTerminalAuthRunner(outcome: .success(0))
+        let unlistedMethodId = AuthMethodId(rawValue: "unlisted")
+
+        await #expect(throws: ConnectionModelError.unsupported(method: ConnectionModelError.terminalAuthOperation)) {
+            try await connected.model.loginWithTerminal(unlistedMethodId, runner: runner)
+        }
+
+        #expect(runner.calls.isEmpty)
+        #expect(connected.model.authState == .failed(TerminalAuthFixtures.unsupportedFailure(of: unlistedMethodId)))
     }
 
     // MARK: - Helpers
