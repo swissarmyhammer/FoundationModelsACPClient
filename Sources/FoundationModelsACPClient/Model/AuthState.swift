@@ -5,7 +5,8 @@ import FoundationModelsACP
 /// ``ConnectionModel`` sets the state from the `authMethods` of the
 /// `initialize` answer, and changes it on each login and logout, and on each
 /// `-32000` (`authentication_required`) answer of the agent to a session
-/// request or a list request.
+/// request or a list request, or to a prompt or a configuration change of a
+/// session model.
 public enum AuthState: Hashable, Sendable {
     /// The connection did not initialize yet, so the auth methods of the
     /// agent are not known.

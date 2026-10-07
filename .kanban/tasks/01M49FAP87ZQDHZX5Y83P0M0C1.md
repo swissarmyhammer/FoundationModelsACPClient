@@ -60,10 +60,26 @@ comments:
     - evidence: 1 file — Tests/FoundationModelsACPClientTests/Model/SessionModelPendingTests.swift. `swift build && swift test`: 555 tests in 48 suites passed, 0 failures. The only warning is the accepted MLX "missing creator" warning (task zws9qzt).
     - next: /review (task stays in doing). Not committed.
   timestamp: 2026-10-07T15:07:46.676606+00:00
+- actor: claude-code
+  id: 01m4beq3448azje66eydkbh429
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (6ab860e): 0 findings (0 confirmed, 0 refuted, 7 attempted, 0 failed). Every prior item in the Review Findings section is checked.
+    - next: none. The task is in done.
+  timestamp: 2026-10-07T15:11:38.116888+00:00
+- actor: claude-code
+  id: 01m4beqat3gcvdjnd97rfpab1g
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (`try` covers only the `#require` call)
+    - test: green — swift test, 555 passed, 0 failed, 0 skipped
+    - commit: 6ab860e
+    - review: clean — 0 findings; the earlier finding at SessionModelPendingTests.swift:146 is checked; task moved to done
+  timestamp: 2026-10-07T15:11:45.987709+00:00
 depends_on:
 - 01M49FA5BK7YA0BJ57PQCDQCM3
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: dd80
 title: 'Model: selectPermission and cancelPermission wait until the response frame is written'
 ---
 ## What

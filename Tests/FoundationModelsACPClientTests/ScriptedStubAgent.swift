@@ -14,7 +14,8 @@ import Synchronization
 /// that error, and sends no update. In the same way, a list error refuses
 /// each `session/list`, and a delete error refuses each `session/delete`.
 /// `ConnectionModelAuthRequiredTests` uses these errors to send a `-32000`
-/// answer to each request of ``ConnectionModel``.
+/// answer to each request of ``ConnectionModel``, and the prompt error and
+/// the set-config-option error to send it to the requests of a session.
 ///
 /// The stub answers `session/new` with the session the script belongs to,
 /// because a test that drives the whole turn path opens a session before it
@@ -47,7 +48,8 @@ import Synchronization
 /// test that drives the other branch of `AgentSession.closeSession(_:)` asks
 /// for an error with another code.
 ///
-/// `session/set_config_option` accepts each request with no option, so a
+/// `session/set_config_option` refuses with the error the test chose, or
+/// accepts each request with no option when the test chose no error, so a
 /// test can prove that the request reached the agent.
 ///
 /// A stub built with an elicitation asks the client for that elicitation
@@ -219,6 +221,10 @@ final class ScriptedStubAgent: Agent {
     /// each delete.
     private let deleteSessionError: RequestError?
 
+    /// The error to refuse each `session/set_config_option` with, or `nil`
+    /// to accept each request.
+    private let setConfigOptionError: RequestError?
+
     /// The updates to send, in order, before the `session/new` answer.
     private let newSessionScript: [SessionUpdate]
 
@@ -336,6 +342,8 @@ final class ScriptedStubAgent: Agent {
     ///     or `nil` to answer each list with the page of its cursor.
     ///   - deleteSessionError: The error to refuse each `session/delete`
     ///     with, or `nil` to accept each delete.
+    ///   - setConfigOptionError: The error to refuse each
+    ///     `session/set_config_option` with, or `nil` to accept each request.
     ///   - newSessionScript: The updates to send before the `session/new`
     ///     answer.
     ///   - afterNewSessionScript: The updates to send after the `session/new`
@@ -380,6 +388,7 @@ final class ScriptedStubAgent: Agent {
         newSessionError: RequestError? = nil,
         listSessionsError: RequestError? = nil,
         deleteSessionError: RequestError? = nil,
+        setConfigOptionError: RequestError? = nil,
         newSessionScript: [SessionUpdate] = [],
         afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
@@ -409,6 +418,7 @@ final class ScriptedStubAgent: Agent {
         self.newSessionError = newSessionError
         self.listSessionsError = listSessionsError
         self.deleteSessionError = deleteSessionError
+        self.setConfigOptionError = setConfigOptionError
         self.newSessionScript = newSessionScript
         self.afterNewSessionScript = afterNewSessionScript
         self.newSessionCommands = newSessionCommands
@@ -515,6 +525,9 @@ final class ScriptedStubAgent: Agent {
 
     func setSessionConfigOption(_ params: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse {
         record(params.meta, of: ClientRequestSpan.Method.setConfigOption)
+        if let setConfigOptionError {
+            throw setConfigOptionError
+        }
         return SetSessionConfigOptionResponse(configOptions: [])
     }
 

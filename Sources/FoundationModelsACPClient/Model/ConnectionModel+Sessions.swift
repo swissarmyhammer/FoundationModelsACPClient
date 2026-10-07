@@ -265,7 +265,9 @@ extension ConnectionModel {
         let subscription = connection.subscribe(to: sessionId)
         let session = makeSessionModel(
             sessionId: sessionId,
-            requestSender: ConnectionSessionRequestSender(connection: connection)
+            requestSender: ConnectionSessionRequestSender(connection: connection) { [weak self] error in
+                self?.recordAuthRequired(ifThrownBy: error, over: connection)
+            }
         )
         session.attach(subscription)
         return session

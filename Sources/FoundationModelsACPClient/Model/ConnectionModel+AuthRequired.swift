@@ -9,6 +9,11 @@ import FoundationModelsACP
 // `sendRecordingAuth(_:through:)`. `initialize`, `auth/login`, and
 // `auth/logout` do not: `initialize` sets the auth state from its answer, and
 // `login(_:)` and `logout(_:)` record each failure of their own.
+//
+// The prompt and the config change of a session model go out through its
+// `ConnectionSessionRequestSender`. The sender gives each error to
+// `recordAuthRequired(ifThrownBy:over:)`, which records a `-32000` answer
+// only for a session of the open connection.
 
 extension ConnectionModel {
     /// Sets ``authState`` to ``AuthState/required(_:)`` with the auth
@@ -24,6 +29,23 @@ extension ConnectionModel {
             return
         }
         authState = .required(authMethods)
+    }
+
+    /// Records a `-32000` answer to a request of a session model, as
+    /// ``recordAuthRequired(ifThrownBy:)`` does, when the session belongs to
+    /// the open connection.
+    ///
+    /// A session of an earlier connection can still send requests after
+    /// ``connect(over:logger:bufferLimits:client:)`` made a new connection.
+    /// Its `-32000` answer tells nothing about the new connection, so it
+    /// changes nothing.
+    ///
+    /// - Parameters:
+    ///   - error: The error that the request of the session threw.
+    ///   - connection: The connection that sent the request.
+    func recordAuthRequired(ifThrownBy error: any Error, over connection: ClientSideConnection) {
+        guard connection === self.connection else { return }
+        recordAuthRequired(ifThrownBy: error)
     }
 
     /// Sends one request in a client request span, and records a `-32000`

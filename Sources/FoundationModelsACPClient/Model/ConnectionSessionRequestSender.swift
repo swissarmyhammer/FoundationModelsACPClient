@@ -10,9 +10,18 @@ import FoundationModelsACP
 /// ``ClientRequestSpan/send(_:parent:through:)``: the span, the request
 /// metrics, and the W3C trace context in the `_meta` of the request. The
 /// `_meta` that the caller gives stays, and the trace context is added to it.
+///
+/// Each error that a prompt or a configuration change throws goes to
+/// ``requestDidFail`` before the call throws it again. Thus the model that
+/// made the sender can read the error, for example a `-32000` answer of the
+/// agent.
 struct ConnectionSessionRequestSender: SessionRequestSender {
     /// The connection that carries the requests.
     let connection: ClientSideConnection
+
+    /// Gets each error that a prompt or a configuration change threw, before
+    /// the call throws it again.
+    let requestDidFail: @MainActor @Sendable (any Error) -> Void
 
     /// Sends `session/prompt` in a client request span.
     ///
@@ -25,14 +34,16 @@ struct ConnectionSessionRequestSender: SessionRequestSender {
     /// - Returns: The response of the agent.
     /// - Throws: `RequestError` on a peer error, `ConnectionError` on a
     ///   disconnect or a timeout, or `CancellationError` when the calling task
-    ///   is cancelled.
+    ///   is cancelled, after ``requestDidFail`` got it.
     func prompt(
         _ request: PromptRequest,
         willSend: @MainActor @Sendable (PromptRequest) -> Void
     ) async throws -> PromptResponse {
-        try await ClientRequestSpan.send(request) { traced in
-            await willSend(traced)
-            return try await connection.prompt(traced)
+        try await reportingFailure {
+            try await ClientRequestSpan.send(request) { traced in
+                await willSend(traced)
+                return try await connection.prompt(traced)
+            }
         }
     }
 
@@ -52,7 +63,31 @@ struct ConnectionSessionRequestSender: SessionRequestSender {
         ) { try await connection.sessionCancel($0) }
     }
 
+    /// Sends `session/set_config_option` in a client request span.
+    ///
+    /// - Parameter request: The set-config-option request.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on a
+    ///   disconnect or a timeout, after ``requestDidFail`` got it.
     func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws {
-        _ = try await ClientRequestSpan.send(request) { try await connection.setSessionConfigOption($0) }
+        try await reportingFailure {
+            _ = try await ClientRequestSpan.send(request) { try await connection.setSessionConfigOption($0) }
+        }
+    }
+
+    /// Runs one request, and gives each error that it throws to
+    /// ``requestDidFail`` before it throws the error again.
+    ///
+    /// - Parameter send: Sends the request.
+    /// - Returns: The value of `send`.
+    /// - Throws: The error of `send`.
+    private func reportingFailure<Output>(
+        _ send: nonisolated(nonsending) () async throws -> Output
+    ) async throws -> Output {
+        do {
+            return try await send()
+        } catch {
+            await requestDidFail(error)
+            throw error
+        }
     }
 }

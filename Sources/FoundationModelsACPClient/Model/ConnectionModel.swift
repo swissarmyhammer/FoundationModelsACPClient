@@ -61,9 +61,11 @@ public final class ConnectionModel {
     ///
     /// ``AuthState/required(_:)`` also comes from a `-32000`
     /// (`authentication_required`) answer of the agent to a session request
-    /// or a list request of the model. That answer can come after a
-    /// successful login too, for example when the login expired. A later
-    /// successful ``login(_:)`` gives ``AuthState/authenticated(_:)`` again.
+    /// or a list request of the model, or to a prompt or a configuration
+    /// change of a session model of the open connection. That answer can
+    /// come after a successful login too, for example when the login
+    /// expired. A later successful ``login(_:)`` gives
+    /// ``AuthState/authenticated(_:)`` again.
     public internal(set) var authState: AuthState = .unknown
 
     /// The open connection, or `nil` when no connection is open. A close
