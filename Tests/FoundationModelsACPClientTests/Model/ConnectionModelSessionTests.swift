@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 import Testing
 
@@ -10,8 +11,9 @@ import Testing
 // `ConnectedModel` gives the real ACP wire, with a `ScriptedStubAgent` on the
 // agent end. The stub sends its `newSessionScript` before it answers
 // `session/new`, so the updates are on the wire before the model knows the
-// session id. It sends its `resumeSessionScript` as the replay of a
-// `session/resume`, before the answer.
+// session id, and its `afterNewSessionScript` after the answer. It sends its
+// `resumeSessionScript` as the replay of a `session/resume`, before the
+// answer.
 
 /// The fixtures of the session factory tests.
 private enum SessionFactoryFixtures {
@@ -151,6 +153,37 @@ private enum SessionFactoryFixtures {
         MCPServerRecord(name: "search", transport: .stdio, origin: .client, server: searchServer, status: .notReported)
     ]
 
+    /// The `update` member of the example `_mcp_server_status` notification
+    /// of the agent: the `files` stdio server of the client failed.
+    static let exampleStatusUpdateJSON = """
+        {"sessionUpdate":"_mcp_server_status","name":"files","transport":"stdio","origin":"client","status":"failed","reason":"\(exampleStatusReason)"}
+        """
+
+    /// The reason of ``exampleStatusUpdateJSON``.
+    static let exampleStatusReason = "The command is not an absolute path."
+
+    /// The items of ``newSessionServers`` after ``exampleStatusUpdateJSON``:
+    /// only the `files` item changed.
+    static let newSessionServerRecordsAfterStatus = [
+        MCPServerRecord(name: "docs", transport: .http, origin: .client, server: httpServer, status: .notReported),
+        MCPServerRecord(
+            name: "files",
+            transport: .stdio,
+            origin: .client,
+            server: stdioServer,
+            status: .failed(reason: exampleStatusReason)
+        ),
+    ]
+
+    /// Decodes ``exampleStatusUpdateJSON`` with the wire decoder.
+    ///
+    /// - Returns: The update, which this schema revision reads as
+    ///   `SessionUpdate.unknown`.
+    /// - Throws: `DecodingError` when the JSON does not decode.
+    static func exampleStatusUpdate() throws -> SessionUpdate {
+        try JSONDecoder().decode(SessionUpdate.self, from: Data(exampleStatusUpdateJSON.utf8))
+    }
+
     /// Gives the fields of each MCP server item of a session model, in list
     /// order.
     ///
@@ -176,6 +209,8 @@ private enum SessionFactoryFixtures {
     ///     for a session with no subscriber.
     ///   - newSessionScript: The updates the agent sends before its
     ///     `session/new` answer.
+    ///   - afterNewSessionScript: The updates the agent sends after its
+    ///     `session/new` answer.
     ///   - newSessionCommands: The command list of the `session/new` answer.
     ///   - closeSessionError: The error the agent refuses each close with, or
     ///     `nil` to accept each close.
@@ -197,6 +232,7 @@ private enum SessionFactoryFixtures {
         capabilities: AgentCapabilities = InitializeFixtures.baselineCapabilities,
         bufferLimits: SessionUpdateBufferLimits = .default,
         newSessionScript: [SessionUpdate] = [],
+        afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
         closeSessionError: RequestError? = nil,
         newSessionGate: UpdateGate? = nil,
@@ -215,6 +251,7 @@ private enum SessionFactoryFixtures {
                 script: [],
                 closeSessionError: closeSessionError,
                 newSessionScript: newSessionScript,
+                afterNewSessionScript: afterNewSessionScript,
                 newSessionCommands: newSessionCommands,
                 resumeSessionScript: resumeSessionScript,
                 resumeSessionCommands: resumeSessionCommands,
@@ -780,6 +817,20 @@ struct ConnectionModelSessionTests {
 
         #expect(session.mcpServers.map(ObjectIdentifier.init) == itemsBeforeResume.map(ObjectIdentifier.init))
         #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecords)
+    }
+
+    @Test func newSessionAppliesAStatusUpdateThatFollowsTheResponse() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            afterNewSessionScript: [try SessionFactoryFixtures.exampleStatusUpdate()]
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+
+        try await waitUntil { session.mcpServers.contains { $0.status != .notReported } }
+        #expect(
+            SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecordsAfterStatus
+        )
+        #expect(session.transcript.isEmpty)
     }
 
     @Test func aRequestWithNoMCPServersGivesAnEmptyList() async throws {

@@ -9,16 +9,33 @@ public enum MCPServerTransport: String, Hashable, Sendable {
 
     /// The agent talks to the server over HTTP. The wire value is `"http"`.
     case http
+
+    /// Makes the transport of a wire value.
+    ///
+    /// - Parameter wireValue: The wire value: `"stdio"` or `"http"`.
+    /// - Returns: `nil` for a wire value that this client does not know.
+    init?(wireValue: String) {
+        self.init(rawValue: wireValue)
+    }
 }
 
 /// The source of an MCP server of a session.
-public enum MCPServerOrigin: Hashable, Sendable {
+public enum MCPServerOrigin: String, Hashable, Sendable {
     /// The client sent the server in its `session/new` or `session/resume`
-    /// request.
+    /// request. The wire value is `"client"`.
     case client
 
-    /// The configuration of the agent gave the server.
+    /// The configuration of the agent gave the server. The wire value is
+    /// `"config"`.
     case config
+
+    /// Makes the origin of a wire value.
+    ///
+    /// - Parameter wireValue: The wire value: `"client"` or `"config"`.
+    /// - Returns: `nil` for a wire value that this client does not know.
+    init?(wireValue: String) {
+        self.init(rawValue: wireValue)
+    }
 }
 
 /// The last connection status of an MCP server, as the agent reports it.
@@ -40,6 +57,26 @@ public enum MCPServerStatus: Hashable, Sendable {
 
     /// The connection of the agent to the server closed.
     case closed
+
+    /// Makes the status of a wire value.
+    ///
+    /// No wire value gives ``notReported``: only the client uses it.
+    ///
+    /// - Parameters:
+    ///   - wireValue: The wire value: `"connecting"`, `"connected"`,
+    ///     `"failed"` or `"closed"`.
+    ///   - reason: The reason that the agent gave. Only `"failed"` keeps
+    ///     it; each other status ignores it.
+    /// - Returns: `nil` for a wire value that this client does not know.
+    init?(wireValue: String, reason: String? = nil) {
+        switch wireValue {
+        case "connecting": self = .connecting
+        case "connected": self = .connected
+        case "failed": self = .failed(reason: reason)
+        case "closed": self = .closed
+        default: return nil
+        }
+    }
 }
 
 /// One MCP server of a session, as an observable item.
@@ -91,5 +128,18 @@ public final class MCPServerItem: Identifiable {
         }
         origin = .client
         self.server = server
+    }
+
+    /// Makes the item of a server that the client does not have, from the
+    /// status update of that server. The client did not send the server, so
+    /// the item has no configuration.
+    ///
+    /// - Parameter update: The status update of the server.
+    init(statusUpdate update: MCPServerStatusUpdate) {
+        name = update.name
+        transport = update.transport
+        origin = update.origin
+        server = nil
+        status = update.status
     }
 }

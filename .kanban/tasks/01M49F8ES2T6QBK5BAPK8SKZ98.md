@@ -29,8 +29,24 @@ comments:
     - evidence: 4 files — Sources/FoundationModelsACPClient/Model/MCPServerItem.swift (new), Sources/FoundationModelsACPClient/Model/SessionModel.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. `swift test --filter ConnectionModelSessionTests`: 34 passed (4 new). `swift build`: no new warning (only the accepted MLX "missing creator" warning). `swift test`: 496 tests in 44 suites passed, 0 failed, 0 skipped.
     - next: /review. The task stays in doing.
   timestamp: 2026-10-07T11:41:33.304723+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4b318pcstqn40ek7ad9dm4t
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (5448511), 4 Swift files reviewed, 7 validator runs, 0 findings, 0 confirmed, 0 refuted. The .kanban files were excluded by .reviewignore.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-07T11:47:28.588207+00:00
+- actor: claude-code
+  id: 01m4b31hdtxear31yk5bwr0j8t
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files
+    - test: green — swift test, 496 passed, 0 failed, 0 skipped
+    - commit: 5448511
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-07T11:47:37.530175+00:00
+position_column: done
+position_ordinal: d380
 title: 'Model: SessionModel holds the MCP servers of the session, each with its status'
 ---
 ## What

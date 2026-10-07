@@ -14,7 +14,10 @@ import Synchronization
 /// because a test that drives the whole turn path opens a session before it
 /// prompts. The answer carries the `newSessionCommands` the test chose, and
 /// the stub sends the `newSessionScript` before the answer, so a test can
-/// prove that an update which comes before the session id is not lost.
+/// prove that an update which comes before the session id is not lost. The
+/// stub sends the `afterNewSessionScript` after the answer: the connection
+/// writes the answer first, so a test can prove that an update which follows
+/// the answer is in the model.
 ///
 /// `session/resume` sends the `resumeSessionScript` as the replay, and then
 /// refuses with the error the test chose, or answers with the
@@ -158,6 +161,9 @@ final class ScriptedStubAgent: Agent {
     /// The updates to send, in order, before the `session/new` answer.
     private let newSessionScript: [SessionUpdate]
 
+    /// The updates to send, in order, after the `session/new` answer.
+    private let afterNewSessionScript: [SessionUpdate]
+
     /// The command list of the `session/new` answer, or `nil` to leave the
     /// member out.
     private let newSessionCommands: [AvailableCommand]?
@@ -265,6 +271,8 @@ final class ScriptedStubAgent: Agent {
     ///     `nil` to accept each close.
     ///   - newSessionScript: The updates to send before the `session/new`
     ///     answer.
+    ///   - afterNewSessionScript: The updates to send after the `session/new`
+    ///     answer.
     ///   - newSessionCommands: The command list of the `session/new` answer,
     ///     or `nil` to leave the member out.
     ///   - resumeSessionScript: The updates to send as the replay of a
@@ -303,6 +311,7 @@ final class ScriptedStubAgent: Agent {
         promptError: RequestError? = nil,
         closeSessionError: RequestError? = .methodNotFound(ClientRequestSpan.Method.closeSession),
         newSessionScript: [SessionUpdate] = [],
+        afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
         resumeSessionScript: [SessionUpdate] = [],
         resumeSessionCommands: [AvailableCommand]? = nil,
@@ -328,6 +337,7 @@ final class ScriptedStubAgent: Agent {
         self.promptError = promptError
         self.closeSessionError = closeSessionError
         self.newSessionScript = newSessionScript
+        self.afterNewSessionScript = afterNewSessionScript
         self.newSessionCommands = newSessionCommands
         self.resumeSessionScript = resumeSessionScript
         self.resumeSessionCommands = resumeSessionCommands
@@ -379,6 +389,7 @@ final class ScriptedStubAgent: Agent {
         for update in newSessionScript {
             try await send(update)
         }
+        sendAfterTheAnswer(afterNewSessionScript)
         return NewSessionResponse(sessionId: session, availableCommands: newSessionCommands)
     }
 
@@ -468,6 +479,25 @@ final class ScriptedStubAgent: Agent {
         try await connection.sessionUpdate(
             UpdateSessionNotification(sessionId: session, update: update)
         )
+    }
+
+    /// Sends updates after the connection wrote the answer of the request
+    /// that this stub handles now.
+    ///
+    /// `AgentSideConnection.afterRespondingToCurrentRequest(_:)` runs the
+    /// sends on the task that wrote the answer, so the updates never reach
+    /// the wire before it. An empty script defers no work.
+    ///
+    /// - Parameter updates: The updates to send, in order.
+    private func sendAfterTheAnswer(_ updates: [SessionUpdate]) {
+        guard !updates.isEmpty else { return }
+        connection.afterRespondingToCurrentRequest { [self] in
+            for update in updates {
+                // A test that tore the connection down after the answer has
+                // nowhere left to send the rest of the script.
+                guard (try? await send(update)) != nil else { return }
+            }
+        }
     }
 
     /// Starts the task that sends ``deferredScript``, one step per gate.

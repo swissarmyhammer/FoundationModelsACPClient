@@ -29,6 +29,10 @@ import Observation
 /// ``transcript``: it is a live event, so the start of a resume and the close
 /// clear the list.
 ///
+/// The `_mcp_server_status` extension update of the agent is the one update
+/// that does not go to the engine: it sets the status of one item of
+/// ``mcpServers``, and it adds no transcript entry.
+///
 /// The model also holds the pending permission requests and the pending
 /// session-scoped elicitations of the session, as ``pendingPermissions`` and
 /// ``pendingElicitations``.
@@ -91,6 +95,11 @@ public final class SessionModel {
     /// of the `session/new` or `session/resume` request, in request order.
     /// A `session/resume` request replaces the list, and each item starts
     /// again at ``MCPServerStatus/notReported``.
+    ///
+    /// Each `_mcp_server_status` update of the agent sets the status of the
+    /// item with its name. An update for a name that the list does not hold
+    /// appends one ``MCPServerOrigin/config`` item: the configuration of the
+    /// agent gave that server. These updates add no transcript entry.
     public internal(set) var mcpServers: [MCPServerItem] = []
 
     /// Whether the connection discarded updates of this session before the
@@ -279,17 +288,39 @@ public final class SessionModel {
     /// come through here, so an echo of a local prompt links its local entry
     /// on each path.
     ///
+    /// An `_mcp_server_status` update never goes to the engine, because the
+    /// engine makes an unknown transcript entry from it. A valid one changes
+    /// ``mcpServers``, and an update that ``MCPServerStatusUpdate`` ignores
+    /// changes nothing.
+    ///
     /// - Parameter updates: The updates to fold, in arrival order.
     func fold(_ updates: [SessionUpdate]) {
-        let changes = updates.map { update in
-            if let link = promptCorrelator.observe(update) {
-                linkPrompt(link)
-            }
-            return engine.apply(update)
-        }
+        let changes = updates.compactMap(engineChange(folding:))
         for change in SessionMergeEngine.Change.collapsed(changes) {
             reflect(change)
         }
+    }
+
+    /// Folds one update, and gives the change of the engine.
+    ///
+    /// An `_mcp_server_status` update goes to ``applyMCPServerStatus(_:)``
+    /// and not to the engine, so it gives no change. Each other update goes
+    /// to the prompt correlator and then to the engine.
+    ///
+    /// - Parameter update: The update to fold.
+    /// - Returns: The change of the engine, or `nil` for an
+    ///   `_mcp_server_status` update.
+    private func engineChange(folding update: SessionUpdate) -> SessionMergeEngine.Change? {
+        guard !MCPServerStatusUpdate.isStatusUpdate(update) else {
+            if let status = MCPServerStatusUpdate.decode(update) {
+                applyMCPServerStatus(status)
+            }
+            return nil
+        }
+        if let link = promptCorrelator.observe(update) {
+            linkPrompt(link)
+        }
+        return engine.apply(update)
     }
 
     /// Sets the commands and the configuration options that a `session/new`
@@ -320,6 +351,24 @@ public final class SessionModel {
     /// - Parameter servers: The `mcpServers` field of the request.
     func setMCPServers(_ servers: [MCPServer]) {
         mcpServers = servers.compactMap(MCPServerItem.init(clientServer:))
+    }
+
+    /// Applies one `_mcp_server_status` update of the agent to
+    /// ``mcpServers``.
+    ///
+    /// The update replaces the status of the item with its name, and no other
+    /// item changes. When no item has that name, the update appends a new
+    /// item with the name, the transport, the origin and the status of the
+    /// update, and with no configuration: the configuration of the agent gave
+    /// that server, and the client did not send it.
+    ///
+    /// - Parameter update: The decoded status update.
+    func applyMCPServerStatus(_ update: MCPServerStatusUpdate) {
+        guard let item = mcpServers.first(where: { $0.name == update.name }) else {
+            mcpServers.append(MCPServerItem(statusUpdate: update))
+            return
+        }
+        item.status = update.status
     }
 
     /// Clears the transcript and the last-value state, so a replay of the
