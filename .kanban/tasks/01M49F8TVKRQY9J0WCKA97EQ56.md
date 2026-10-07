@@ -20,6 +20,38 @@ comments:
     - evidence: 6 files changed: Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift, Tests/FoundationModelsACPClientTests/Model/ConnectedModel.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. `swift test --filter ConnectionModelSessionTests`: 39 passed, 0 failed. `swift test`: 515 tests in 45 suites passed, 0 failed. The only warning is the accepted SwiftPM MLX "missing creator for mutated node" warning (^zws9qzt).
     - next: /review
   timestamp: 2026-10-07T12:18:41.568062+00:00
+- actor: claude-code
+  id: 01m4b56y2sanwhgedcpmr630az
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (bbb4f78); 2 findings (2 confirmed, 0 refuted) — Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:46, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:125 (duplication/duplication)
+    - next: implement the 2026-10-07 07:20 Review Findings. Remove the duplicated copy-and-filter of the request in newSession(_:) and resumeInTurn(_:) with one shared helper, then review again.
+  timestamp: 2026-10-07T12:25:31.481873+00:00
+- actor: claude-code
+  id: 01m4b579f4f31ew5j4mc4nrtf7
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 6 files
+    - test: green — swift test, 515 passed, 0 failed, 0 skipped
+    - commit: bbb4f78
+    - review: findings — Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:46, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:125
+  timestamp: 2026-10-07T12:25:43.140520+00:00
+- actor: claude-code
+  id: 01m4b5e50fwspab83kabstk9ex
+  text: |-
+    Review findings of 2026-10-07 07:20 (both duplication/duplication, one cause):
+    - Added the internal protocol `MCPServerListRequest` (`var mcpServers: [MCPServer]? { get set }`) in ConnectionModel+Sessions.swift. `NewSessionRequest` and `ResumeSessionRequest` conform with empty extensions (the generated structs already have a `public var mcpServers`).
+    - Added the internal generic helper `ConnectionModel.removingUnadvertisedMCPServers(from:)`. It holds the copy-and-filter that was in `newSession(_:)` and in `resumeInTurn(_:)`. The two methods now call it. The file has no other copy of the pattern (`replay` reads `request.mcpServers` but does not copy or filter).
+    - The helper is internal, not private, so the test target reaches it through `@testable import`.
+    - TDD: new test `removingUnadvertisedMCPServersChangesOnlyTheServersOfEachRequestKind`. RED: compile error, no member `removingUnadvertisedMCPServers`. GREEN: 1 passed.
+  timestamp: 2026-10-07T12:29:27.951688+00:00
+- actor: claude-code
+  id: 01m4b5e6xg5hms801aq2jdbkkj
+  text: |-
+    ### implement — changed
+    - evidence: 2 files changed: Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. `swift test`: 516 tests in 45 suites passed, 0 failed. The only warning is the accepted SwiftPM MLX "missing creator for mutated node" warning (^zws9qzt). Both 2026-10-07 07:20 findings are checked.
+    - next: /review
+  timestamp: 2026-10-07T12:29:29.904464+00:00
 depends_on:
 - 01M49F8ES2T6QBK5BAPK8SKZ98
 position_column: doing
@@ -65,3 +97,13 @@ Use /tdd — write failing tests first, then implement to make them pass.
 - [x] Record `mcpServers` in `ScriptedStubAgent` and write the four failing tests.
 - [x] Add `advertisedMCPServers(in:)`.
 - [x] Filter the request in `newSession(_:)` and `resumeInTurn(_:)`, and log each removed server.
+
+## Review Findings (2026-10-07 07:20)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 6 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:46` `duplication/duplication` — Lines 46-47 are duplicated verbatim at lines 125-126. Both blocks create a mutable copy of the request and filter its MCP servers with identical logic, risking divergence if one copy is modified independently. Extract a generic helper function or protocol extension to filter MCP servers that both newSession and resumeInTurn can call. For example, define a protocol that both NewSessionRequest and ResumeSessionRequest conform to, with a method that filters the mcpServers field.
+- [x] `Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift:125` `duplication/duplication` — Lines 125-126 are duplicated verbatim at lines 46-47. Both blocks create a mutable copy of the request and filter its MCP servers with identical logic, risking divergence if one copy is modified independently. Extract a generic helper function or protocol extension to filter MCP servers that both newSession and resumeInTurn can call. For example, define a protocol that both NewSessionRequest and ResumeSessionRequest conform to, with a method that filters the mcpServers field.

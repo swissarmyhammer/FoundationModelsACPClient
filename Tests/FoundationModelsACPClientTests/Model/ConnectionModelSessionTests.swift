@@ -937,6 +937,26 @@ struct ConnectionModelSessionTests {
         #expect(messages.elements.contains { $0.contains("\"search\"") && $0.contains("stdio") })
     }
 
+    @Test func removingUnadvertisedMCPServersChangesOnlyTheServersOfEachRequestKind() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.stdioOnlyCapabilities
+        )
+        var expectedNewSession = SessionFactoryFixtures.newSessionRequestWithServers
+        expectedNewSession.mcpServers = [SessionFactoryFixtures.stdioServer]
+
+        let newSession = connected.model.removingUnadvertisedMCPServers(
+            from: SessionFactoryFixtures.newSessionRequestWithServers
+        )
+        let resume = connected.model.removingUnadvertisedMCPServers(
+            from: SessionFactoryFixtures.resumeRequestWithServers
+        )
+
+        // One helper filters the two kinds of request. Each other field of
+        // the request stays as the caller made it.
+        #expect(newSession == expectedNewSession)
+        #expect(resume == SessionFactoryFixtures.resumeRequestWithServers)
+    }
+
     // MARK: - The request sender
 
     @Test func aNewSessionPromptsOverTheConnection() async throws {

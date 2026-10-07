@@ -43,8 +43,7 @@ extension ConnectionModel {
     ///   error, the model registers no session.
     public func newSession(_ request: NewSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
-        var sent = request
-        sent.mcpServers = advertisedMCPServersWarningOfEachRemoved(in: request.mcpServers)
+        let sent = removingUnadvertisedMCPServers(from: request)
         let response = try await ClientRequestSpan.send(sent) { try await connection.newSession($0) }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
         // The list goes in before the stream task of the model can fold an
@@ -122,8 +121,7 @@ extension ConnectionModel {
     ///   `RequestError` of the agent; or the error of the connection.
     private func resumeInTurn(_ request: ResumeSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
-        var sent = request
-        sent.mcpServers = advertisedMCPServersWarningOfEachRemoved(in: request.mcpServers)
+        let sent = removingUnadvertisedMCPServers(from: request)
         if let open = openSessions[sent.sessionId] {
             try await replay(sent, into: open, over: connection)
             return open
@@ -253,6 +251,22 @@ extension ConnectionModel {
 
     // MARK: - MCP servers
 
+    /// Gives a copy of a request that sends only the MCP servers that the
+    /// agent can get, and logs one warning for each server that the copy
+    /// does not send.
+    ///
+    /// ``newSession(_:)`` and ``resumeSession(_:)`` send this copy. Each
+    /// other field of the copy is as the caller made it.
+    ///
+    /// - Parameter request: The request as the caller made it.
+    /// - Returns: The copy of `request`, with the servers whose transport
+    ///   the agent advertises, in request order.
+    func removingUnadvertisedMCPServers<Request: MCPServerListRequest>(from request: Request) -> Request {
+        var sent = request
+        sent.mcpServers = advertisedMCPServersWarningOfEachRemoved(in: request.mcpServers)
+        return sent
+    }
+
     /// Gives the MCP servers of a request that the agent can get, and logs
     /// one warning for each server that the request does not send.
     ///
@@ -333,6 +347,21 @@ extension ConnectionModel {
         session.markClosed()
     }
 }
+
+/// A request that sends a list of MCP servers to the agent.
+///
+/// ``ConnectionModel/removingUnadvertisedMCPServers(from:)`` filters the
+/// list of each request of this kind, so the rule for the servers that go
+/// out is in one location.
+protocol MCPServerListRequest {
+    /// The MCP servers that the request sends, or `nil` when the request
+    /// sends no list.
+    var mcpServers: [MCPServer]? { get set }
+}
+
+extension NewSessionRequest: MCPServerListRequest {}
+
+extension ResumeSessionRequest: MCPServerListRequest {}
 
 extension MCPServer {
     /// The name and the wire transport of the server, for a log message.
