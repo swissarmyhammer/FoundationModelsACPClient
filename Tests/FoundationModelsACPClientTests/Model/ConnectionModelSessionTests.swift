@@ -99,6 +99,68 @@ private enum SessionFactoryFixtures {
         value: .id(SessionConfigValueId(rawValue: "fast"))
     )
 
+    /// An HTTP MCP server that the client sends.
+    static let httpServer = MCPServer.http(MCPServerHTTP(name: "docs", url: "https://example.com/mcp"))
+
+    /// A stdio MCP server that the client sends.
+    static let stdioServer = MCPServer.stdio(
+        MCPServerStdio(command: AbsolutePath(rawValue: "/usr/local/bin/files-mcp"), name: "files")
+    )
+
+    /// A second stdio MCP server, which only the resume request sends.
+    static let searchServer = MCPServer.stdio(
+        MCPServerStdio(command: AbsolutePath(rawValue: "/usr/local/bin/search-mcp"), name: "search")
+    )
+
+    /// An MCP server with a transport that this schema revision does not
+    /// know. It never becomes an item.
+    static let unknownServer = MCPServer.unknown(
+        "sse",
+        .object(["name": .string("events"), "url": .string("https://example.com/sse")])
+    )
+
+    /// The MCP servers of the new-session request of the MCP server tests:
+    /// one server of each known transport, with an unknown server between
+    /// them.
+    static let newSessionServers = [httpServer, unknownServer, stdioServer]
+
+    /// The new-session request that sends ``newSessionServers``.
+    static let newSessionRequestWithServers = NewSessionRequest(
+        cwd: workingDirectory,
+        mcpServers: newSessionServers
+    )
+
+    /// The resume request of the test session that sends only
+    /// ``searchServer``, with a replay from the start.
+    static let resumeRequestWithServers = ResumeSessionRequest(
+        cwd: workingDirectory,
+        sessionId: testSession,
+        mcpServers: [searchServer],
+        replayFrom: replayFromStart
+    )
+
+    /// The items that ``newSessionServers`` give: the unknown server gives
+    /// no item.
+    static let newSessionServerRecords = [
+        MCPServerRecord(name: "docs", transport: .http, origin: .client, server: httpServer, status: .notReported),
+        MCPServerRecord(name: "files", transport: .stdio, origin: .client, server: stdioServer, status: .notReported),
+    ]
+
+    /// The item that ``resumeRequestWithServers`` gives.
+    static let resumeServerRecords = [
+        MCPServerRecord(name: "search", transport: .stdio, origin: .client, server: searchServer, status: .notReported)
+    ]
+
+    /// Gives the fields of each MCP server item of a session model, in list
+    /// order.
+    ///
+    /// - Parameter session: The session model.
+    /// - Returns: One record for each item.
+    @MainActor
+    static func mcpServerRecords(of session: SessionModel) -> [MCPServerRecord] {
+        session.mcpServers.map(MCPServerRecord.init(item:))
+    }
+
     /// The error of a close that the agent does not advertise.
     static let closeUnsupported = ConnectionModelError.unsupported(method: ClientRequestSpan.Method.closeSession)
 
@@ -677,6 +739,61 @@ struct ConnectionModelSessionTests {
         #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
     }
 
+    // MARK: - MCP servers
+
+    @Test func newSessionHoldsItsMCPServersAsNotReported() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+
+        #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecords)
+    }
+
+    @Test func resumeReplacesTheMCPServersOfAnOpenSession() async throws {
+        let answerGate = UpdateGate()
+        let connected = try await SessionFactoryFixtures.connect(resumeSessionGate: answerGate)
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+        let resuming = Task { [model = connected.model] in
+            try await model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
+        }
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
+
+        // The gate holds the answer of the agent, so the list of the resume
+        // request is in the model before the response.
+        #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.resumeServerRecords)
+        answerGate.open()
+
+        #expect(try await resuming.value === session)
+        #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.resumeServerRecords)
+    }
+
+    @Test func aFailedResumeKeepsTheMCPServers() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            resumeSessionError: SessionFactoryFixtures.resumeRefusal
+        )
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+        let itemsBeforeResume = session.mcpServers
+
+        await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
+            try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
+        }
+
+        #expect(session.mcpServers.map(ObjectIdentifier.init) == itemsBeforeResume.map(ObjectIdentifier.init))
+        #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecords)
+    }
+
+    @Test func aRequestWithNoMCPServersGivesAnEmptyList() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        #expect(session.mcpServers.isEmpty)
+        _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
+        try #require(!session.mcpServers.isEmpty)
+
+        _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(session.mcpServers.isEmpty)
+    }
+
     // MARK: - The request sender
 
     @Test func aNewSessionPromptsOverTheConnection() async throws {
@@ -856,5 +973,39 @@ private final class ForwardingClientFactory {
         let client = ForwardingClient(router: router)
         built.append(client)
         return client
+    }
+}
+
+/// The fields of one ``MCPServerItem``, as a value that a test can compare.
+private struct MCPServerRecord: Equatable {
+    /// The name of the server.
+    let name: String
+
+    /// The transport of the server.
+    let transport: MCPServerTransport
+
+    /// The source of the server.
+    let origin: MCPServerOrigin
+
+    /// The configuration that the client sent, or `nil`.
+    let server: MCPServer?
+
+    /// The last status of the server.
+    let status: MCPServerStatus
+}
+
+extension MCPServerRecord {
+    /// Copies the fields of an item.
+    ///
+    /// - Parameter item: The item to copy.
+    @MainActor
+    init(item: MCPServerItem) {
+        self.init(
+            name: item.name,
+            transport: item.transport,
+            origin: item.origin,
+            server: item.server,
+            status: item.status
+        )
     }
 }

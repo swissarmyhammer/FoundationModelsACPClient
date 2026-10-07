@@ -23,7 +23,9 @@ extension ConnectionModel {
     /// discard kept updates, the model has ``SessionModel/hasMissedUpdates``.
     ///
     /// The commands and the configuration options of the response seed the
-    /// model, and the model goes into ``openSessions``.
+    /// model, and the model goes into ``openSessions``. The MCP servers of the
+    /// request go into ``SessionModel/mcpServers`` before the model folds an
+    /// update.
     ///
     /// When the connection closes, or a new connection takes its place,
     /// after the response arrives but before this call reads it, the model
@@ -39,6 +41,10 @@ extension ConnectionModel {
         let connection = try openConnection()
         let response = try await ClientRequestSpan.send(request) { try await connection.newSession($0) }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
+        // The list goes in before the stream task of the model can fold an
+        // update, so a status update that the agent sends after the response
+        // always finds it.
+        session.setMCPServers(request.mcpServers ?? [])
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         try register(session, openedOver: connection)
         return session
@@ -65,8 +71,13 @@ extension ConnectionModel {
     /// the configuration options of the response then seed the model, and a
     /// new model goes into ``openSessions``.
     ///
+    /// The MCP servers of the request replace ``SessionModel/mcpServers``
+    /// before the request goes out, also for an open model, and each item
+    /// starts again at ``MCPServerStatus/notReported``.
+    ///
     /// On a failure, the replay ends as a failure and the call throws. An
-    /// open model stays open. A new model is closed and does not go into
+    /// open model stays open, and gets back the MCP servers that it had
+    /// before the call. A new model is closed and does not go into
     /// ``openSessions``. When the connection closes, or a new connection
     /// takes its place, after the response arrives but before this call reads
     /// it, a new model is closed too.
@@ -141,13 +152,19 @@ extension ConnectionModel {
         into session: SessionModel,
         over connection: ClientSideConnection
     ) async throws {
+        // The agent sends the status of its MCP servers after the response,
+        // so the list of the request must be in the model before the request
+        // goes out. A list set after the response could erase those statuses.
+        let mcpServersBeforeResume = session.mcpServers
         session.beginReplay(replayFrom: request.replayFrom)
+        session.setMCPServers(request.mcpServers ?? [])
         let resumeStarts = watchResumeStarts(of: connection, for: session)
         defer { resumeStarts.cancel() }
         let response: ResumeSessionResponse
         do {
             response = try await ClientRequestSpan.send(request) { try await connection.resumeSession($0) }
         } catch {
+            session.mcpServers = mcpServersBeforeResume
             await endReplay(of: session, afterFailure: error)
             throw error
         }

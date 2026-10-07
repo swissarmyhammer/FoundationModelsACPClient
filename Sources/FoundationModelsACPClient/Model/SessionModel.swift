@@ -86,6 +86,13 @@ public final class SessionModel {
     /// a resume and the close clear the list.
     public private(set) var notices: [SessionNotice] = []
 
+    /// The MCP servers of the session, each with its last status. The list
+    /// holds one ``MCPServerOrigin/client`` item for each HTTP or stdio server
+    /// of the `session/new` or `session/resume` request, in request order.
+    /// A `session/resume` request replaces the list, and each item starts
+    /// again at ``MCPServerStatus/notReported``.
+    public internal(set) var mcpServers: [MCPServerItem] = []
+
     /// Whether the connection discarded updates of this session before the
     /// model subscribed. When this value is `true`, the transcript can lack
     /// updates. A successful replay from the start of the retained history
@@ -300,6 +307,19 @@ public final class SessionModel {
         for change in engine.seed(from: response) {
             reflect(change)
         }
+    }
+
+    /// Replaces ``mcpServers`` with the servers that the client sends in a
+    /// `session/new` or `session/resume` request.
+    ///
+    /// Each HTTP or stdio server gives one ``MCPServerOrigin/client`` item,
+    /// in request order, with the status ``MCPServerStatus/notReported``. A
+    /// server with a transport that this schema revision does not know gives
+    /// no item.
+    ///
+    /// - Parameter servers: The `mcpServers` field of the request.
+    func setMCPServers(_ servers: [MCPServer]) {
+        mcpServers = servers.compactMap(MCPServerItem.init(clientServer:))
     }
 
     /// Clears the transcript and the last-value state, so a replay of the
