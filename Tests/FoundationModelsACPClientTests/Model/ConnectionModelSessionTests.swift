@@ -141,6 +141,29 @@ private enum SessionFactoryFixtures {
         replayFrom: replayFromStart
     )
 
+    /// The servers of ``newSessionServers`` that an agent which advertises
+    /// each MCP transport gets: the unknown server does not go out.
+    static let advertisedNewSessionServers = [httpServer, stdioServer]
+
+    /// The MCP capabilities of an agent that advertises each MCP transport.
+    static let eachMCPTransport = MCPCapabilities(http: MCPHTTPCapabilities(), stdio: MCPStdioCapabilities())
+
+    /// The capabilities of an agent that advertises the session baseline and
+    /// each MCP transport.
+    static let eachMCPTransportCapabilities = AgentCapabilities(session: SessionCapabilities(mcp: eachMCPTransport))
+
+    /// The capabilities of an agent that advertises the session baseline and
+    /// only the stdio MCP transport.
+    static let stdioOnlyCapabilities = AgentCapabilities(
+        session: SessionCapabilities(mcp: MCPCapabilities(stdio: MCPStdioCapabilities()))
+    )
+
+    /// The capabilities of an agent that advertises the session baseline and
+    /// only the HTTP MCP transport.
+    static let httpOnlyCapabilities = AgentCapabilities(
+        session: SessionCapabilities(mcp: MCPCapabilities(http: MCPHTTPCapabilities()))
+    )
+
     /// The items that ``newSessionServers`` give: the unknown server gives
     /// no item.
     static let newSessionServerRecords = [
@@ -225,11 +248,13 @@ private enum SessionFactoryFixtures {
     ///   - resumeSessionGate: The gate that must open, after the replay,
     ///     before the agent answers `session/resume`, or `nil` to answer at
     ///     once.
+    ///   - logger: The diagnostic sink of the model.
     /// - Returns: The connected model, after `initialize`.
     /// - Throws: Whatever `initialize` threw.
     @MainActor
     static func connect(
         capabilities: AgentCapabilities = InitializeFixtures.baselineCapabilities,
+        logger: ACPLogger = .disabled,
         bufferLimits: SessionUpdateBufferLimits = .default,
         newSessionScript: [SessionUpdate] = [],
         afterNewSessionScript: [SessionUpdate] = [],
@@ -242,7 +267,7 @@ private enum SessionFactoryFixtures {
         resumeSessionGate: UpdateGate? = nil
     ) async throws -> ConnectedModel {
         let connected = await ConnectedModel(
-            model: ConnectionModel(coalescingCadence: .zero),
+            model: ConnectionModel(coalescingCadence: .zero, logger: logger),
             bufferLimits: bufferLimits
         ) { connection in
             ScriptedStubAgent(
@@ -779,7 +804,9 @@ struct ConnectionModelSessionTests {
     // MARK: - MCP servers
 
     @Test func newSessionHoldsItsMCPServersAsNotReported() async throws {
-        let connected = try await SessionFactoryFixtures.connect()
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
+        )
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
@@ -788,7 +815,10 @@ struct ConnectionModelSessionTests {
 
     @Test func resumeReplacesTheMCPServersOfAnOpenSession() async throws {
         let answerGate = UpdateGate()
-        let connected = try await SessionFactoryFixtures.connect(resumeSessionGate: answerGate)
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
+            resumeSessionGate: answerGate
+        )
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
         let resuming = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
@@ -806,6 +836,7 @@ struct ConnectionModelSessionTests {
 
     @Test func aFailedResumeKeepsTheMCPServers() async throws {
         let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
             resumeSessionError: SessionFactoryFixtures.resumeRefusal
         )
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
@@ -821,6 +852,7 @@ struct ConnectionModelSessionTests {
 
     @Test func newSessionAppliesAStatusUpdateThatFollowsTheResponse() async throws {
         let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
             afterNewSessionScript: [try SessionFactoryFixtures.exampleStatusUpdate()]
         )
 
@@ -834,7 +866,9 @@ struct ConnectionModelSessionTests {
     }
 
     @Test func aRequestWithNoMCPServersGivesAnEmptyList() async throws {
-        let connected = try await SessionFactoryFixtures.connect()
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
+        )
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         #expect(session.mcpServers.isEmpty)
         _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
@@ -843,6 +877,64 @@ struct ConnectionModelSessionTests {
         _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
         #expect(session.mcpServers.isEmpty)
+    }
+
+    // MARK: - MCP transports that the agent advertises
+
+    @Test func newSessionSendsEachServerWhoseTransportTheAgentAdvertises() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+
+        #expect(connected.newSessionMCPServers == [SessionFactoryFixtures.advertisedNewSessionServers])
+        #expect(SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecords)
+    }
+
+    @Test func newSessionRemovesAnHTTPServerThatTheAgentDoesNotAdvertise() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.stdioOnlyCapabilities,
+            logger: ACPLogger { messages.append($0) }
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+
+        #expect(connected.newSessionMCPServers == [[SessionFactoryFixtures.stdioServer]])
+        #expect(session.mcpServers.map(\.name) == ["files"])
+        // The agent does not get the HTTP server and the unknown server, so
+        // the log has one warning for each of them.
+        #expect(messages.elements.count == 2)
+        #expect(messages.elements.contains { $0.contains("\"docs\"") && $0.contains("http") })
+        #expect(messages.elements.contains { $0.contains("\"events\"") && $0.contains("sse") })
+    }
+
+    @Test func newSessionWithNoMCPCapabilitySendsNoServer() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: InitializeFixtures.baselineCapabilities
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
+
+        #expect(connected.newSessionMCPServers == [[]])
+        #expect(session.mcpServers.isEmpty)
+        #expect(connected.model.session(for: testSession) === session)
+    }
+
+    @Test func resumeSessionRemovesAServerThatTheAgentDoesNotAdvertise() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionFactoryFixtures.connect(
+            capabilities: SessionFactoryFixtures.httpOnlyCapabilities,
+            logger: ACPLogger { messages.append($0) }
+        )
+
+        let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
+
+        #expect(connected.resumeSessionMCPServers == [[]])
+        #expect(session.mcpServers.isEmpty)
+        #expect(messages.elements.count == 1)
+        #expect(messages.elements.contains { $0.contains("\"search\"") && $0.contains("stdio") })
     }
 
     // MARK: - The request sender

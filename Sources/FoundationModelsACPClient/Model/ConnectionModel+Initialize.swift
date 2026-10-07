@@ -11,6 +11,9 @@ import FoundationModelsACP
 // - A `capabilities.session` object advertises the session baseline, which
 //   holds `session/list`, `session/resume`, and `session/close`.
 // - `capabilities.session.delete` advertises `session/delete`.
+// - `capabilities.session.mcp.http` and `capabilities.session.mcp.stdio`
+//   advertise the MCP transports that the agent can use. The client sends
+//   only the MCP servers of these transports.
 // - An `authMethods` entry that is not a `terminal` method advertises
 //   `auth/login` and `auth/logout`. The client runs a `terminal` method as a
 //   separate process and never sends it to `auth/login`.
@@ -82,6 +85,39 @@ extension ConnectionModel {
     func requireCapability(_ isSupported: Bool, method: String) throws {
         guard isSupported else {
             throw ConnectionModelError.unsupported(method: method)
+        }
+    }
+
+    // MARK: - MCP transports
+
+    /// Gives the MCP servers of a request that the agent can get.
+    ///
+    /// The client sends an MCP server only when the agent advertises its
+    /// transport in `capabilities.session.mcp`. A server with a transport
+    /// that this schema revision does not know is never advertised, so it
+    /// never goes out.
+    ///
+    /// - Parameter servers: The `mcpServers` field of a request.
+    /// - Returns: The servers whose transport the agent advertises, in
+    ///   request order, or `nil` when `servers` is `nil`.
+    func advertisedMCPServers(in servers: [MCPServer]?) -> [MCPServer]? {
+        servers?.filter(advertisesTransport(of:))
+    }
+
+    /// Tells whether the agent advertises the transport of an MCP server.
+    /// It is `false` before ``initialize(_:)`` succeeds.
+    ///
+    /// - Parameter server: The MCP server.
+    /// - Returns: `true` when the agent advertises the transport of `server`.
+    func advertisesTransport(of server: MCPServer) -> Bool {
+        let transports = agentCapabilities?.session?.mcp
+        switch server {
+        case .http:
+            return transports?.http != nil
+        case .stdio:
+            return transports?.stdio != nil
+        case .unknown:
+            return false
         }
     }
 

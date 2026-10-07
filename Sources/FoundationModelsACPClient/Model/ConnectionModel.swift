@@ -94,6 +94,11 @@ public final class ConnectionModel {
     /// own.
     @ObservationIgnored private let logger: ACPLogger
 
+    /// The diagnostic sink of the last connection: the logger given to
+    /// ``connect(over:logger:bufferLimits:client:)``, or ``logger`` when that
+    /// call got none. Before the first connection, it is ``logger``.
+    @ObservationIgnored private(set) var connectionLogger: ACPLogger
+
     /// Makes a model with no connection and no open session.
     ///
     /// - Parameters:
@@ -112,6 +117,7 @@ public final class ConnectionModel {
         self.coalescingCadence = coalescingCadence
         self.clock = clock
         self.logger = logger
+        connectionLogger = logger
     }
 
     // MARK: - Connection
@@ -167,6 +173,7 @@ public final class ConnectionModel {
         authState = .unknown
         stopWatchingRequests()
         let connectionLogger = logger ?? self.logger
+        self.connectionLogger = connectionLogger
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
         let served = wrap(ModelClient(model: self, logger: connectionLogger))

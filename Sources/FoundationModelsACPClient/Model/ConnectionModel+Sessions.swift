@@ -13,8 +13,12 @@ import FoundationModelsACP
 extension ConnectionModel {
     // MARK: - New session
 
-    /// Sends `session/new` as the caller made it, and gives the model of the
-    /// new session.
+    /// Sends `session/new` as the caller made it, less each MCP server that
+    /// the agent cannot get, and gives the model of the new session.
+    ///
+    /// The request sends only the MCP servers whose transport the agent
+    /// advertises. The call logs one warning for each other server and does
+    /// not throw, so the session opens with the servers that remain.
     ///
     /// The model subscribes to the updates of the session as soon as the
     /// response gives the session id. The first subscription gets each update
@@ -39,12 +43,14 @@ extension ConnectionModel {
     ///   error, the model registers no session.
     public func newSession(_ request: NewSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
-        let response = try await ClientRequestSpan.send(request) { try await connection.newSession($0) }
+        var sent = request
+        sent.mcpServers = advertisedMCPServersWarningOfEachRemoved(in: request.mcpServers)
+        let response = try await ClientRequestSpan.send(sent) { try await connection.newSession($0) }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
         // The list goes in before the stream task of the model can fold an
         // update, so a status update that the agent sends after the response
         // always finds it.
-        session.setMCPServers(request.mcpServers ?? [])
+        session.setMCPServers(sent.mcpServers ?? [])
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         try register(session, openedOver: connection)
         return session
@@ -52,8 +58,9 @@ extension ConnectionModel {
 
     // MARK: - Resume session
 
-    /// Sends `session/resume` as the caller made it, and gives the model of
-    /// the session with the replay of the agent.
+    /// Sends `session/resume` as the caller made it, less each MCP server
+    /// that the agent cannot get, and gives the model of the session with
+    /// the replay of the agent.
     ///
     /// For a session that is open, the call reuses its model and its
     /// subscription, and gives the same instance. For another session, the
@@ -71,9 +78,11 @@ extension ConnectionModel {
     /// the configuration options of the response then seed the model, and a
     /// new model goes into ``openSessions``.
     ///
-    /// The MCP servers of the request replace ``SessionModel/mcpServers``
-    /// before the request goes out, also for an open model, and each item
-    /// starts again at ``MCPServerStatus/notReported``.
+    /// The request sends only the MCP servers whose transport the agent
+    /// advertises, in the same way as ``newSession(_:)``. The servers that
+    /// the request sends replace ``SessionModel/mcpServers`` before the
+    /// request goes out, also for an open model, and each item starts again
+    /// at ``MCPServerStatus/notReported``.
     ///
     /// On a failure, the replay ends as a failure and the call throws. An
     /// open model stays open, and gets back the MCP servers that it had
@@ -113,13 +122,15 @@ extension ConnectionModel {
     ///   `RequestError` of the agent; or the error of the connection.
     private func resumeInTurn(_ request: ResumeSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
-        if let open = openSessions[request.sessionId] {
-            try await replay(request, into: open, over: connection)
+        var sent = request
+        sent.mcpServers = advertisedMCPServersWarningOfEachRemoved(in: request.mcpServers)
+        if let open = openSessions[sent.sessionId] {
+            try await replay(sent, into: open, over: connection)
             return open
         }
-        let session = makeSubscribedSessionModel(sessionId: request.sessionId, over: connection)
+        let session = makeSubscribedSessionModel(sessionId: sent.sessionId, over: connection)
         do {
-            try await replay(request, into: session, over: connection)
+            try await replay(sent, into: session, over: connection)
         } catch {
             session.markClosed()
             throw error
@@ -240,6 +251,36 @@ extension ConnectionModel {
         return session
     }
 
+    // MARK: - MCP servers
+
+    /// Gives the MCP servers of a request that the agent can get, and logs
+    /// one warning for each server that the request does not send.
+    ///
+    /// The session opens with the servers that remain, so a removed server
+    /// is not an error.
+    ///
+    /// - Parameter servers: The `mcpServers` field of the request.
+    /// - Returns: The servers whose transport the agent advertises, in
+    ///   request order, or `nil` when `servers` is `nil`.
+    private func advertisedMCPServersWarningOfEachRemoved(in servers: [MCPServer]?) -> [MCPServer]? {
+        for server in servers ?? [] where !advertisesTransport(of: server) {
+            connectionLogger.log(Self.removedMCPServerWarning(for: server))
+        }
+        return advertisedMCPServers(in: servers)
+    }
+
+    /// Gives the warning for an MCP server that a request does not send,
+    /// because the agent does not advertise its transport.
+    ///
+    /// - Parameter server: The removed server.
+    /// - Returns: The warning, with the name and the transport of the server.
+    private static func removedMCPServerWarning(for server: MCPServer) -> String {
+        let label = server.nameAndTransport
+        let name = label.name.map { "the MCP server \"\($0)\"" } ?? "an MCP server with no name"
+        return "ConnectionModel: removed \(name) of the \(label.transport) transport from the request, "
+            + "because the agent does not advertise that transport"
+    }
+
     // MARK: - Registration
 
     /// Adds the model of a session that a request opened to
@@ -290,5 +331,33 @@ extension ConnectionModel {
         }
         unregister(session.sessionId)
         session.markClosed()
+    }
+}
+
+extension MCPServer {
+    /// The name and the wire transport of the server, for a log message.
+    ///
+    /// A server with a transport that this schema revision does not know has
+    /// a name only when its payload has a string `name` member.
+    fileprivate var nameAndTransport: (name: String?, transport: String) {
+        switch self {
+        case .http(let configuration):
+            (configuration.name, MCPServerTransport.http.rawValue)
+        case .stdio(let configuration):
+            (configuration.name, MCPServerTransport.stdio.rawValue)
+        case .unknown(let transport, let payload):
+            (payload.nameMember, transport)
+        }
+    }
+}
+
+extension JSONValue {
+    /// The string `name` member of an object, or `nil` when the value is not
+    /// an object or has no string `name` member.
+    fileprivate var nameMember: String? {
+        guard case .object(let members) = self, case .string(let name)? = members["name"] else {
+            return nil
+        }
+        return name
     }
 }

@@ -57,7 +57,10 @@ import Synchronization
 /// The stub records the working directory of each `session/new` it answered,
 /// because `--cwd` is the session's working directory and the wire request is
 /// the only place that value is observable. `AgentSessionTests` reads
-/// ``lastWorkingDirectory`` to assert the path the binary resolved.
+/// ``lastWorkingDirectory`` to assert the path the binary resolved. The stub
+/// also records the `mcpServers` of each `session/new` and `session/resume`,
+/// so `ConnectionModelSessionTests` can assert which servers went on the
+/// wire.
 ///
 /// The stub also records the `_meta` of each request and notification that it
 /// gets, because the `_meta` is where the W3C trace context of the client
@@ -116,6 +119,32 @@ final class ScriptedStubAgent: Agent {
     /// `nil` when it answered none.
     var lastWorkingDirectory: AbsolutePath? {
         workingDirectories.elements.last
+    }
+
+    /// The `mcpServers` field of each `session/new` this stub got, in
+    /// arrival order. A `nil` item is a request with no field.
+    ///
+    /// The connection serves `session/new` on a task of its own, so the
+    /// record must tolerate a write from a thread other than the test body's.
+    private let newSessionMCPServerRecord = ThreadSafeBuffer<[MCPServer]?>()
+
+    /// The `mcpServers` field of each `session/new` this stub got, in
+    /// arrival order. A `nil` item is a request with no field.
+    var newSessionMCPServers: [[MCPServer]?] {
+        newSessionMCPServerRecord.elements
+    }
+
+    /// The `mcpServers` field of each `session/resume` this stub got, in
+    /// arrival order. A `nil` item is a request with no field.
+    ///
+    /// The connection serves `session/resume` on a task of its own, so the
+    /// record must tolerate a write from a thread other than the test body's.
+    private let resumeSessionMCPServerRecord = ThreadSafeBuffer<[MCPServer]?>()
+
+    /// The `mcpServers` field of each `session/resume` this stub got, in
+    /// arrival order. A `nil` item is a request with no field.
+    var resumeSessionMCPServers: [[MCPServer]?] {
+        resumeSessionMCPServerRecord.elements
     }
 
     /// The `_meta` of each request and notification this stub got, in
@@ -385,6 +414,7 @@ final class ScriptedStubAgent: Agent {
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.newSession)
         workingDirectories.append(params.cwd)
+        newSessionMCPServerRecord.append(params.mcpServers)
         await newSessionGate?.wait()
         for update in newSessionScript {
             try await send(update)
@@ -411,6 +441,7 @@ final class ScriptedStubAgent: Agent {
 
     func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
         record(params.meta, of: ClientRequestSpan.Method.resumeSession)
+        resumeSessionMCPServerRecord.append(params.mcpServers)
         for update in resumeSessionScript {
             try await send(update)
         }

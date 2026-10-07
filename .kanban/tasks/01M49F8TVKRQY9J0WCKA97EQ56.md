@@ -1,10 +1,29 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m4b4tb1q37yknhkwqph2d001
+  text: |-
+    Research and implementation notes:
+    - `ConnectionModel` had one `logger` (the init default). `connect(over:logger:...)` can take a different logger for each connection, and `ModelClient` logs through that connection logger. The doc of `logger` says that it is used only when `connect` gets no logger. To obey that contract, I added `connectionLogger` (internal getter, set in `init` and in `connect`). The warnings for removed MCP servers go through `connectionLogger`. This is the "logger" of step 3 of the card.
+    - `advertisesTransport(of:)` is internal in `ConnectionModel+Initialize.swift`. `advertisedMCPServers(in:)` uses it as its filter. The logging helper `advertisedMCPServersWarningOfEachRemoved(in:)` in `ConnectionModel+Sessions.swift` also uses it.
+    - The warning has the name and the wire transport. A server of an unknown transport (`MCPServer.unknown(type, payload)`) gets its name from a string `name` member of the payload, if there is one. If not, the text says "an MCP server with no name".
+    - Existing MCP tests (`newSessionHoldsItsMCPServersAsNotReported`, `resumeReplacesTheMCPServersOfAnOpenSession`, `aFailedResumeKeepsTheMCPServers`, `newSessionAppliesAStatusUpdateThatFollowsTheResponse`, `aRequestWithNoMCPServersGivesAnEmptyList`) connected with the baseline capabilities, which have no `session.mcp`. After this change, they would send no server. They now connect with the new fixture `eachMCPTransportCapabilities`. Their assertions did not change.
+    - `SessionFactoryFixtures.connect` has a new `logger:` parameter, so a test can capture the warnings.
+    - RED: all 4 new tests failed because the agent got each server (12 issues). GREEN: 39/39 in ConnectionModelSessionTests.
+  timestamp: 2026-10-07T12:18:38.775350+00:00
+- actor: claude-code
+  id: 01m4b4tds0zkr2k39c5z44dgmv
+  text: |-
+    ### implement — changed
+    - evidence: 6 files changed: Sources/FoundationModelsACPClient/Model/ConnectionModel.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Initialize.swift, Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/ScriptedStubAgent.swift, Tests/FoundationModelsACPClientTests/Model/ConnectedModel.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift. `swift test --filter ConnectionModelSessionTests`: 39 passed, 0 failed. `swift test`: 515 tests in 45 suites passed, 0 failed. The only warning is the accepted SwiftPM MLX "missing creator for mutated node" warning (^zws9qzt).
+    - next: /review
+  timestamp: 2026-10-07T12:18:41.568062+00:00
 depends_on:
 - 01M49F8ES2T6QBK5BAPK8SKZ98
-position_column: todo
-position_ordinal: '8180'
+position_column: doing
+position_ordinal: '80'
 title: 'Model: send only the MCP servers whose transport the agent advertises'
 ---
 ## What
@@ -22,11 +41,11 @@ ACP v2 initialization (https://agentclientprotocol.com/protocol/v2/initializatio
 
 ## Acceptance Criteria
 
-- [ ] With `session.mcp.http` and `session.mcp.stdio` advertised, each server goes to the agent.
-- [ ] With only `session.mcp.stdio` advertised, the agent gets no HTTP server, and `SessionModel.mcpServers` has no item for it.
-- [ ] With no `session.mcp`, the agent gets an empty list or no list, and the session opens.
-- [ ] A removed server gives one warning in the log.
-- [ ] `resumeSession(_:)` applies the same rule.
+- [x] With `session.mcp.http` and `session.mcp.stdio` advertised, each server goes to the agent.
+- [x] With only `session.mcp.stdio` advertised, the agent gets no HTTP server, and `SessionModel.mcpServers` has no item for it.
+- [x] With no `session.mcp`, the agent gets an empty list or no list, and the session opens.
+- [x] A removed server gives one warning in the log.
+- [x] `resumeSession(_:)` applies the same rule.
 
 ## Tests
 
@@ -43,6 +62,6 @@ Use /tdd — write failing tests first, then implement to make them pass.
 
 ## Subtasks
 
-- [ ] Record `mcpServers` in `ScriptedStubAgent` and write the four failing tests.
-- [ ] Add `advertisedMCPServers(in:)`.
-- [ ] Filter the request in `newSession(_:)` and `resumeInTurn(_:)`, and log each removed server.
+- [x] Record `mcpServers` in `ScriptedStubAgent` and write the four failing tests.
+- [x] Add `advertisedMCPServers(in:)`.
+- [x] Filter the request in `newSession(_:)` and `resumeInTurn(_:)`, and log each removed server.

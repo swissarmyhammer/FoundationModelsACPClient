@@ -48,6 +48,18 @@ struct ConnectedModel {
         builtAgents.elements.last?.deleteRequests ?? []
     }
 
+    /// The `mcpServers` field of each `session/new` that the agent got, in
+    /// arrival order. A `nil` item is a request with no field.
+    var newSessionMCPServers: [[MCPServer]?] {
+        builtAgents.elements.last?.newSessionMCPServers ?? []
+    }
+
+    /// The `mcpServers` field of each `session/resume` that the agent got,
+    /// in arrival order. A `nil` item is a request with no field.
+    var resumeSessionMCPServers: [[MCPServer]?] {
+        builtAgents.elements.last?.resumeSessionMCPServers ?? []
+    }
+
     /// Connects a model to the stub agent that `makeAgent` builds.
     ///
     /// - Parameters:
