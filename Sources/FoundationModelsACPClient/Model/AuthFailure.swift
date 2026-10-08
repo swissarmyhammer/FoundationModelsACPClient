@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 
 /// The record of an auth operation that failed, for a UI to observe.
@@ -52,6 +53,9 @@ public struct AuthFailure: Hashable, Sendable {
 
         /// A text about the failure that a UI can show.
         ///
+        /// Each text comes from the string catalog of this package, in the
+        /// language of the user, so a host app can translate it.
+        ///
         /// - ``request(_:)``: the message of the JSON-RPC error.
         /// - ``terminal(exitStatus:message:)``: the message of the failure
         ///   when there is one. If not, a text that gives the exit status, or
@@ -61,26 +65,68 @@ public struct AuthFailure: Hashable, Sendable {
         public var message: String {
             switch self {
             case .request(let error):
-                error.message
-            case .terminal(let exitStatus, let message):
-                message ?? Self.terminalMessage(exitStatus: exitStatus)
+                MessageKey.request.text(formatting: error.message)
+            case .terminal(_, let message?):
+                MessageKey.terminalMessage.text(formatting: message)
+            case .terminal(let exitStatus?, nil):
+                MessageKey.terminalExitStatus.text(formatting: exitStatus)
+            case .terminal(nil, nil):
+                MessageKey.terminalAbnormalStop.text
             case .unsupported:
-                "The agent cannot do this authentication operation."
+                MessageKey.unsupported.text
             }
         }
 
-        /// Gives the text of a failed terminal auth process that gave no
-        /// message.
+        /// The key of each text of ``message`` in the string catalog of this
+        /// package.
         ///
-        /// - Parameter exitStatus: The exit status of the process, or `nil`
-        ///   when the process did not exit normally.
-        /// - Returns: A text that gives the exit status, or that says that
-        ///   the process did not stop normally.
-        private static func terminalMessage(exitStatus: Int32?) -> String {
-            guard let exitStatus else {
-                return "The sign-in process did not stop normally."
+        /// The agent or the host writes the text of a request error and the
+        /// message of a terminal failure. The catalog does not translate these
+        /// texts. It holds a format that puts each text into the message, so a
+        /// translation can add words around the text.
+        enum MessageKey: String, CaseIterable {
+            /// The format of the message of a JSON-RPC error. The argument is
+            /// the message of the error.
+            case request = "auth.failure.request"
+
+            /// The format of the message of a terminal auth process. The
+            /// argument is the message of the failure.
+            case terminalMessage = "auth.failure.terminal.message"
+
+            /// The format of the text of a terminal auth process that exited
+            /// with no message. The argument is the exit status.
+            case terminalExitStatus = "auth.failure.terminal.exitStatus"
+
+            /// The text of a terminal auth process that did not exit normally
+            /// and gave no message.
+            case terminalAbnormalStop = "auth.failure.terminal.abnormalStop"
+
+            /// The text of an auth operation that the agent does not
+            /// advertise.
+            case unsupported = "auth.failure.unsupported"
+
+            /// The resource bundle that holds the string catalog of this
+            /// module.
+            static var bundle: Bundle { .module }
+
+            /// The text of this key, in the language of the user.
+            ///
+            /// The key itself is the text when the catalog has no entry for
+            /// it, so a missing entry is easy to see.
+            var text: String {
+                Self.bundle.localizedString(forKey: rawValue, value: nil, table: nil)
             }
-            return "The sign-in process stopped with exit status \(exitStatus)."
+
+            /// Puts the arguments into the format of this key.
+            ///
+            /// The current locale formats each number argument.
+            ///
+            /// - Parameter arguments: The format arguments, in the order of
+            ///   the format of the source language.
+            /// - Returns: The text of this key with the arguments in it.
+            func text(formatting arguments: any CVarArg...) -> String {
+                String(format: text, locale: .current, arguments: arguments)
+            }
         }
     }
 

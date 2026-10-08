@@ -5,6 +5,10 @@ import PackageDescription
 
 let package = Package(
     name: "FoundationModelsACPClient",
+    // The language of the string catalog of the library target. A bundle
+    // gives this localization when it has no localization for the language
+    // of the user.
+    defaultLocalization: "en",
     // macOS only, matching the family floor (macOS 27 / FoundationModels v2).
     // There is no `@available` branching in this package.
     platforms: [
@@ -113,7 +117,11 @@ let package = Package(
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Metrics", package: "swift-metrics"),
-            ]
+            ],
+            // The string catalog of the texts that the library gives a UI,
+            // for example `AuthFailure.Reason.message`. A host app translates
+            // these texts with no change to the code.
+            resources: [.process("Localizable.xcstrings")]
         ),
         // Everything the `acp-client` binary does (cli-plan.md §3): the
         // subcommand tree, the agent session, the terminal layer and the exit

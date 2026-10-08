@@ -1,0 +1,66 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "auth.failure.request" : {
+      "comment" : "The text of a sign-in or sign-out request that the agent refused, or that failed. The argument is the message of the JSON-RPC error. The agent writes that message, so do not translate it. Keep the argument, and add words around it only.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@"
+          }
+        }
+      }
+    },
+    "auth.failure.terminal.abnormalStop" : {
+      "comment" : "The text of a sign-in process that did not exit normally (for example, a signal stopped it) and gave no message.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sign-in process did not stop normally."
+          }
+        }
+      }
+    },
+    "auth.failure.terminal.exitStatus" : {
+      "comment" : "The text of a sign-in process that exited with a failure and gave no message. The argument is the exit status of the process.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sign-in process stopped with exit status %d."
+          }
+        }
+      }
+    },
+    "auth.failure.terminal.message" : {
+      "comment" : "The text of a sign-in process that failed with a message. The argument is that message. The host app writes that message, so do not translate it. Keep the argument, and add words around it only.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@"
+          }
+        }
+      }
+    },
+    "auth.failure.unsupported" : {
+      "comment" : "The text of a sign-in or sign-out operation that the agent does not advertise, so the client did not start it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The agent cannot do this authentication operation."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
