@@ -45,7 +45,7 @@ extension SessionModel {
             return response
         } catch {
             failPrompt(entry)
-            appendError(RequestError(reporting: error))
+            appendError(reporting: error)
             throw error
         }
     }
@@ -61,6 +61,21 @@ extension SessionModel {
     ///   - data: The JSON-RPC error data, or `nil`.
     public func appendError(code: ErrorCode, message: String, data: JSONValue?) {
         appendLocalEntry(.error(ErrorEntry(code: code, message: message, data: data)))
+    }
+
+    /// Appends the local error entry of an error that a request threw.
+    ///
+    /// Use this for a request that the host sent and that failed, so the
+    /// entry has the same text and data as the entry that ``prompt(_:meta:)``
+    /// adds. ``RequestError/init(reporting:)`` gives the code, the message,
+    /// and the data of the entry. For example, a closed connection gives the
+    /// message "The connection to the agent closed before the agent
+    /// answered." and the data `{"connectionError": "closed"}`.
+    ///
+    /// - Parameter error: The error that the request threw.
+    public func appendError(reporting error: any Error) {
+        let failure = RequestError(reporting: error)
+        appendError(code: failure.code, message: failure.message, data: failure.data)
     }
 
     /// Cancels the turn: answers each pending permission request with the
@@ -116,13 +131,6 @@ extension SessionModel {
     private func recordTraceContext(of request: PromptRequest) {
         promptTraceMeta = TraceContextMeta.extract(from: request.meta).map { $0.inject(into: nil) }
     }
-
-    /// Appends the local error entry of a failed request.
-    ///
-    /// - Parameter failure: The JSON-RPC error of the request.
-    private func appendError(_ failure: RequestError) {
-        appendError(code: failure.code, message: failure.message, data: failure.data)
-    }
 }
 
 extension RequestError {
@@ -134,12 +142,24 @@ extension RequestError {
     /// error entry of the transcript and for ``AuthFailure/Reason/request(_:)``.
     ///
     /// A `RequestError` stays as the peer sent it. A `ConnectionError` has no
-    /// JSON-RPC code, so it becomes `internalError` with the name of its case
-    /// in `data`. A cancellation becomes `requestCancelled`. Each other error
-    /// becomes `internalError` with its description as the detail.
+    /// JSON-RPC code, so it becomes `internalError` with a message of the
+    /// client and with the name of its case in the `connectionError` member
+    /// of `data`:
+    ///
+    /// - `ConnectionError.closed`: "The connection to the agent closed before
+    ///   the agent answered.", and `{"connectionError": "closed"}`.
+    /// - `ConnectionError.timedOut`: "The request timed out before the agent
+    ///   answered.", and `{"connectionError": "timedOut"}`.
+    ///
+    /// A cancellation becomes `requestCancelled`. Each other error becomes
+    /// `internalError` with its description as the detail.
+    ///
+    /// A host that sends a request itself uses this initializer, or
+    /// ``SessionModel/appendError(reporting:)``, so its error entry is the
+    /// same as the entry of the client.
     ///
     /// - Parameter error: The error that the request threw.
-    init(reporting error: any Error) {
+    public init(reporting error: any Error) {
         switch error {
         case let requestError as RequestError:
             self = requestError
