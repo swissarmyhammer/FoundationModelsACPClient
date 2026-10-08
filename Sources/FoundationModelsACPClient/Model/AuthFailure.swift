@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Logging
 
 /// The record of an auth operation that failed, for a UI to observe.
 ///
@@ -109,12 +110,45 @@ public struct AuthFailure: Hashable, Sendable {
             /// module.
             static var bundle: Bundle { .module }
 
+            /// The log metadata key that holds the catalog key with no entry.
+            static let missingEntryMetadataKey = "localization.key"
+
             /// The text of this key, in the language of the user.
             ///
-            /// The key itself is the text when the catalog has no entry for
-            /// it, so a missing entry is easy to see.
+            /// The catalog has an entry for each key. When an entry is
+            /// missing, ``recordMissingEntry(_:)`` records the defect, and the
+            /// key itself is the text, so a missing entry is easy to see.
             var text: String {
-                Self.bundle.localizedString(forKey: rawValue, value: nil, table: nil)
+                text(in: Self.bundle, reportingMissingEntry: Self.recordMissingEntry)
+            }
+
+            /// The text of this key in the string table of a bundle.
+            ///
+            /// - Parameters:
+            ///   - bundle: The bundle that holds the string table.
+            ///   - report: Receives the key when the string table has no entry
+            ///     for it.
+            /// - Returns: The text of the entry, or the key when there is no
+            ///   entry.
+            func text(in bundle: Bundle, reportingMissingEntry report: (String) -> Void) -> String {
+                let entry = bundle.localizedString(forKey: rawValue, value: nil, table: nil)
+                guard entry != rawValue else {
+                    report(rawValue)
+                    return rawValue
+                }
+                return entry
+            }
+
+            /// Records a catalog key with no entry: the assertion stops a debug
+            /// build, and the log records the defect in a release build.
+            ///
+            /// - Parameter key: The catalog key with no entry.
+            static func recordMissingEntry(_ key: String) {
+                assertionFailure("no catalog entry for \(key)")
+                Logger(label: ACPClientTelemetry.logLabel).error(
+                    "The string catalog has no entry for the key \(key); the key stands as the text.",
+                    metadata: [missingEntryMetadataKey: "\(key)"]
+                )
             }
 
             /// Puts the arguments into the format of this key.

@@ -18,6 +18,10 @@ private enum AuthFailureMessageFixtures {
     /// key. No catalog text is equal to it.
     static let missingEntry = "<no catalog entry>"
 
+    /// A bundle that holds no string catalog of the client package: the main
+    /// bundle of the test runner.
+    static let bundleWithNoCatalog = Bundle.main
+
     /// Each reason, with the English text that the reason gives.
     static let englishTexts: [(AuthFailure.Reason, String)] = [
         (.request(InitializeFixtures.loginRefusal), InitializeFixtures.loginRefusal.message),
@@ -64,5 +68,31 @@ private enum AuthFailureMessageFixtures {
         )
 
         #expect(entry != AuthFailureMessageFixtures.missingEntry)
+    }
+
+    @Test(arguments: AuthFailure.Reason.MessageKey.allCases)
+    func aKeyWithNoCatalogEntryGivesTheKeyAndReportsIt(_ key: AuthFailure.Reason.MessageKey) {
+        var reportedKeys: [String] = []
+
+        let text = key.text(
+            in: AuthFailureMessageFixtures.bundleWithNoCatalog,
+            reportingMissingEntry: { reportedKeys.append($0) }
+        )
+
+        #expect(text == key.rawValue)
+        #expect(reportedKeys == [key.rawValue])
+    }
+
+    @Test(arguments: AuthFailure.Reason.MessageKey.allCases)
+    func aKeyWithACatalogEntryReportsNothing(_ key: AuthFailure.Reason.MessageKey) {
+        var reportedKeys: [String] = []
+
+        let text = key.text(
+            in: AuthFailure.Reason.MessageKey.bundle,
+            reportingMissingEntry: { reportedKeys.append($0) }
+        )
+
+        #expect(text != key.rawValue)
+        #expect(reportedKeys.isEmpty)
     }
 }
