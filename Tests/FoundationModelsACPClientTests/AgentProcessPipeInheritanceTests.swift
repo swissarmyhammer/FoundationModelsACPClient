@@ -92,7 +92,8 @@ struct AgentProcessPipeInheritanceTests {
 ///   agent.
 /// - Returns: The whole stdout of the agent, or `nil` when the read failed or
 ///   did not end in time.
-/// - Throws: The errors of ``AgentProcess/init(command:arguments:registry:)``.
+/// - Throws: The errors of
+///   ``AgentProcess/init(command:arguments:environment:currentDirectory:registry:)``.
 private func descriptorProbeAnswer(for descriptor: Int32) async throws -> String? {
     let probe = try AgentProcess(
         command: StdioChild.descriptorProbeCommand,
@@ -101,13 +102,5 @@ private func descriptorProbeAnswer(for descriptor: Int32) async throws -> String
     )
     defer { probe.shutdown() }
 
-    let bytes = probe.transport.bytes
-    return await outcome { () async -> String? in
-        do {
-            let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }
-            return String(decoding: answer, as: UTF8.self)
-        } catch {
-            return nil
-        }
-    } ?? nil
+    return await StdioChild.wholeStandardOutput(of: probe)
 }

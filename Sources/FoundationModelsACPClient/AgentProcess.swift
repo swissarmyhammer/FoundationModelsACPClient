@@ -61,8 +61,8 @@ import Synchronization
 /// A failure while constructing an ``AgentProcess`` or while speaking to
 /// its agent.
 public enum AgentProcessError: Error, Equatable, CustomStringConvertible {
-    /// ``AgentProcess/init(command:arguments:)`` got a `command` that is
-    /// not an absolute path.
+    /// ``AgentProcess/init(command:arguments:environment:currentDirectory:)``
+    /// got a `command` that is not an absolute path.
     ///
     /// This package requires an absolute path rather than a `PATH` lookup,
     /// for the family's own reason: a relative lookup would have to select
@@ -75,7 +75,8 @@ public enum AgentProcessError: Error, Equatable, CustomStringConvertible {
     case pipeCreationFailed(errno: Int32)
 
     /// `posix_spawn` itself failed; carries the `command` path and the
-    /// error number `posix_spawn` returned directly.
+    /// error number `posix_spawn` returned directly. A working directory that
+    /// the child cannot enter fails the spawn too.
     case spawnFailed(command: String, errno: Int32)
 
     /// A write to the agent's stdin failed; carries the C `errno`. After
@@ -134,6 +135,14 @@ public struct AgentProcess: Sendable {
     /// The arguments given to ``command`` at the spawn.
     public let arguments: [String]
 
+    /// The whole environment given to the agent at the spawn, or `nil` when
+    /// the agent got the environment of this process.
+    public let environment: [String: String]?
+
+    /// The working directory the agent started in, or `nil` when the agent
+    /// started in the working directory of this process.
+    public let currentDirectory: String?
+
     /// The transport wired to the agent's stdio. Hand it to
     /// ``ConnectionModel/connect(over:logger:bufferLimits:client:)``.
     public let transport: any ACPTransport
@@ -145,40 +154,81 @@ public struct AgentProcess: Sendable {
     /// Spawns the agent process, in its own process group, and wires its
     /// stdio to ``transport``.
     ///
-    /// The child inherits this process's environment and its stderr.
+    /// The child gets the stderr of this process. The child gets the
+    /// environment and the working directory of this process unless the
+    /// caller gives others, so a host needs no `/usr/bin/env` wrapper to set
+    /// them.
     ///
     /// - Parameters:
     ///   - command: The absolute path of the agent executable.
     ///   - arguments: The arguments to give to the agent.
+    ///   - environment: The whole environment of the agent, or `nil` to give
+    ///     it the environment of this process. A dictionary replaces the
+    ///     environment of this process; it does not add to it.
+    ///   - currentDirectory: The working directory the agent starts in, or
+    ///     `nil` to start it in the working directory of this process. A
+    ///     relative path is relative to the working directory of this
+    ///     process.
     /// - Throws: ``AgentProcessError/commandNotAbsolute(_:)`` for a
     ///   relative `command`, ``AgentProcessError/pipeCreationFailed(errno:)``
     ///   when a pipe cannot be made, or
     ///   ``AgentProcessError/spawnFailed(command:errno:)`` when
-    ///   `posix_spawn` itself fails.
-    public init(command: String, arguments: [String] = []) throws {
-        try self.init(command: command, arguments: arguments, registry: .global)
+    ///   `posix_spawn` itself fails, also for a `currentDirectory` that the
+    ///   child cannot enter.
+    public init(
+        command: String,
+        arguments: [String] = [],
+        environment: [String: String]? = nil,
+        currentDirectory: String? = nil
+    ) throws {
+        try self.init(
+            command: command,
+            arguments: arguments,
+            environment: environment,
+            currentDirectory: currentDirectory,
+            registry: .global
+        )
     }
 
     /// Spawns the agent process and registers its pid in `registry`.
     ///
-    /// ``init(command:arguments:)`` registers in `ProcessRegistry.global`,
-    /// the registry every process this package starts shares. A unit test
-    /// spawns into a registry of its own, so its pids never reach the
-    /// process-wide registry that other tests read at the same time.
+    /// ``init(command:arguments:environment:currentDirectory:)`` registers in
+    /// `ProcessRegistry.global`, the registry every process this package
+    /// starts shares. A unit test spawns into a registry of its own, so its
+    /// pids never reach the process-wide registry that other tests read at
+    /// the same time.
     ///
     /// - Parameters:
     ///   - command: The absolute path of the agent executable.
     ///   - arguments: The arguments to give to the agent.
+    ///   - environment: The whole environment of the agent, or `nil` for the
+    ///     environment of this process.
+    ///   - currentDirectory: The working directory of the agent, or `nil`
+    ///     for the working directory of this process.
     ///   - registry: The registry for the spawned pid.
-    /// - Throws: The errors of ``init(command:arguments:)``.
-    init(command: String, arguments: [String] = [], registry: ProcessRegistry) throws {
+    /// - Throws: The errors of
+    ///   ``init(command:arguments:environment:currentDirectory:)``.
+    init(
+        command: String,
+        arguments: [String] = [],
+        environment: [String: String]? = nil,
+        currentDirectory: String? = nil,
+        registry: ProcessRegistry
+    ) throws {
         guard command.hasPrefix("/") else {
             throw AgentProcessError.commandNotAbsolute(command)
         }
         self.command = command
         self.arguments = arguments
+        self.environment = environment
+        self.currentDirectory = currentDirectory
 
-        let spawned = try Self.spawn(command: command, arguments: arguments)
+        let spawned = try Self.spawn(
+            command: command,
+            arguments: arguments,
+            environment: environment,
+            currentDirectory: currentDirectory
+        )
         let state = AgentProcessState(registry: registry)
         state.record(pid: spawned.pid, stdinWriteDescriptor: spawned.stdinWriteDescriptor)
         self.state = state
@@ -198,6 +248,27 @@ public struct AgentProcess: Sendable {
     /// Tests assert teardown by pid, not by inference; a host never needs
     /// this to use ``shutdown()`` correctly.
     public var processIdentifier: pid_t? { state.pid }
+
+    /// How the agent ended, or `nil` while the teardown has not reaped it.
+    ///
+    /// The teardown records the status when it reaps the agent: after the
+    /// agent ended by itself, after ``shutdown()``, or after the transport
+    /// ended. ``waitForExit()`` waits for the same value.
+    public var exitStatus: AgentExitStatus? { state.exitStatus }
+
+    /// Waits until the teardown reaped the agent, and gives how it ended.
+    ///
+    /// This call does not end the agent. It returns when the agent ends by
+    /// itself (its stdout closes), or when the host calls ``shutdown()`` or
+    /// ends the transport. A call after the end returns at once.
+    ///
+    /// - Returns: How the agent ended. ``AgentExitStatus/notCollected``
+    ///   tells that the teardown did not collect the agent in its time limit.
+    /// - Throws: `CancellationError` when the task of the caller is
+    ///   cancelled before the end.
+    public func waitForExit() async throws -> AgentExitStatus {
+        try await state.waitForExit()
+    }
 
     /// Group-kills and reaps the agent. Idempotent; a no-op when the agent
     /// is already torn down.
@@ -245,10 +316,19 @@ public struct AgentProcess: Sendable {
     /// - Parameters:
     ///   - command: The absolute path of the executable.
     ///   - arguments: The arguments to give it.
+    ///   - environment: The whole environment of the child, or `nil` for the
+    ///     environment of this process.
+    ///   - currentDirectory: The working directory of the child, or `nil`
+    ///     for the working directory of this process.
     /// - Returns: The spawned pid and this process's pipe ends.
     /// - Throws: ``AgentProcessError/pipeCreationFailed(errno:)`` or
     ///   ``AgentProcessError/spawnFailed(command:errno:)``.
-    private static func spawn(command: String, arguments: [String]) throws -> Spawned {
+    private static func spawn(
+        command: String,
+        arguments: [String],
+        environment: [String: String]?,
+        currentDirectory: String?
+    ) throws -> Spawned {
         let (stdinRead, stdinWrite) = try createPipe()
         // A write to a dead child's stdin raises `SIGPIPE` by default, and
         // that signal terminates the whole host process. `F_SETNOSIGPIPE`
@@ -275,7 +355,9 @@ public struct AgentProcess: Sendable {
                     (source: stdinRead, target: STDIN_FILENO),
                     (source: stdoutWrite, target: STDOUT_FILENO),
                 ],
-                processGroup: .own
+                processGroup: .own,
+                environment: environment,
+                currentDirectory: currentDirectory
             )
         } catch {
             // The spawn failed before any child inherited these
@@ -311,9 +393,10 @@ public struct AgentProcess: Sendable {
     /// two calls, and another thread can spawn a child between them; that
     /// child gets both ends before the flag is on. Only a spawn that names
     /// the descriptors its child keeps is free of the race, and
-    /// ``spawnChild(command:arguments:descriptors:processGroup:)`` is that
-    /// spawn for each child of this package. The flag here is the guard for
-    /// the spawns of other code in this process, after the second call.
+    /// ``spawnChild(command:arguments:descriptors:processGroup:environment:currentDirectory:)``
+    /// is that spawn for each child of this package. The flag here is the
+    /// guard for the spawns of other code in this process, after the second
+    /// call.
     ///
     /// The `dup2` file action still puts the child's end on descriptor 0 or
     /// 1, because `dup2` clears the flag on the new descriptor.
@@ -357,12 +440,19 @@ public struct AgentProcess: Sendable {
     ///     and the descriptor number it gets in the child. This process keeps
     ///     its own copies, and the caller closes them.
     ///   - processGroup: The process group the child joins.
+    ///   - environment: The whole environment of the child, or `nil` for the
+    ///     environment of this process.
+    ///   - currentDirectory: The working directory of the child, or `nil`
+    ///     for the working directory of this process.
     /// - Returns: The spawned pid.
-    /// - Throws: ``AgentProcessError/spawnFailed(command:errno:)``.
+    /// - Throws: ``AgentProcessError/spawnFailed(command:errno:)``, also when
+    ///   the child cannot enter `currentDirectory`.
     static func spawnChild(
         command: String, arguments: [String],
         descriptors: [(source: Int32, target: Int32)],
-        processGroup: ChildProcessGroup
+        processGroup: ChildProcessGroup,
+        environment: [String: String]? = nil,
+        currentDirectory: String? = nil
     ) throws -> pid_t {
         var fileActions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&fileActions)
@@ -373,6 +463,12 @@ public struct AgentProcess: Sendable {
         // The child writes its diagnostics to the stderr of this process, so
         // that they never reach the wire on its stdout.
         posix_spawn_file_actions_addinherit_np(&fileActions, STDERR_FILENO)
+        // The change of directory is a file action, so it occurs in the child
+        // before the exec, and the directory of this process stays the same.
+        // The command is an absolute path, so the change does not move it.
+        if let currentDirectory {
+            posix_spawn_file_actions_addchdir(&fileActions, currentDirectory)
+        }
 
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
@@ -382,15 +478,51 @@ public struct AgentProcess: Sendable {
         // `0` makes the child the leader of a new group.
         posix_spawnattr_setpgroup(&attributes, 0)
 
-        let argv: [UnsafeMutablePointer<CChar>?] = ([command] + arguments).map { strdup($0) } + [nil]
+        let argv = cStrings([command] + arguments)
         defer { freePointers(argv) }
 
         var pid: pid_t = 0
-        let spawnResult = posix_spawn(&pid, command, &fileActions, &attributes, argv, environ)
+        let spawnResult = withEnvironmentBlock(environment) { envp in
+            posix_spawn(&pid, command, &fileActions, &attributes, argv, envp)
+        }
         guard spawnResult == 0 else {
             throw AgentProcessError.spawnFailed(command: command, errno: spawnResult)
         }
         return pid
+    }
+
+    /// Gives `body` the `envp` block for a spawn: the environment of this
+    /// process for `nil`, or else one `NAME=value` entry for each pair of
+    /// `environment`, in name order, with a `nil` terminator.
+    ///
+    /// The block of a dictionary lives only while `body` runs.
+    ///
+    /// - Parameters:
+    ///   - environment: The whole environment of the child, or `nil` for the
+    ///     environment of this process.
+    ///   - body: The work that reads the block.
+    /// - Returns: The result of `body`.
+    private static func withEnvironmentBlock<Result>(
+        _ environment: [String: String]?,
+        _ body: (UnsafePointer<UnsafeMutablePointer<CChar>?>?) -> Result
+    ) -> Result {
+        guard let environment else {
+            return body(UnsafePointer(environ))
+        }
+        let entries = environment.map { name, value in "\(name)=\(value)" }.sorted()
+        let block = cStrings(entries)
+        defer { freePointers(block) }
+        return block.withUnsafeBufferPointer { body($0.baseAddress) }
+    }
+
+    /// Copies each string into a `strdup`'d C string, and adds the `nil`
+    /// terminator that `argv` and `envp` need.
+    ///
+    /// - Parameter strings: The strings to copy.
+    /// - Returns: The C strings and the terminator. The caller frees them
+    ///   with ``freePointers(_:)``.
+    private static func cStrings(_ strings: [String]) -> [UnsafeMutablePointer<CChar>?] {
+        strings.map { strdup($0) } + [nil]
     }
 
     /// Frees each non-nil `strdup`'d C string in `pointers`.
@@ -470,7 +602,7 @@ public struct AgentProcess: Sendable {
 }
 
 /// The process group that a child of
-/// ``AgentProcess/spawnChild(command:arguments:descriptors:processGroup:)``
+/// ``AgentProcess/spawnChild(command:arguments:descriptors:processGroup:environment:currentDirectory:)``
 /// joins.
 enum ChildProcessGroup {
     /// A new process group, with the child as its leader. `killpg` of the
@@ -526,8 +658,8 @@ struct AgentStdioTransport: ACPTransport {
 }
 
 /// The shared, class-backed bookkeeping behind one ``AgentProcess``: the
-/// live pid, the stdin write descriptor, and the registry the pid is
-/// registered into.
+/// live pid, the stdin write descriptor, the registry the pid is registered
+/// into, and the exit status the teardown records.
 ///
 /// A plain `final class` with a `Mutex` rather than an actor, for the
 /// family's own reason: `deinit` cannot `await`, so the state it tears down
@@ -549,6 +681,10 @@ final class AgentProcessState: Sendable {
     /// The registry the recorded pid is registered into and deregistered
     /// from.
     private let registry: ProcessRegistry
+
+    /// The exit status that ``terminateCurrent()`` records, and the callers
+    /// that wait for it.
+    private let exitLatch = AgentExitLatch()
 
     /// The number of seconds in ``defaultReapTimeLimit``.
     private static let defaultReapTimeLimitSeconds = 5
@@ -582,6 +718,21 @@ final class AgentProcessState: Sendable {
     /// The live pid, or `nil` after teardown.
     var pid: pid_t? {
         live.withLock { $0?.pid }
+    }
+
+    /// How the agent ended, or `nil` before ``terminateCurrent()`` reaped
+    /// it.
+    var exitStatus: AgentExitStatus? {
+        exitLatch.status
+    }
+
+    /// Waits until ``terminateCurrent()`` records how the agent ended.
+    ///
+    /// - Returns: How the agent ended.
+    /// - Throws: `CancellationError` when the task of the caller is
+    ///   cancelled before the record.
+    func waitForExit() async throws -> AgentExitStatus {
+        try await exitLatch.wait()
     }
 
     /// Records the freshly spawned agent and registers its pid.
@@ -640,6 +791,10 @@ final class AgentProcessState: Sendable {
     /// did not reach still reads the EOF, and an ACP agent exits on it. An
     /// agent that ignores both stays alive after the reap time limit ends,
     /// rather than block the host forever.
+    ///
+    /// The teardown records how the agent ended after the reap, and after
+    /// the deregister, so a caller that ``waitForExit()`` resumes finds the
+    /// pid gone from the registry.
     func terminateCurrent() {
         let taken = live.withLock { current -> Live? in
             let recorded = current
@@ -651,8 +806,9 @@ final class AgentProcessState: Sendable {
         if let descriptor = taken.stdinWriteDescriptor {
             close(descriptor)
         }
-        reap(pid: taken.pid)
+        let status = reap(pid: taken.pid)
         registry.deregister(taken.pid)
+        exitLatch.record(status)
     }
 
     /// The number of milliseconds in ``reapPollInterval``.
@@ -671,13 +827,22 @@ final class AgentProcessState: Sendable {
     /// Only the first answer is a reason to poll again.
     ///
     /// - Parameter pid: The pid to collect.
-    private func reap(pid: pid_t) {
+    /// - Returns: How the child ended, decoded from the status `waitpid`
+    ///   wrote, or ``AgentExitStatus/notCollected`` when no answer collected
+    ///   the child.
+    private func reap(pid: pid_t) -> AgentExitStatus {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: reapTimeLimit)
         var status: Int32 = 0
-        while waitpid(pid, &status, WNOHANG) == 0, clock.now < deadline {
+        var answer = waitpid(pid, &status, WNOHANG)
+        while answer == 0, clock.now < deadline {
             Thread.sleep(forTimeInterval: Self.reapPollInterval / .seconds(1))
+            answer = waitpid(pid, &status, WNOHANG)
         }
+        guard answer == pid else {
+            return .notCollected
+        }
+        return AgentExitStatus(waitStatus: status)
     }
 
     /// Owner teardown: once nothing retains this state, ARC runs the same

@@ -66,7 +66,7 @@ private let discardedOutputPath = "/dev/null"
 ///   - arguments: The arguments to give it.
 /// - Returns: The child's pid and this process's write end of its stdin.
 /// - Throws: The errors of `AgentProcess.createPipe()` and
-///   `AgentProcess.spawnChild(command:arguments:descriptors:processGroup:)`.
+///   `AgentProcess.spawnChild(command:arguments:descriptors:processGroup:environment:currentDirectory:)`.
 private func spawnInThisProcessGroup(
     command: String, arguments: [String]
 ) throws -> GroupMemberChild {

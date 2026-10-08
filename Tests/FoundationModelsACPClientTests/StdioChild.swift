@@ -1,9 +1,14 @@
 import Darwin
+import Foundation
 
-// The children the process tests spawn. They are `/bin/cat`, `/bin/sleep` and
-// two `/bin/sh` scripts, and not an ACP agent: `cat` reads its stdin until end
-// of file, `sleep` ignores its stdin, one script runs `cat` and then `sleep`,
-// and the other tells whether the child holds one descriptor.
+@testable import FoundationModelsACPClient
+
+// The children the process tests spawn. They are `/bin/cat`, `/bin/sleep`,
+// `/usr/bin/env`, `/bin/pwd` and three `/bin/sh` scripts, and not an ACP
+// agent: `cat` reads its stdin until end of file, `sleep` ignores its stdin,
+// `env` writes its environment, `pwd` writes its working directory, one script
+// runs `cat` and then `sleep`, one tells whether the child holds one
+// descriptor, and one exits at once with a given status.
 // The tests that spawn a real foreign agent over stdio live in the nested
 // `IntegrationTests` package.
 
@@ -58,6 +63,30 @@ enum StdioChild {
         return ["-c", script, descriptorProbeCommand, String(descriptor)]
     }
 
+    /// The command for a child that writes its whole environment on its
+    /// stdout, one `NAME=value` line for each variable, and then exits.
+    static let environmentPrinterCommand = "/usr/bin/env"
+
+    /// The command for a child that writes its working directory on its
+    /// stdout, and then exits. It runs with ``directoryPrinterArguments``.
+    static let directoryPrinterCommand = "/bin/pwd"
+
+    /// The arguments that make ``directoryPrinterCommand`` write the physical
+    /// path, with each symbolic link resolved.
+    static let directoryPrinterArguments = ["-P"]
+
+    /// The command for a child that exits at once with a given status. It
+    /// runs the script of ``exitingArguments(status:)``.
+    static let exitingCommand = "/bin/sh"
+
+    /// The arguments that make ``exitingCommand`` exit with `status`.
+    ///
+    /// - Parameter status: The exit status of the child.
+    /// - Returns: The arguments for ``exitingCommand``.
+    static func exitingArguments(status: Int32) -> [String] {
+        ["-c", "exit \(status)"]
+    }
+
     /// Tells whether the process table holds `pid`. A reaped child is gone
     /// from the table; a live child and a zombie are both in it.
     ///
@@ -65,5 +94,22 @@ enum StdioChild {
     /// - Returns: `true` when `kill(pid, 0)` finds the process.
     static func isInProcessTable(pid: pid_t) -> Bool {
         kill(pid, 0) == 0
+    }
+
+    /// Reads the stdout of a child until it ends, and decodes it as UTF-8.
+    ///
+    /// - Parameter child: The spawned child to read.
+    /// - Returns: The whole stdout of the child, or `nil` when the read failed
+    ///   or did not end in time.
+    static func wholeStandardOutput(of child: AgentProcess) async -> String? {
+        let bytes = child.transport.bytes
+        return await outcome { () async -> String? in
+            do {
+                let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }
+                return String(decoding: answer, as: UTF8.self)
+            } catch {
+                return nil
+            }
+        } ?? nil
     }
 }
