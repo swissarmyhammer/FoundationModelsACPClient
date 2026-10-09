@@ -25,8 +25,24 @@ comments:
     - note: One build line, "missing creator for mutated node ... mlx-swift_Cmlx.bundle", comes from the SwiftPM build of the mlx-swift dependency. It names no project file.
     - next: review
   timestamp: 2026-10-09T21:31:22.963457+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4h9pe9yvae84sks9jhgze4x
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD. 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. The validators reviewed 5 files. No validator applies to README.md, cli-plan.md and plan.md. A .reviewignore rule excludes 4 .kanban files.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-09T21:39:20.510060+00:00
+- actor: claude-code
+  id: 01m4h9pntm0vf1kf89swctts8e
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 8 files (plan.md deleted)
+    - test: green — swift test 594 passed; IntegrationTests 103 passed
+    - commit: 9236497
+    - review: clean — 0 findings
+  timestamp: 2026-10-09T21:39:28.212943+00:00
+position_column: done
+position_ordinal: e780
 title: Remove plan.md and the references to it
 ---
 The plan is old. The work is past the plan. Delete `plan.md`. Then make each text that refers to `plan.md` stand alone. A comment must give the reason directly. A comment must not point to a deleted file.
