@@ -38,11 +38,12 @@ let package = Package(
     ],
     dependencies: [
         // The first two are the whole in-family dependency list of this
-        // package, by design (plan.md, "a client, not *our* client"). Each pin
-        // is `branch: "main"` over the SSH URL, matching how every sibling in
-        // this family pins an in-family package. A version requirement would
-        // conflict for an app that depends on this package and on another
-        // in-family consumer at the same time.
+        // package, by design: a client that knows only ACP can drive any
+        // conforming agent, so this package must not depend on the agent
+        // runtime. Each pin is `branch: "main"` over the SSH URL, matching how
+        // every sibling in this family pins an in-family package. A version
+        // requirement would conflict for an app that depends on this package
+        // and on another in-family consumer at the same time.
         //
         // The ACP wire.
         .package(

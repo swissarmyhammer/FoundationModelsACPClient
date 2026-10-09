@@ -59,8 +59,9 @@ struct AgentInvocation: ParsableArguments {
     /// The failure ``validate()`` and ``command()`` both report for an
     /// invocation that names no agent.
     ///
-    /// There is no default agent. A default would name one agent, and the
-    /// no-knowledge-of-our-runtime claim of `plan.md` would stop being true.
+    /// There is no default agent. A default would name one agent, and then
+    /// the client would know about one runtime. This client must know only
+    /// ACP, so that it can drive any conforming agent.
     ///
     /// ArgumentParser turns a `ValidationError` into the usage text on stderr
     /// and the usage row of `cli-plan.md` §9.

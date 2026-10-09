@@ -73,10 +73,38 @@ Add the package to the dependencies in your `Package.swift`:
 )
 ```
 
-## Documentation
+## Design decisions
 
-The architecture, the decisions, and the milestones are in
-[`plan.md`](plan.md). The peer package for the ACP **Agent** role is
+- **A client, not *our* client.** The library depends on the ACP wire,
+  Observation, the family leaf `FoundationModelsExtras`, and the tracing,
+  logging and metrics APIs. It does not depend on `FoundationModelsRouter`,
+  `FoundationModelsACPAgent`, `FoundationModelsMCP` or the
+  `FoundationModels` framework. A client that knows only ACP can drive any
+  conforming agent. If the package needs a type from the agent runtime, the
+  ACP interface is incomplete, and the fix goes upstream into ACP.
+- **No `import SwiftUI`.** Observation is sufficient for a SwiftUI binding,
+  and without a view framework a CLI and a headless test can use the models.
+- **`@MainActor` models.** SwiftUI binds state on the main actor, and the
+  updates arrive on background tasks. The models do that change of actor
+  at one boundary.
+- **A projection, never a record.** The transcript of the agent is the
+  record. The models can rebuild their state from `session/resume` with
+  `replayFrom: .start`, and they are not durable history.
+- **ACP v2 only.** v2 is a draft, so this package changes when the schema
+  changes.
+- **Display terminals are rendered, never driven.** v2 removed the client
+  `terminal/*` methods and `fs/*` methods. The agent owns its terminals and
+  its file access, and gets the files of the client through MCP. This
+  package shows the display terminals of the agent, and it never runs a
+  command or touches a file.
+- **Token-rate chunks are coalesced.** A `SessionModel` applies the chunks
+  at a display rate, so a SwiftUI view does not redraw for each token. A
+  test measures this.
+- **The package that spawns an agent owns its process.** `AgentProcess`
+  spawns the agent in its own process group, ends the group on shutdown,
+  and reaps it. It gives no guarantee under `SIGKILL`.
+
+The peer package for the ACP **Agent** role is
 [FoundationModelsACPAgent](https://github.com/swissarmyhammer/FoundationModelsACPAgent).
 
 ## Known limitation: staleness after compaction

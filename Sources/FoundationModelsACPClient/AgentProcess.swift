@@ -1,5 +1,5 @@
 // `AgentProcess` — this package owns the lifecycle of the external agent it
-// spawns (plan.md, "Transports, and who owns the agent process"). It mirrors
+// spawns over stdio, because no other party can end that process. It mirrors
 // the family discipline that `FoundationModelsShelltool` and
 // `FoundationModelsMCP` (`StdioServerProcess`) already implement: spawn in
 // the child's own process group, so the agent's own children die with it;

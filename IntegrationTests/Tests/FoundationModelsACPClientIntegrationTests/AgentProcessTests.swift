@@ -4,7 +4,7 @@ import Testing
 
 @testable import FoundationModelsACPClient
 
-// M6: the out-of-process deployment. `AgentProcess` spawns an external agent
+// The out-of-process deployment. `AgentProcess` spawns an external agent
 // binary in its own process group and speaks ACP over its stdio. The foreign
 // agent here is a /bin/sh script that speaks canned ACP v2 NDJSON. It knows
 // nothing about this runtime, so it proves the wire really is the interface.
@@ -72,7 +72,7 @@ private func reportedChildPid(at path: String) async -> pid_t? {
 /// real process and asserts on the process table, so the tests must not
 /// share a moment on a loaded machine.
 @Suite(
-    "Gated agent-process scenarios over stdio (M6)",
+    "Gated agent-process scenarios over stdio",
     .serialized,
     .timeLimit(.minutes(5))
 )

@@ -1,8 +1,8 @@
 # CLI Plan — `acp-client`
 
 This plan adds one executable to this package. It stands on its own. It
-cites `plan.md` for the rules that it keeps, and it states its own rules
-where the two differ. `plan.md` does not change.
+keeps the design decisions that `README.md` gives for the package, and it
+states its own rules where the two differ.
 
 Two sibling plans go with it:
 
@@ -23,17 +23,15 @@ the interop test.
 
 ## 2. Why it belongs in this package
 
-`plan.md` states the design principle: "a client, not *our* client". Its
-testing strategy already asks for this binary, but it does not name it:
-
-> **Interop** — drive a *foreign* ACP agent binary over stdio, proving
-> the no-knowledge-of-our-runtime claim is real rather than aspirational.
+This package is a client, not *our* client. It knows only ACP, so it can
+drive any conforming agent. An interop test must prove that claim: it
+drives a *foreign* ACP agent binary over stdio, and the client must know
+nothing about our runtime.
 
 A test can make that claim. An executable proves it, because a person can
-point it at any agent and watch the frames. The container is already
-headless-usable, and `plan.md` says so: "staying SwiftUI-free keeps it
-usable from AppKit, from a CLI, and headless-testable." This binary is
-that CLI.
+point it at any agent and watch the frames. The container does not import
+SwiftUI, so AppKit, a CLI and a headless test can all use it. This binary
+is that CLI.
 
 ## 3. The binary
 
@@ -332,9 +330,9 @@ package writes one `Doctorable` conformance over an agent command:
 | The `initialize` answer decodes, and no member of `capabilities` and no element of `authMethods` is dropped in silence | A malformed `initialize` result |
 | The process ends when its stdin closes, and it leaves no child | A leaked agent |
 
-The third row is worth the command on its own. `plan.md` for the agent
-side makes "the agent MUST NOT write non-ACP content to stdout" a
-protocol MUST, and a foreign agent that breaks it fails in a way that
+The third row is worth the command on its own. The ACP stdio transport
+makes "the agent MUST NOT write non-ACP content to stdout" a protocol
+MUST, and a foreign agent that breaks it fails in a way that
 looks like a parsing bug in **our** client.
 
 Three rows make a decision the table alone does not show.
@@ -388,8 +386,9 @@ request, so it is usable, and it leaks. §9 gives that verdict exit code
 ## 11. Interrupt and process ownership
 
 `AgentProcess` already spawns the agent in its own process group, and it
-vends the transport. This binary keeps those obligations, which `plan.md`
-gives in "Transports, and who owns the agent process".
+vends the transport. The package that spawns an agent owns its process:
+it ends the agent on shutdown, it reaps the agent, and it states that it
+gives no guarantee under `SIGKILL`. This binary keeps those obligations.
 
 `Ctrl-C` must not kill the process at once. The binary sends
 `session/cancel`, waits for the `cancelled` stop reason, prints the text
@@ -423,8 +422,9 @@ pid is gone.
 
 ## 12. What this binary must not do
 
-`plan.md` gives the import rule: "Never Router, ACPAgent, MCP, or the
-FoundationModels framework." The two targets of §3 keep it.
+The import rule of the package: no target imports `FoundationModelsRouter`,
+`FoundationModelsACPAgent`, `FoundationModelsMCP` or the `FoundationModels`
+framework. The two targets of §3 keep it.
 
 The `acp-client` executable target links TWO things: the `AcpClientCore`
 library, and the `OTel` product of `swift-otel`. It holds the `@main`
@@ -467,12 +467,12 @@ stderr outside the terminal layer:
 
 ## 13. Client capabilities
 
-`plan.md` decides that `ACPClient.advertisedCapabilities` omits `auth`,
-because `AgentProcess` spawns the agent on pipes and gives the user no
-terminal. That decision holds for the container.
+`ACPClient.advertisedCapabilities` omits `auth`, because `AgentProcess`
+spawns the agent on pipes and gives the user no terminal. That decision
+holds for the container, and the doc comment of that value records it.
 
-`acp-client` runs in a terminal, so it is the "host that owns a terminal"
-that the decision mentions. It could build its own `ClientCapabilities`
+`acp-client` runs in a terminal, so it is a "host that owns a terminal",
+as that doc comment names it. It could build its own `ClientCapabilities`
 value with `auth.terminal`.
 
 **It does not do this in N1 to N6.** Terminal authentication needs the
