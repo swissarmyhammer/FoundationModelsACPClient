@@ -23,7 +23,7 @@ import Tracing
 /// OpenTelemetry semantic conventions, for example `rpc.method`.
 ///
 /// Rule 1: the library uses the `Tracing`, `Logging` and `Metrics` APIs only.
-/// It installs no backend. Only the `acp-client` executable installs one.
+/// It installs no backend. Only the host application installs one.
 /// Until a backend is installed, each span and each metric does nothing.
 ///
 /// This type gives names only. It keeps no logger and no metric in a stored

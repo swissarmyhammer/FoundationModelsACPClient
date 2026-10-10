@@ -14,8 +14,7 @@ import Testing
 // `pipe(2)`, so the agent must also hold no descriptor that lacks the flag.
 //
 // The agents here are `/bin/cat`, `/bin/sleep` and a `/bin/sh` probe, and not
-// an ACP agent. The tests that spawn a real foreign agent over stdio live in
-// the nested `IntegrationTests` package. The agents register in a private
+// an ACP agent. The agents register in a private
 // registry, so a test that reads `ProcessRegistry.global` beside this one sees
 // no pid of this test.
 

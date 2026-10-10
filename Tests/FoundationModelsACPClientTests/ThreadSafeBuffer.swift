@@ -3,16 +3,10 @@ import Synchronization
 // The capture the concurrent tests share. A test that watches work happening
 // on another task or another thread cannot capture that work in a plain array
 // or a plain `String`, because the writer appends while the test body reads.
-// `FrameTeeTransportTests` captures the teed lines and the byte chunks its
-// forwarding task produces, and `TerminalOutputTests` captures the chunks
-// Noora's spinner draws from a timer thread of its own. One buffer serves
-// both, so the two suites cannot disagree about what a thread-safe capture is.
-//
-// This file names no type of `FoundationModelsACP` and no type of
-// `AcpClientCore`, and it must stay that way. `FrameTeeTransportTests` imports
-// both packages, and both export a type called `TerminalOutput`. A file that
-// imports both and wants the ACP wire model must spell
-// `FoundationModelsACP.TerminalOutput` in full.
+// For example, `PermissionReplyOrderTests` captures the lines that a
+// `FrameRecordingTransport` reads on its forwarding task. One buffer serves
+// each such test, so the tests cannot disagree about what a thread-safe
+// capture is.
 
 /// A thread-safe append-only list.
 ///

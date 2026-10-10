@@ -3,7 +3,6 @@ import FoundationModelsACP
 import TelemetryTestSupport
 import Testing
 
-@testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
 // The content-safety test of this package (rule 5 of the OpenTelemetry design
@@ -11,10 +10,9 @@ import Testing
 // or metric dimension holds a prompt, a response, tool arguments, tool output
 // or file content.
 //
-// Each test drives a whole turn of the real `AgentSession` and `TurnRunner`
-// in a `TelemetryCapture`, through a `TracedSessionHarness`, with a
-// `ScriptedStubAgent` on the far end. `TurnRunner.run()` calls
-// `AgentSession.openSession()`, so the turn sends `initialize`,
+// Each test drives a whole turn of the real `ConnectionModel` and
+// `SessionModel` in a `TelemetryCapture`, through a `TracedSessionHarness`,
+// with a `ScriptedStubAgent` on the far end. The session sends `initialize`,
 // `session/new`, `session/prompt` and `session/close`. The turn sends its
 // prompt through `SessionModel.prompt(_:meta:)`, so the prompt span, the
 // transcript entries of the model and the error entry of a refused turn are
@@ -167,9 +165,9 @@ struct ContentSafetyTests {
                 cwd: Fixture.workingDirectory,
                 promptError: Self.refusal
             )
-            _ = try await harness.session.initialize()
+            try await harness.initialize()
             await #expect(throws: Self.refusal) {
-                try await harness.runner.run()
+                try await harness.runTurn()
             }
             try await harness.closeTheTurnSession()
             await harness.teardown()

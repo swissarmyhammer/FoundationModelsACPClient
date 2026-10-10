@@ -14,7 +14,7 @@ import Tracing
 /// type adapts that codec to the tracer.
 ///
 /// A host that sends ACP requests through its own `ClientSideConnection` uses
-/// this type as the binary does: it builds each request with the `_meta` that
+/// this type as the models do: it builds each request with the `_meta` that
 /// the `send` closure gets.
 ///
 /// ```swift
@@ -71,8 +71,7 @@ import Tracing
 /// keeps the factory of the time that it was made, so a metric in a stored
 /// value would not see a factory that a test or a host binds later.
 public enum ClientRequestSpan {
-    /// The ACP wire method names that the `acp-client` binary and the models
-    /// send. A host can give each of these, or another ACP method name, as
+    /// The ACP wire method names that the models send. A host can give each of these, or another ACP method name, as
     /// the `method` of
     /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
     public enum Method {

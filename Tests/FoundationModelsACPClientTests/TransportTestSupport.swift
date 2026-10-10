@@ -6,22 +6,6 @@ import FoundationModelsACP
 // This file holds the shared helpers for the transport tests. Each helper
 // bounds a wait with a deadline, so a test failure shows as a failed
 // expectation and never as a hang.
-//
-// The nested `IntegrationTests` package keeps a copy of its own, in its
-// `Support/TransportTestSupport.swift`. The two copies stay separate on
-// purpose: a test target cannot share source with a test target in another
-// package. A package can use only the products of another package, so one
-// shared source would need a test-support product that each user of this
-// package gets too.
-//
-// The helpers that both copies hold are the same, word for word:
-// `TransportTestDeadline`, `eventually(within:_:)`, `outcome(within:of:)`,
-// `waitForIdle(in:within:)` and `makeInitializeRequest()`. A change to one of
-// them goes into both copies.
-//
-// `waitUntil(_:)` is in this copy alone: only the unit tests wait on a
-// condition with no deadline of their own. The integration copy holds the
-// helpers that only the integration tests use.
 
 /// The time limits the transport tests use.
 enum TransportTestDeadline {

@@ -6,7 +6,6 @@ import TelemetryTestSupport
 import Testing
 import Tracing
 
-@testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
 // These tests cover `ClientRequestSpan`, the helper that opens one client span
@@ -20,7 +19,7 @@ import Tracing
 // `traceparent`. The tests do not bootstrap the logging system: the capture
 // does that one time for the process.
 //
-// Each test drives the real `AgentSession` and `TurnRunner` through a
+// Each test drives the real `ConnectionModel` and `SessionModel` through a
 // `TracedSessionHarness`, with a `ScriptedStubAgent` on the far end. The stub
 // records the `_meta` of each message it gets, which is the value that
 // crosses the process boundary.
@@ -154,7 +153,7 @@ struct ClientRequestSpanTests {
     func anAnsweredRequestGivesASpanWithNoError() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
-            _ = try await harness.session.initialize()
+            try await harness.initialize()
             await harness.teardown()
 
             let span = try #require(context.requestSpans(of: ClientRequestSpan.Method.initialize).first)

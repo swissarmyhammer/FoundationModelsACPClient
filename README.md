@@ -46,22 +46,6 @@ its own entry, so a view redraws only that row.
 For an agent in the same process, make a transport pair with
 `InMemoryTransport.pair()` and connect over the client end.
 
-## The `acp-client` binary
-
-The package also ships `acp-client`, a command-line client for any ACP v2
-agent. It starts the agent, runs one turn, prints the answer, and exits. With
-`--frames` it shows every ndJSON message in both directions, so you can see
-what an agent sent.
-
-```
-acp-client run "write a haiku" -- acp-agent acp
-acp-client probe -- npx @some-vendor/their-acp-agent --model small
-```
-
-`acp-client` is an executable **product**, so another package can depend on
-this one and spawn the binary from its own tests. The plan it is written
-against is [`cli-plan.md`](cli-plan.md).
-
 ## Install
 
 Add the package to the dependencies in your `Package.swift`:
@@ -83,7 +67,7 @@ Add the package to the dependencies in your `Package.swift`:
   conforming agent. If the package needs a type from the agent runtime, the
   ACP interface is incomplete, and the fix goes upstream into ACP.
 - **No `import SwiftUI`.** Observation is sufficient for a SwiftUI binding,
-  and without a view framework a CLI and a headless test can use the models.
+  and without a view framework AppKit and a headless test can use the models.
 - **`@MainActor` models.** SwiftUI binds state on the main actor, and the
   updates arrive on background tasks. The models do that change of actor
   at one boundary.

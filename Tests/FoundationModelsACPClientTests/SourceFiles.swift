@@ -6,15 +6,6 @@ import Foundation
 // answers for one file; this walker answers for a whole directory tree, which
 // is what a test that scans a target needs.
 extension RepositoryFile {
-    /// The repository-relative directories that hold the `acp-client`
-    /// command-line client.
-    ///
-    /// The client is two targets: the `AcpClientCore` library, which holds
-    /// everything the binary does, and the thin `acp-client` executable, which
-    /// holds the `@main` entry point alone. A scan that answers for the client
-    /// must read both, so this is the one list of them.
-    static let commandLineClientDirectories = ["Sources/AcpClientCore", "Sources/acp-client"]
-
     /// Returns the URL of each Swift file below one directory of this
     /// repository.
     ///

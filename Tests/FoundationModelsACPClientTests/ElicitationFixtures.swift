@@ -1,9 +1,8 @@
 import FoundationModelsACP
 
 // This file holds the shared builders for the elicitation tests. The
-// container tests and the declining-client tests of the binary both need the
-// same two wire requests, and the one difference between their copies was the
-// scope, so the scope is a parameter here.
+// container tests need two wire requests that differ only in scope, so the
+// scope is a parameter here.
 //
 // The builders are static members of a namespace, so every function belongs
 // to a type and no function stands alone at file scope.

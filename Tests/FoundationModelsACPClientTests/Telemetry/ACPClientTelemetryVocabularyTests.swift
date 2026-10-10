@@ -5,28 +5,23 @@ import TelemetryTestSupport
 import Testing
 
 /// Tests the telemetry vocabulary of the library, and the rule that the
-/// library and the command-line client use the telemetry APIs only.
+/// library uses the telemetry APIs only.
 ///
 /// Rule 1 of the OpenTelemetry design of 2026-09-28: a library uses only the
-/// `Tracing`, `Logging` and `Metrics` APIs, and only the `acp-client`
-/// executable bootstraps a backend. Rule 3: each package keeps its telemetry
+/// `Tracing`, `Logging` and `Metrics` APIs, and only the host application
+/// bootstraps a backend. Rule 3: each package keeps its telemetry
 /// names in one vocabulary file, and each name starts with the module name.
 @Suite("ACPClientTelemetry vocabulary")
 struct ACPClientTelemetryVocabularyTests {
     /// The text that each span name, metric name and logger label starts with.
     private static let requiredPrefix = "FoundationModelsACPClient."
 
-    /// The directories of the two targets that must bootstrap no backend: the
-    /// library and the library of the command-line client. The thin
-    /// `acp-client` executable is not in this list, because it is the one
-    /// target that bootstraps the backend.
-    private static let scannedDirectories = [
-        "Sources/FoundationModelsACPClient",
-        "Sources/AcpClientCore",
-    ]
+    /// The directories that must bootstrap no backend: each target of this
+    /// package. The host application bootstraps the backend.
+    private static let scannedDirectories = ["Sources"]
 
-    /// The calls that install a telemetry backend. Only the `acp-client`
-    /// executable makes one of them.
+    /// The calls that install a telemetry backend. Only the host application
+    /// makes one of them.
     private static let backendBootstrapCalls = [
         "LoggingSystem.bootstrap",
         "MetricsSystem.bootstrap",
@@ -81,15 +76,15 @@ struct ACPClientTelemetryVocabularyTests {
         }
     }
 
-    @Test("the library and the client library bootstrap no telemetry backend")
+    @Test("the library bootstraps no telemetry backend")
     func noScannedTargetBootstrapsABackend() throws {
         let violations = try Self.scannedFiles().flatMap { file in
             try Self.bootstrapCallViolations(in: file)
         }
-        #expect(violations.isEmpty, "Only acp-client may bootstrap a backend. Found: \(violations)")
+        #expect(violations.isEmpty, "Only the host application may bootstrap a backend. Found: \(violations)")
     }
 
-    @Test("the library and the client library use neither os logging nor signposts")
+    @Test("the library uses neither os logging nor signposts")
     func noScannedTargetUsesAppleLogging() throws {
         let violations = try Self.scannedFiles().flatMap { file in
             try Self.appleLoggingViolations(in: file)

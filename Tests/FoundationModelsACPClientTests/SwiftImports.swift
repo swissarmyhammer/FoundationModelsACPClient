@@ -1,10 +1,8 @@
 import Foundation
 
-// The import reader the boundary tests share. Two tests ask what a Swift file
-// imports, and they ask for opposite reasons: `ForbiddenImportTests` wants the
-// modules no file may name, and `TerminalOutputTests` wants the one file that
-// may name Noora. One reader answers both, so the two tests cannot disagree
-// about what an import statement looks like.
+// The import reader of the boundary test. `ForbiddenImportTests` asks it what
+// each Swift file of `Sources/` imports, and fails on each module that no file
+// may name.
 
 /// Reads the import statements of a Swift source file.
 enum SwiftImports {

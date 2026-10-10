@@ -1,15 +1,8 @@
 name: CI
 
-# The unit/integration split is structural. The root `Package.swift` declares
-# no integration target: the agent-process suite is its own package under
-# `IntegrationTests/`, so a plain `swift test` at the root cannot reach it.
-# The shared swift-ci.yaml workflow carries that split into CI through its
-# `integration-package-path` input: it builds the nested package in the unit
-# job on every run, and its own integration job (ordered after the unit job
-# inside the shared workflow) builds and runs it. `CIWorkflowTests` in the
-# unit suite pins that the input is set, so a later edit cannot drop the
-# integration suite from CI without a red unit test. Nothing here sets an
-# environment variable to select a suite, and nothing may start to do so.
+# This package is a library, and each of its tests runs in process. So CI runs
+# the one unit suite of the root `Package.swift`, and there is no integration
+# package.
 
 on:
   push:
@@ -24,5 +17,3 @@ concurrency:
 jobs:
   unit:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
-    with:
-      integration-package-path: IntegrationTests

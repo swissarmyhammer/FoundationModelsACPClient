@@ -18,23 +18,9 @@ let package = Package(
         // The ACP Client role: an observable container that a UI layer can
         // bind to. This library knows the ACP wire, Observation, the family
         // leaf `FoundationModelsExtras`, and the Tracing, Logging and Metrics
-        // APIs.
+        // APIs. It is the only product: this package is a library, and not an
+        // application.
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
-        // Everything the `acp-client` binary does, as a library. It is a
-        // product, and not a target alone, because a package can import only a
-        // product of another package, and the `IntegrationTests` package
-        // drives this code directly rather than through the binary.
-        //
-        // SwiftPM publishes no importable module for an EXECUTABLE product
-        // across a package boundary, so this library is the only shape in
-        // which that suite can reach the client at all.
-        .library(name: "AcpClientCore", targets: ["AcpClientCore"]),
-        // The command-line client for any ACP v2 agent (cli-plan.md §3). It is
-        // a product, and not a target alone, because FoundationModelsACPAgent
-        // depends on this package and spawns this binary from its own tests
-        // (§17), exactly as this package's own `IntegrationTests` package
-        // already spawns `acp-agent`.
-        .executable(name: "acp-client", targets: ["acp-client"]),
     ],
     dependencies: [
         // The first two are the whole in-family dependency list of this
@@ -59,49 +45,16 @@ let package = Package(
             url: "git@github.com:swissarmyhammer/FoundationModelsExtras.git",
             branch: "main"
         ),
-        // The parser for `acp-client` (cli-plan.md §4). The binary writes no
-        // parser of its own. `FoundationModelsExtras` already declares this
-        // package from the same floor, and the graph resolves it at 1.8.2, so
-        // the direct declaration costs no new checkout. It is direct rather
-        // than taken through the `Operations` re-export because the binary
-        // wants the parser alone, and not the fusion machinery around it.
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.0"),
-        // The terminal design system for the stderr layer (cli-plan.md §5).
-        // The agent plan picked Noora, and this package follows that decision,
-        // because two CLIs in one family that draw tables differently is a
-        // defect a user sees.
-        //
-        // `.upToNextMinor` and not `from:`: Noora is a 0.x package, where
-        // `from:` accepts every future 0.x minor, and Noora's release history
-        // holds breaking 0.x minors.
-        //
-        // Noora also pulls `onevcat/Rainbow`, `apple/swift-log` and
-        // `tuist/path` into this graph. Those three are the cost, and this
-        // comment is where it is visible.
-        .package(url: "https://github.com/tuist/Noora.git", .upToNextMinor(from: "0.57.0")),
         // The tracing API, the logging API and the metrics API of the library
-        // target (the OpenTelemetry design of 2026-09-28). API only: no
-        // library target links a backend or bootstraps one. Only the
-        // `acp-client` executable bootstraps a backend. Until a backend is
-        // bootstrapped, each span, each logger and each metric of the library
-        // does nothing. The floors are the floors of `FoundationModelsExtras`,
-        // which already puts these three packages into the graph.
+        // target (the OpenTelemetry design of 2026-09-28). API only: this
+        // package links no backend and bootstraps none. The host application
+        // bootstraps a backend. Until it does, each span, each logger and each
+        // metric of the library does nothing. The floors are the floors of
+        // `FoundationModelsExtras`, which already puts these three packages
+        // into the graph.
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.15.1"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.11.0"),
-        // The OpenTelemetry backend: the OTLP exporters for logs, traces and
-        // metrics. Only the `acp-client` executable target links it, and
-        // `ManifestTests` checks that no other target names it. The standard
-        // `OTEL_*` environment variables configure it at run time. The floor
-        // is the current release when this dependency was added.
-        //
-        // The traits are `OTLPHTTP` alone. The default traits of swift-otel
-        // also hold `OTLPGRPC`, which compiles grpc-swift-2,
-        // grpc-swift-nio-transport and grpc-swift-protobuf. SwiftPM joins the
-        // enabled traits of all packages in a graph, so the default would
-        // turn gRPC on for each host of this package. Thus only the
-        // `http/protobuf` OTLP protocol is available.
-        .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.5.1", traits: ["OTLPHTTP"]),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -124,63 +77,12 @@ let package = Package(
             // these texts with no change to the code.
             resources: [.process("Localizable.xcstrings")]
         ),
-        // Everything the `acp-client` binary does (cli-plan.md §3): the
-        // subcommand tree, the agent session, the terminal layer and the exit
-        // code table. It is a library and not the executable target itself,
-        // because SwiftPM emits no importable module for an executable across
-        // a package boundary, and the `IntegrationTests` package drives this
-        // code directly.
-        //
-        // These five dependencies are all of them, and §12 permits no more:
-        // this package, the wire, the parser, the terminal package, and the
-        // family leaf whose `Doctorable`, `DoctorRunner`, `DoctorReport`,
-        // `HealthCheck`, `HealthStatus` and `PlainTextDoctorRenderer` the
-        // `doctor` subcommand of §10 stands on. None of them is
-        // FoundationModelsRouter, FoundationModelsACPAgent,
-        // FoundationModelsMCP, the FoundationModels framework, or SwiftUI, and
-        // `ManifestTests` reads this block to keep it that way.
-        .target(
-            name: "AcpClientCore",
-            dependencies: [
-                "FoundationModelsACPClient",
-                .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
-                .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Noora", package: "Noora"),
-            ]
-        ),
-        // The `acp-client` executable (cli-plan.md §3). It holds the `@main`
-        // type and the telemetry bootstrap. It takes `AcpClientCore` and the
-        // `OTel` backend, and nothing else: every other dependency of the
-        // binary reaches it through that library. The backend stands here and
-        // not in the library, because only an executable may bootstrap one
-        // (cli-plan.md §12).
-        .executableTarget(
-            name: "acp-client",
-            dependencies: [
-                "AcpClientCore",
-                .product(name: "OTel", package: "swift-otel"),
-            ]
-        ),
-        // Tests, on Swift Testing. The suite holds the linkage smoke test, the
-        // forbidden-import scanner, and the manifest and version tests of the
-        // command-line client. It takes the `AcpClientCore` target so those
-        // tests can `@testable import AcpClientCore`. It does not take
-        // `acp-client`: that target holds the `@main` type and the telemetry
-        // bootstrap, and no unit test can import an executable target.
-        //
-        // This manifest declares no integration test target, and that is the
-        // whole unit/integration split. The agent-process suite is its own
-        // package, `IntegrationTests/Package.swift`, which depends on this
-        // one by path. So `swift test` here runs the unit tests and nothing
-        // else — not because a person remembered a flag, but because SwiftPM
-        // cannot see a target this manifest does not declare. Run that suite
-        // with `swift test --package-path IntegrationTests`.
+        // Tests, on Swift Testing. Each test runs in process: an agent is an
+        // in-memory transport or a scripted stub, and no test spawns a client.
         .testTarget(
             name: "FoundationModelsACPClientTests",
             dependencies: [
                 "FoundationModelsACPClient",
-                "AcpClientCore",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
                 // The in-memory tracer, log handler and metrics factory of the

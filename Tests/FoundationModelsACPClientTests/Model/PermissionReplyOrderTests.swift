@@ -2,7 +2,6 @@ import Foundation
 import FoundationModelsACP
 import Testing
 
-@testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
 // The tests of the order guarantee of `SessionModel.selectPermission(_:option:)`
@@ -12,8 +11,8 @@ import Testing
 // after the call goes on the wire after the response.
 //
 // `InMemoryTransport.pair()` gives the real ACP wire, with a
-// `ScriptedStubAgent` on the agent end. A `FrameTeeTransport` wraps the agent
-// end. Its forwarding task reads the frames of the client in wire order, and
+// `ScriptedStubAgent` on the agent end. A `FrameRecordingTransport` wraps the
+// agent end. Its forwarding task reads the frames of the client in wire order, and
 // it records each frame before the agent reads it. A record in the handlers of
 // the agent would race: the agent handles the permission response and the
 // prompt on different tasks.
@@ -60,16 +59,13 @@ private struct RecordedSession {
     /// through it.
     let agentConnection: AgentSideConnection
 
-    /// Each line that crossed the agent end, with its direction mark.
+    /// Each line that the client wrote to the agent end.
     private let lines: ThreadSafeBuffer<String>
 
     /// The permission responses and the prompts that the client wrote, in
     /// wire order.
     var clientFrames: [ClientFrame] {
-        lines.elements.compactMap { line in
-            guard line.hasPrefix(FrameTeeTransport.inboundMark) else { return nil }
-            return ClientFrame(line: line.dropFirst(FrameTeeTransport.inboundMark.count))
-        }
+        lines.elements.compactMap { ClientFrame(line: Substring($0)) }
     }
 
     /// Connects a new model to a new stub agent, sends `initialize`, and
@@ -80,7 +76,7 @@ private struct RecordedSession {
         let lines = ThreadSafeBuffer<String>()
         self.lines = lines
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let recordedAgentEnd = FrameTeeTransport(wrapping: agentEnd) { lines.append($0) }
+        let recordedAgentEnd = FrameRecordingTransport(wrapping: agentEnd) { lines.append($0) }
         agentConnection = await AgentSideConnection(stream: recordedAgentEnd) { connection in
             ScriptedStubAgent(connection: connection, session: testSession, script: [])
         }

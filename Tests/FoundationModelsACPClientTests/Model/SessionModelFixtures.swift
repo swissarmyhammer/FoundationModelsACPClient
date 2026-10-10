@@ -104,47 +104,42 @@ enum SessionModelFixtures {
         return task
     }
 
-    // MARK: - Unstable updates
+    // MARK: - Compaction and notice updates
 
     /// The compaction id that the compaction tests use.
-    static let compactionId = Unstable.CompactionId(rawValue: "compaction-1")
+    static let compactionId = CompactionId(rawValue: "compaction-1")
 
-    /// Makes a `compaction_update` for the test compaction, as the stable
-    /// update that carries it on the wire.
+    /// Makes a `compaction_update` for the test compaction.
     ///
     /// - Parameters:
     ///   - status: The status of the compaction.
     ///   - summary: The `summary` field of the update.
     ///   - error: The `error` field of the update.
     /// - Returns: The update.
-    /// - Throws: `EncodingError` when the payload does not encode.
     static func compactionUpdate(
-        _ status: Unstable.CompactionStatus,
+        _ status: CompactionStatus,
         summary: PatchField<[ContentBlock]> = .unchanged,
         error: PatchField<String> = .unchanged
-    ) throws -> SessionUpdate {
-        let update = Unstable.CompactionUpdate(compactionId: compactionId, status: status, error: error, summary: summary)
-        return try SessionUpdate(.compactionUpdate(update))
+    ) -> SessionUpdate {
+        let update = CompactionUpdate(compactionId: compactionId, status: status, error: error, summary: summary)
+        return .compactionUpdate(update)
     }
 
-    /// Makes a `compaction_summary_chunk` for the test compaction, as the
-    /// stable update that carries it on the wire.
+    /// Makes a `compaction_summary_chunk` for the test compaction.
     ///
     /// - Parameter text: The text of the summary block.
     /// - Returns: The update.
-    /// - Throws: `EncodingError` when the payload does not encode.
-    static func compactionChunk(_ text: String) throws -> SessionUpdate {
-        let chunk = Unstable.CompactionSummaryChunk(compactionId: compactionId, content: textBlock(text))
-        return try SessionUpdate(.compactionSummaryChunk(chunk))
+    static func compactionChunk(_ text: String) -> SessionUpdate {
+        let chunk = CompactionSummaryChunk(compactionId: compactionId, content: textBlock(text))
+        return .compactionSummaryChunk(chunk)
     }
 
-    /// Makes a `notice`, as the stable update that carries it on the wire.
+    /// Makes a `notice` update.
     ///
     /// - Parameter notice: The notice.
     /// - Returns: The update.
-    /// - Throws: `EncodingError` when the payload does not encode.
-    static func noticeUpdate(_ notice: Unstable.Notice) throws -> SessionUpdate {
-        try SessionUpdate(.notice(notice))
+    static func noticeUpdate(_ notice: Notice) -> SessionUpdate {
+        .notice(notice)
     }
 }
 

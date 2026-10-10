@@ -1,69 +1,29 @@
 import Foundation
 import Testing
 
-/// Pins the parts of `Package.swift` and `Package.resolved` that the
-/// `acp-client` executable stands on.
+/// Pins the parts of `Package.swift` that keep this package a library.
 ///
-/// A build catches most manifest mistakes on its own. It cannot catch these
-/// five, because each one still builds: an executable declared as a target and
-/// not as a product, which no other package can depend on; a dependency the
-/// binary must not link, which `cli-plan.md` §12 bans; a sixth dependency past
-/// the five that plan permits; a dependency hung on the thin `acp-client`
-/// executable target, which reaches around the count the library target
-/// carries; and a `from:` requirement on a 0.x package, which accepts every
-/// future breaking minor. This suite pins exactly those.
+/// A build catches most manifest mistakes on its own. It cannot catch these,
+/// because each one still builds: an executable product, which makes this
+/// package an application; a forbidden module on the library target; a
+/// telemetry API that the library target does not link; and a telemetry
+/// backend on any target, which puts an exporter into each host process.
 ///
-/// Every rule but one reads the manifest through `swift package dump-package`,
-/// which parses `Package.swift` and writes each declaration in one normal
-/// form. SwiftPM accepts five spellings for a `Target.Dependency` — a bare
-/// string literal, `.byName(name:)`, `.target(name:)`,
-/// `.product(name:package:)`, and the last three with a trailing
-/// `moduleAliases:` or `condition:` — and the dump reduces all five to a name
-/// under one of three keys. So no rule here has to know which spelling a
-/// person wrote, and none of them has to step over a `/* */` comment, a raw
-/// string or an `#if os(macOS)` block either. The one rule that still reads
-/// the manifest as text is ``theNooraRequirementIsUpToNextMinor``, and it says
-/// at its head why the dump cannot answer it.
+/// Every rule reads the manifest through `swift package dump-package`, which
+/// parses `Package.swift` and writes each declaration in one normal form.
+/// SwiftPM accepts five spellings for a `Target.Dependency` — a bare string
+/// literal, `.byName(name:)`, `.target(name:)`, `.product(name:package:)`, and
+/// the last three with a trailing `moduleAliases:` or `condition:` — and the
+/// dump reduces all five to a name under one of three keys. So no rule here
+/// has to know which spelling a person wrote, and none of them has to step
+/// over a `/* */` comment, a raw string or an `#if os(macOS)` block either.
 ///
-/// The command-line client is two targets, so every rule here says which of
-/// them it reads, and why that one and not the other.
-///
-/// Two more rules come from the OpenTelemetry design of 2026-09-28. Rule 1
-/// gives the library target the `Tracing`, `Logging` and `Metrics` APIs and no
-/// backend, and only the `acp-client` executable can link the swift-otel
-/// backend. A build accepts a backend on each target, so this suite pins both.
+/// Two rules come from the OpenTelemetry design of 2026-09-28. Rule 1 gives
+/// the library target the `Tracing`, `Logging` and `Metrics` APIs and no
+/// backend. The host application bootstraps a backend, and this package links
+/// none.
 @Suite("Package manifest")
 struct ManifestTests {
-    /// The number of dependencies `cli-plan.md` §12 permits the command-line
-    /// client: the library target of this package, and four products.
-    ///
-    /// They stand on `AcpClientCore` and not on the `acp-client` executable,
-    /// because that executable holds the `@main` type and the telemetry
-    /// bootstrap, and reaches every one of them through the library.
-    private static let permittedDependencyCount = 5
-
-    /// The library target of the manifest that carries the dependencies of the
-    /// command-line client.
-    private static let clientTargetName = "AcpClientCore"
-
-    /// The executable target of the manifest, which holds the `@main` type and
-    /// the telemetry bootstrap. It takes ``clientTargetName`` as its one target
-    /// dependency, and the swift-otel backend as its one product dependency
-    /// (`cli-plan.md` §3).
-    private static let executableTargetName = "acp-client"
-
-    /// The product name of each dependency the binary must link.
-    ///
-    /// `FoundationModelsExtras` stands here because §10 builds `doctor` on its
-    /// `Doctorable`, `DoctorRunner`, `DoctorReport`, `HealthCheck`,
-    /// `HealthStatus` and `PlainTextDoctorRenderer`.
-    private static let requiredProductNames: Set<String> = [
-        "ArgumentParser",
-        "Noora",
-        "FoundationModelsACP",
-        "FoundationModelsExtras",
-    ]
-
     /// The library target of the manifest: the ACP Client role that a UI
     /// layer binds to.
     private static let libraryTargetName = "FoundationModelsACPClient"
@@ -76,132 +36,36 @@ struct ManifestTests {
         "Metrics",
     ]
 
-    /// The package name of the swift-otel backend, as the manifest declares it.
-    private static let telemetryBackendPackageName = "swift-otel"
-
-    /// The product name of the swift-otel backend. The ``executableTargetName``
-    /// target links it, because that target bootstraps the backend.
-    private static let telemetryBackendProductName = "OTel"
-
-    /// The package name and the product name of the swift-otel backend. Only
-    /// the ``executableTargetName`` target can name one of them.
+    /// The package name and the product name of the swift-otel backend. No
+    /// target of this package may name one of them.
     private static let telemetryBackendNames: Set<String> = [
-        telemetryBackendPackageName,
-        telemetryBackendProductName,
+        "swift-otel",
+        "OTel",
     ]
 
-    @Test("the manifest declares acp-client as an executable product")
-    func theManifestDeclaresTheExecutableProduct() throws {
+    @Test("the manifest declares the library product and no executable")
+    func theManifestDeclaresOnlyTheLibraryProduct() throws {
         let dump = try Self.packageDump()
-        let product = try #require(
-            dump.products.first { $0.name == Self.executableTargetName },
-            """
-            Package.swift must declare `.executable(name: "acp-client", ...)`. \
-            A target on its own is not enough: FoundationModelsACPAgent depends \
-            on this package and spawns this binary from its own tests. \
-            It declares the products \(dump.products.map(\.name).sorted()).
-            """
-        )
         #expect(
-            product.isExecutable,
+            dump.products.map(\.name) == [Self.libraryTargetName],
             """
-            The \(Self.executableTargetName) product must be an executable \
-            product, and SwiftPM read it as a library. A library product \
-            publishes a module to import; it is not a binary another package \
-            can spawn.
+            Package.swift must declare the \(Self.libraryTargetName) library as \
+            its one product. It declares \(dump.products.map(\.name).sorted()).
             """
         )
+        let hasAnExecutable = dump.products.contains { $0.isExecutable }
+        #expect(!hasAnExecutable, "This package is a library, so it must declare no executable product.")
     }
 
-    @Test("the client target links the wire, the parser, the terminal package and the family leaf")
-    func theTargetLinksEveryProductTheBinaryNeeds() throws {
-        // The library target alone, and not a union with the executable:
-        // cli-plan.md §3 gives every one of these links to AcpClientCore, so
-        // moving one down to the executable must fail this rule.
-        let client = try Self.clientTarget()
-        #expect(
-            Self.requiredProductNames.isSubset(of: Set(client.productNames)),
-            """
-            The \(Self.clientTargetName) target must name each of \
-            \(Self.requiredProductNames.sorted()) as a product dependency. \
-            It names \(client.productNames.sorted()).
-            """
-        )
-    }
-
-    @Test("the client target declares exactly the five dependencies section 12 permits")
-    func theTargetDeclaresFiveDependencies() throws {
-        // The library target alone. The cap counts where the dependencies
-        // stand, and `theExecutableTargetTakesTheLibraryAndTheBackendAlone`
-        // is what stops a sixth one hiding in the executable instead.
-        let client = try Self.clientTarget()
-        #expect(
-            client.targetNames == [Self.libraryTargetName],
-            """
-            The \(Self.clientTargetName) target must take this package's own \
-            library target, and no other target. \
-            It takes \(client.targetNames).
-            """
-        )
-        #expect(
-            client.targetNames.count + client.productNames.count
-                == Self.permittedDependencyCount,
-            """
-            cli-plan.md section 12 permits the command-line client five \
-            dependencies. \(Self.clientTargetName) declares \
-            \(client.targetNames) and \(client.productNames).
-            """
-        )
-    }
-
-    @Test("the acp-client executable target takes the library and the OTel backend, and nothing else")
-    func theExecutableTargetTakesTheLibraryAndTheBackendAlone() throws {
-        let executable = try Self.executableTarget()
-        #expect(
-            executable.targetNames == [Self.clientTargetName],
-            """
-            The \(Self.executableTargetName) executable target holds the @main \
-            type and the telemetry bootstrap, so cli-plan.md section 3 gives it \
-            \(Self.clientTargetName) as its one target dependency. \
-            It takes \(executable.targetNames).
-            """
-        )
-        #expect(
-            executable.productNames == [Self.telemetryBackendProductName],
-            """
-            The \(Self.executableTargetName) executable target must name the \
-            \(Self.telemetryBackendProductName) product and no other product. \
-            Every other product the binary needs reaches it through \
-            \(Self.clientTargetName), which is where the five that cli-plan.md \
-            section 12 permits are counted. It names \
-            \(executable.productNames.sorted()).
-            """
-        )
-        #expect(
-            executable.packageNames == [Self.telemetryBackendPackageName],
-            """
-            The \(Self.telemetryBackendProductName) product of the \
-            \(Self.executableTargetName) target must come from the \
-            \(Self.telemetryBackendPackageName) package. It names the packages \
-            \(executable.packageNames.sorted()).
-            """
-        )
-    }
-
-    @Test("neither target of the command-line client names a forbidden module")
-    func neitherTargetNamesAForbiddenModule() throws {
-        // Both targets. Section 12 bans these modules from the BINARY, and the
-        // binary is the library and the executable together, so reading one of
-        // them would leave the other free to name one.
-        let named = try Self.clientTarget().allNames
-            .union(Self.executableTarget().allNames)
+    @Test("the library target names no forbidden module")
+    func theLibraryTargetNamesNoForbiddenModule() throws {
+        let named = try Self.target(named: Self.libraryTargetName).allNames
         #expect(
             named.isDisjoint(with: forbiddenModules),
             """
-            Neither the \(Self.clientTargetName) target nor the \
-            \(Self.executableTargetName) target may name any of \
+            The \(Self.libraryTargetName) target may name none of \
             \(forbiddenModules.sorted()). \
-            They name \(named.intersection(forbiddenModules).sorted()).
+            It names \(named.intersection(forbiddenModules).sorted()).
             """
         )
     }
@@ -219,96 +83,24 @@ struct ManifestTests {
         )
     }
 
-    @Test("no target other than acp-client names the swift-otel backend")
-    func onlyTheExecutableTargetNamesTheTelemetryBackend() throws {
+    @Test("no target names the swift-otel backend")
+    func noTargetNamesTheTelemetryBackend() throws {
         // Every target of the manifest, the test target too. A library or a
         // test target that links the backend puts an exporter into a process
         // that did not ask for one.
         let offenders = try Self.packageDump().targets
-            .filter { $0.name != Self.executableTargetName }
             .filter { !$0.allNames.isDisjoint(with: Self.telemetryBackendNames) }
             .map(\.name)
         #expect(
             offenders.isEmpty,
             """
-            Only the \(Self.executableTargetName) target may name any of \
-            \(Self.telemetryBackendNames.sorted()). These targets name one: \
-            \(offenders.sorted()).
+            No target may name any of \(Self.telemetryBackendNames.sorted()). \
+            These targets name one: \(offenders.sorted()).
             """
         )
-    }
-
-    @Test("the Noora requirement is upToNextMinor, not from")
-    func theNooraRequirementIsUpToNextMinor() throws {
-        // The one rule of this suite that reads the manifest as text, because
-        // `swift package dump-package` cannot carry the fact it pins. The dump
-        // resolves a requirement to a version RANGE and drops the spelling
-        // that wrote it: `.upToNextMinor(from: "0.57.0")` comes back as
-        // `[0.57.0, 0.58.0)`, and so would a hand-written half-open range. The
-        // rule asks for the spelling, and only the text holds it.
-        let manifest = try RepositoryFile.read(relativePath: "Package.swift")
-        // `Regex` is not `Sendable`, so the pattern is local rather than a
-        // stored constant, matching how `ForbiddenImportTests` writes its own.
-        let nooraRequirement =
-            /\.package\(\s*url:\s*"[^"]+Noora[^"]*",\s*\.upToNextMinor\(from:\s*"[^"]+"\)\s*\)/
-        #expect(
-            manifest.contains(nooraRequirement),
-            """
-            Noora is a 0.x package, where `from:` accepts every future 0.x \
-            minor and its release history holds breaking ones. Package.swift \
-            must pin it with `.upToNextMinor(from:)`.
-            """
-        )
-    }
-
-    @Test("Package.resolved pins Noora and swift-argument-parser")
-    func theResolvedFilePinsTheNewDependencies() throws {
-        let identities = try Self.resolvedPackageIdentities()
-        #expect(
-            identities.contains("noora"),
-            "Package.resolved must pin Noora. It pins \(identities.sorted())."
-        )
-        #expect(
-            identities.contains("swift-argument-parser"),
-            "Package.resolved must pin swift-argument-parser. It pins \(identities.sorted())."
-        )
-    }
-
-    @Test("Package.resolved pins the swift-otel backend")
-    func theResolvedFilePinsTheTelemetryBackend() throws {
-        let identities = try Self.resolvedPackageIdentities()
-        #expect(
-            identities.contains(Self.telemetryBackendPackageName),
-            """
-            Package.resolved must pin \(Self.telemetryBackendPackageName). \
-            It pins \(identities.sorted()).
-            """
-        )
-    }
-
-    /// The ``clientTargetName`` library target, as SwiftPM parsed it.
-    ///
-    /// - Returns: that target, with its dependency entries.
-    /// - Throws: an error when the manifest cannot be read, or when it declares
-    ///   no such target.
-    private static func clientTarget() throws -> DumpedTarget {
-        try target(named: clientTargetName)
-    }
-
-    /// The ``executableTargetName`` executable target, as SwiftPM parsed it.
-    ///
-    /// - Returns: that target, with its dependency entries.
-    /// - Throws: an error when the manifest cannot be read, or when it declares
-    ///   no such target.
-    private static func executableTarget() throws -> DumpedTarget {
-        try target(named: executableTargetName)
     }
 
     /// One target of the manifest, by name.
-    ///
-    /// One reader serves both targets of the command-line client, so a rule
-    /// that must hold on each of them is written once and cannot read one side
-    /// only.
     ///
     /// - Parameter name: the target name the manifest declares.
     /// - Returns: that target, with its dependency entries.
@@ -354,7 +146,7 @@ struct ManifestTests {
         let root = try RepositoryFile.url(relativePath: "Package.swift")
             .deletingLastPathComponent()
         let workingDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("acp-client-dump-package-\(UUID().uuidString)")
+            .appendingPathComponent("acp-client-library-dump-package-\(UUID().uuidString)")
         // The child writes a scratch directory of its own under here, and the
         // two captured streams stand beside it, so one removal cleans up all
         // three.
@@ -562,27 +354,5 @@ struct ManifestTests {
                 )
             }
         }
-    }
-
-    /// Reads `Package.resolved` and returns the identity of each pinned package.
-    ///
-    /// - Returns: the identity SwiftPM derived for each pin.
-    /// - Throws: an error when the file cannot be read or does not decode.
-    private static func resolvedPackageIdentities() throws -> Set<String> {
-        let text = try RepositoryFile.read(relativePath: "Package.resolved")
-        let resolved = try JSONDecoder().decode(ResolvedPins.self, from: Data(text.utf8))
-        return Set(resolved.pins.map(\.identity))
-    }
-
-    /// The `pins` array of `Package.resolved`.
-    private struct ResolvedPins: Decodable {
-        /// One entry for each package the resolution pinned.
-        let pins: [ResolvedPin]
-    }
-
-    /// One pin of `Package.resolved`.
-    private struct ResolvedPin: Decodable {
-        /// The identity SwiftPM derives from the repository name, lowercased.
-        let identity: String
     }
 }

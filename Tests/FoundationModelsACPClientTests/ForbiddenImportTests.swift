@@ -29,10 +29,8 @@ private func forbiddenImports(in file: URL) throws -> [String] {
 /// Observation, so no file in `Sources/` may import the agent runtime, the
 /// `FoundationModels` framework, or SwiftUI.
 ///
-/// The walk is recursive over the whole of `Sources/`, so the scan covers the
-/// `acp-client` executable target as well as the library target. The binary
-/// keeps the same boundary: `cli-plan.md` §12 gives it the library, the wire,
-/// the parser and the terminal package, and nothing more.
+/// The walk is recursive over the whole of `Sources/`, so a target that a
+/// later change adds enters the scan with no edit here.
 @Test func sourcesHoldNoForbiddenImport() throws {
     let files = try RepositoryFile.swiftSourceFiles(under: "Sources")
     try #require(!files.isEmpty, "The scan found no Swift files below Sources/.")

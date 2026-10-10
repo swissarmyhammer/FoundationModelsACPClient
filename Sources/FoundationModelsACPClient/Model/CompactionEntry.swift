@@ -17,12 +17,12 @@ public final class CompactionEntry: ObservableTranscriptEntry {
     public nonisolated let id: TranscriptEntry.ID
 
     /// The identifier of the compaction.
-    public let compactionId: Unstable.CompactionId
+    public let compactionId: CompactionId
 
     /// The status from the last `compaction_update`. Before the first
     /// update, the status is `SessionEntry.Compaction.unreportedStatus`; see
     /// ``hasReportedStatus``.
-    public internal(set) var status: Unstable.CompactionStatus
+    public internal(set) var status: CompactionStatus
 
     /// The summary that the compaction keeps. A chunk appends a block; an
     /// update with a summary replaces it; an update with `null` or an empty

@@ -38,15 +38,14 @@ import Synchronization
 ///
 /// `session/cancel` sends the `cancelScript` the test chose. The default is no
 /// script at all, which is the agent that IGNORES a cancellation; a test that
-/// drives the `cli-plan.md` §11 interrupt gives it an `idle` update carrying
+/// cancels a turn gives it an `idle` update carrying
 /// the `cancelled` stop reason, which is how the schema confirms a
 /// cancellation.
 ///
 /// `session/close` refuses with the error the test chose, or accepts the
 /// close when the test chose no error. The default is the `methodNotFound`
 /// refusal an agent that does not implement the optional method sends, and a
-/// test that drives the other branch of `AgentSession.closeSession(_:)` asks
-/// for an error with another code.
+/// test that needs another answer asks for an error with another code.
 ///
 /// `session/set_config_option` refuses with the error the test chose, or
 /// accepts each request with no option when the test chose no error, so a
@@ -64,10 +63,8 @@ import Synchronization
 /// text of a refusal does not go into telemetry.
 ///
 /// The stub records the working directory of each `session/new` it answered,
-/// because `--cwd` is the session's working directory and the wire request is
-/// the only place that value is observable. `AgentSessionTests` reads
-/// ``lastWorkingDirectory`` to assert the path the binary resolved. The stub
-/// also records the `mcpServers` of each `session/new` and `session/resume`,
+/// because the wire request is the only place that value is observable. The
+/// stub also records the `mcpServers` of each `session/new` and `session/resume`,
 /// so `ConnectionModelSessionTests` can assert which servers went on the
 /// wire.
 ///
@@ -108,8 +105,8 @@ import Synchronization
 /// order cannot tell a client that ends its turn on the prompt answer from
 /// one that ends it on `idle`, because the answer is last either way. The
 /// `deferredScript` is the other order: each of its steps goes out after the
-/// answer, when the test opens that step's gate. `TurnRunnerTests` uses it to
-/// prove that the turn outlives the acknowledgement.
+/// answer, when the test opens that step's gate. `ClientRequestMetricsTests`
+/// uses it to prove that the prompt answer comes before `idle`.
 final class ScriptedStubAgent: Agent {
     /// The connection back to the client.
     private let connection: AgentSideConnection
@@ -555,7 +552,7 @@ final class ScriptedStubAgent: Agent {
         for update in cancelScript {
             // A notification has no answer that could carry a failure, and a
             // client that tore its connection down right after it cancelled is
-            // a shape `cli-plan.md` §11 allows. Neither is a reason to trap.
+            // a shape that a client can take. Neither is a reason to trap.
             try? await send(update)
         }
     }

@@ -12,8 +12,7 @@ import Testing
 // `AgentProcessState` over a private registry, and runs the teardown.
 //
 // The children are the `StdioChild` commands, `/bin/cat`, `/bin/sleep` and a
-// `/bin/sh` script, and not an ACP agent. The tests that spawn a real foreign
-// agent over stdio live in the nested `IntegrationTests` package.
+// `/bin/sh` script, and not an ACP agent.
 
 /// The time limits of the test whose child never exits.
 ///

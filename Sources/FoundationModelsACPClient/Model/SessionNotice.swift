@@ -17,14 +17,14 @@ public struct SessionNotice: Identifiable, Hashable, Sendable {
     public let id: UUID
 
     /// The notice as the agent sent it.
-    public let notice: Unstable.Notice
+    public let notice: Notice
 
     /// The time of arrival: the time on the clock of the model from the
     /// creation of the model to the arrival of the notice.
     public let arrivalTime: Duration
 
     /// The presentation severity that the agent gave.
-    public var severity: Unstable.NoticeSeverity {
+    public var severity: NoticeSeverity {
         notice.severity
     }
 
@@ -48,7 +48,7 @@ public struct SessionNotice: Identifiable, Hashable, Sendable {
     /// - Parameters:
     ///   - notice: The notice as the agent sent it.
     ///   - arrivalTime: The time on the clock of the model at the arrival.
-    init(notice: Unstable.Notice, arrivalTime: Duration) {
+    init(notice: Notice, arrivalTime: Duration) {
         self.id = UUID()
         self.notice = notice
         self.arrivalTime = arrivalTime

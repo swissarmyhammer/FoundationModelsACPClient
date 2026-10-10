@@ -41,8 +41,8 @@ extension SessionModel {
     /// tap before the model folds it. Each call makes a new stream, and each
     /// stream gets each update that arrives after the call. The stream
     /// finishes when the model closes or is released; a stream made after the
-    /// close is already finished. acp-client uses it to write the chunks to
-    /// standard output as they arrive.
+    /// close is already finished. A host uses it to show each chunk as it
+    /// arrives.
     ///
     /// - Returns: The stream of raw updates.
     public func updateTap() -> AsyncStream<SessionUpdate> {

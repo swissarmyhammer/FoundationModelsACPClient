@@ -9,7 +9,7 @@ import Testing
 // replay and the close of the model clear the list.
 
 /// The warning notice that most tests receive.
-private let contextNotice = Unstable.Notice(
+private let contextNotice = Notice(
     severity: .warning,
     title: "The context is almost full",
     description: "The agent compacts the context soon.",
@@ -17,7 +17,7 @@ private let contextNotice = Unstable.Notice(
 )
 
 /// A second notice, to tell two notices apart.
-private let rateNotice = Unstable.Notice(severity: .info, title: "The rate limit resets in one minute")
+private let rateNotice = Notice(severity: .info, title: "The rate limit resets in one minute")
 
 /// The time on the manual clock between the model init and the notice, in
 /// milliseconds.
@@ -37,7 +37,7 @@ struct SessionModelNoticeTests {
     @Test func aNoticeAddsOneItemAndNoTranscriptEntry() throws {
         let model = SessionModelFixtures.immediateModel()
 
-        model.apply(try SessionModelFixtures.noticeUpdate(contextNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(contextNotice))
 
         let notice = try #require(model.notices.first)
         #expect(model.notices.map(\.notice) == [contextNotice])
@@ -53,7 +53,7 @@ struct SessionModelNoticeTests {
         let model = SessionModelFixtures.coalescingModel(clock: clock)
 
         clock.advance(by: .milliseconds(arrivalMilliseconds))
-        model.apply(try SessionModelFixtures.noticeUpdate(contextNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(contextNotice))
 
         #expect(model.notices.map(\.arrivalTime) == [.milliseconds(arrivalMilliseconds)])
     }
@@ -62,8 +62,8 @@ struct SessionModelNoticeTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.noticeUpdate(contextNotice),
-            try SessionModelFixtures.noticeUpdate(contextNotice),
+            SessionModelFixtures.noticeUpdate(contextNotice),
+            SessionModelFixtures.noticeUpdate(contextNotice),
         ])
 
         #expect(Set(model.notices.map(\.id)).count == model.notices.count)
@@ -75,8 +75,8 @@ struct SessionModelNoticeTests {
     @Test func dismissNoticeRemovesOnlyThatNotice() throws {
         let model = SessionModelFixtures.immediateModel()
         model.applyEach([
-            try SessionModelFixtures.noticeUpdate(contextNotice),
-            try SessionModelFixtures.noticeUpdate(rateNotice),
+            SessionModelFixtures.noticeUpdate(contextNotice),
+            SessionModelFixtures.noticeUpdate(rateNotice),
         ])
         let first = try #require(model.notices.first)
 
@@ -87,10 +87,10 @@ struct SessionModelNoticeTests {
 
     @Test func dismissNoticeWithAnUnknownIdChangesNothing() throws {
         let model = SessionModelFixtures.immediateModel()
-        model.apply(try SessionModelFixtures.noticeUpdate(contextNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(contextNotice))
         let dismissed = try #require(model.notices.first)
         model.dismissNotice(dismissed.id)
-        model.apply(try SessionModelFixtures.noticeUpdate(rateNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(rateNotice))
 
         model.dismissNotice(dismissed.id)
 
@@ -101,7 +101,7 @@ struct SessionModelNoticeTests {
 
     @Test func theStartOfAResumeClearsTheNotices() throws {
         let model = SessionModelFixtures.immediateModel()
-        model.apply(try SessionModelFixtures.noticeUpdate(contextNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(contextNotice))
 
         model.beginReplay(replayFrom: nil)
 
@@ -109,7 +109,7 @@ struct SessionModelNoticeTests {
     }
 
     @Test func aReplayDoesNotBringBackANotice() throws {
-        let updates = [agentChunk(text: "Hello"), try SessionModelFixtures.noticeUpdate(contextNotice)]
+        let updates = [agentChunk(text: "Hello"), SessionModelFixtures.noticeUpdate(contextNotice)]
         var agentHistory = SessionMergeEngine()
         for update in updates {
             agentHistory.apply(update)
@@ -127,7 +127,7 @@ struct SessionModelNoticeTests {
 
     @Test func theCloseClearsTheNotices() throws {
         let model = SessionModelFixtures.immediateModel()
-        model.apply(try SessionModelFixtures.noticeUpdate(contextNotice))
+        model.apply(SessionModelFixtures.noticeUpdate(contextNotice))
 
         model.markClosed()
 
@@ -139,9 +139,9 @@ struct SessionModelNoticeTests {
     @Test func theUpdateTapGivesTheRawNoticeAndCompactionUpdates() async throws {
         let model = SessionModelFixtures.immediateModel()
         var tap = model.updateTap().makeAsyncIterator()
-        let notice = try SessionModelFixtures.noticeUpdate(contextNotice)
-        let compaction = try SessionModelFixtures.compactionUpdate(.inProgress)
-        let chunk = try SessionModelFixtures.compactionChunk("Summary")
+        let notice = SessionModelFixtures.noticeUpdate(contextNotice)
+        let compaction = SessionModelFixtures.compactionUpdate(.inProgress)
+        let chunk = SessionModelFixtures.compactionChunk("Summary")
 
         model.applyEach([notice, compaction, chunk])
 

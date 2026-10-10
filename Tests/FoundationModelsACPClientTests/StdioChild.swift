@@ -9,8 +9,6 @@ import Foundation
 // `env` writes its environment, `pwd` writes its working directory, one script
 // runs `cat` and then `sleep`, one tells whether the child holds one
 // descriptor, and one exits at once with a given status.
-// The tests that spawn a real foreign agent over stdio live in the nested
-// `IntegrationTests` package.
 
 /// The commands of the children the process tests spawn, and the test of the
 /// process table those tests share.

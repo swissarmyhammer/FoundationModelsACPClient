@@ -34,7 +34,7 @@ struct SessionModelCompactionTests {
     @Test func aCompactionUpdateAddsOneCompactionEntryAtTheEnd() throws {
         let model = SessionModelFixtures.immediateModel()
 
-        model.applyEach([agentChunk(text: "Earlier"), try SessionModelFixtures.compactionUpdate(.inProgress)])
+        model.applyEach([agentChunk(text: "Earlier"), SessionModelFixtures.compactionUpdate(.inProgress)])
 
         let entry = try #require(model.transcript.last?.compaction)
         #expect(model.transcript.map(\.id) == [earlierMessageID, compactionEntryID])
@@ -50,10 +50,10 @@ struct SessionModelCompactionTests {
 
     @Test func aLaterUpdateChangesTheStatusOfTheSameObject() throws {
         let model = SessionModelFixtures.immediateModel()
-        model.apply(try SessionModelFixtures.compactionUpdate(.inProgress))
+        model.apply(SessionModelFixtures.compactionUpdate(.inProgress))
         let entry = try #require(model.transcript.first?.compaction)
 
-        model.apply(try SessionModelFixtures.compactionUpdate(.completed, summary: .value([textBlock("Kept")])))
+        model.apply(SessionModelFixtures.compactionUpdate(.completed, summary: .value([textBlock("Kept")])))
 
         #expect(model.transcript.map(\.id) == [compactionEntryID])
         #expect(model.transcript.first?.compaction === entry)
@@ -64,11 +64,11 @@ struct SessionModelCompactionTests {
     @Test func aStatusChangeWritesOnlyTheStatus() throws {
         let model = SessionModelFixtures.immediateModel()
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("Kept"),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("Kept"),
         ])
         let entry = try #require(model.transcript.first?.compaction)
-        let statusChange = try SessionModelFixtures.compactionUpdate(.completed, summary: .value([textBlock("Kept")]))
+        let statusChange = SessionModelFixtures.compactionUpdate(.completed, summary: .value([textBlock("Kept")]))
 
         let fired = observationFires {
             _ = (entry.summary, entry.error, entry.meta)
@@ -84,8 +84,8 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionUpdate(.failed, error: .value(failureReason)),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionUpdate(.failed, error: .value(failureReason)),
         ])
 
         let entry = try #require(model.transcript.first?.compaction)
@@ -97,8 +97,8 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionUpdate(.cancelled),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionUpdate(.cancelled),
         ])
 
         let entry = try #require(model.transcript.first?.compaction)
@@ -112,9 +112,9 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("First "),
-            try SessionModelFixtures.compactionChunk("second"),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("First "),
+            SessionModelFixtures.compactionChunk("second"),
         ])
 
         let entry = try #require(model.transcript.first?.compaction)
@@ -125,7 +125,7 @@ struct SessionModelCompactionTests {
     @Test func aChunkBeforeAnyUpdateGivesNoReportedStatus() throws {
         let model = SessionModelFixtures.immediateModel()
 
-        model.apply(try SessionModelFixtures.compactionChunk("Early"))
+        model.apply(SessionModelFixtures.compactionChunk("Early"))
 
         let entry = try #require(model.transcript.first?.compaction)
         #expect(entry.status == SessionEntry.Compaction.unreportedStatus)
@@ -137,9 +137,9 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("Kept"),
-            try SessionModelFixtures.compactionUpdate(.completed, summary: .value([])),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("Kept"),
+            SessionModelFixtures.compactionUpdate(.completed, summary: .value([])),
         ])
 
         let entry = try #require(model.transcript.first?.compaction)
@@ -150,9 +150,9 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
 
         model.applyEach([
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("Kept"),
-            try SessionModelFixtures.compactionUpdate(.completed, summary: .cleared),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("Kept"),
+            SessionModelFixtures.compactionUpdate(.completed, summary: .cleared),
         ])
 
         let entry = try #require(model.transcript.first?.compaction)
@@ -166,9 +166,9 @@ struct SessionModelCompactionTests {
         model.apply(agentChunk(text: "Earlier"))
         let earlier = try #require(model.transcript.first?.agentMessage)
         let compaction = [
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("Summary"),
-            try SessionModelFixtures.compactionUpdate(.completed),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("Summary"),
+            SessionModelFixtures.compactionUpdate(.completed),
         ]
 
         let fired = observationFires {
@@ -203,9 +203,9 @@ struct SessionModelCompactionTests {
     @Test func aReplayGivesTheSameCompactionEntry() throws {
         let updates = [
             agentChunk(text: "Earlier"),
-            try SessionModelFixtures.compactionUpdate(.inProgress),
-            try SessionModelFixtures.compactionChunk("Summary"),
-            try SessionModelFixtures.compactionUpdate(.failed, error: .value(failureReason)),
+            SessionModelFixtures.compactionUpdate(.inProgress),
+            SessionModelFixtures.compactionChunk("Summary"),
+            SessionModelFixtures.compactionUpdate(.failed, error: .value(failureReason)),
         ]
         var agentHistory = SessionMergeEngine()
         for update in updates {

@@ -4,7 +4,6 @@ import MetricsTestKit
 import TelemetryTestSupport
 import Testing
 
-@testable import AcpClientCore
 @testable import FoundationModelsACPClient
 
 // These tests cover the request metrics of `ClientRequestSpan`: the request
@@ -69,16 +68,15 @@ struct ClientRequestMetricsTests {
                 script: [],
                 deferredScript: [GatedUpdates(gate: idleGate, updates: [idleState(stopReason: .endTurn)])]
             )
-            _ = try await harness.session.initialize()
+            try await harness.initialize()
             let turn = Task { @MainActor in
-                try await harness.runner.run()
+                try await harness.runTurn()
             }
             let dimensions = [RequestTelemetry.methodDimension(ClientRequestSpan.Method.prompt)]
 
-            // The turn ends on `idle` and cancels a prompt that is still in
-            // flight. The agent sends `idle` only after the prompt answer
-            // reached the client, which the request counter shows, so the
-            // prompt is never cancelled.
+            // The agent sends `idle` only after the gate opens, and the test
+            // opens the gate only after the prompt answer reached the client,
+            // which the request counter shows.
             let answered = await eventually {
                 context.metricsFactory.counters.contains { counter in
                     counter.label == ACPClientTelemetry.MetricName.requests
