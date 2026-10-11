@@ -48,10 +48,28 @@ struct TranscriptEntryTimingTests {
     /// The date at which each test starts.
     let start = ManualWallClock.startDate
 
+    /// Makes a model that sends its requests through ``sender`` and reads
+    /// each time from ``wallClock``.
+    ///
+    /// - Parameter cadence: The coalescing cadence of the model. `.zero`
+    ///   applies each chunk at once.
+    /// - Returns: The model.
+    func timedModel(cadence: Duration = .zero) -> SessionModel {
+        SessionModelFixtures.makeModel(sender: sender, cadence: cadence, now: wallClock.now)
+    }
+
+    /// Makes a timed model that holds chunks in the buffer on the buffered
+    /// cadence until a flush runs.
+    ///
+    /// - Returns: The model.
+    func bufferedModel() -> SessionModel {
+        timedModel(cadence: SessionModelFixtures.bufferedCadence)
+    }
+
     // MARK: - Messages and thoughts
 
     @Test func agentMessageStartsAtItsFirstChunkAndEndsWhenTheNextEntryStarts() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(agentChunk(text: "one "))
         wallClock.advance(by: firstStep)
@@ -66,7 +84,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func agentMessageHasNoEndWhileNoOtherEntryStarts() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(agentChunk(text: "still talking"))
         wallClock.advance(by: firstStep)
@@ -77,7 +95,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func thoughtEndsWhenTheNextEntryStarts() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(thoughtChunk(text: "think"))
         wallClock.advance(by: firstStep)
@@ -89,7 +107,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func thoughtEndsWhenTheAgentBecomesIdle() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(thoughtChunk(text: "think"))
         wallClock.advance(by: firstStep)
@@ -99,7 +117,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func aLaterEntryDoesNotMoveAnEndThatIsSet() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(thoughtChunk(text: "think"))
         wallClock.advance(by: firstStep)
@@ -111,7 +129,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func unknownEntryEndsWhenTheNextEntryStarts() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(.unknown(futureUpdateType, .object([:])))
         wallClock.advance(by: firstStep)
@@ -124,7 +142,7 @@ struct TranscriptEntryTimingTests {
 
     @Test(arguments: [ToolCallStatus.completed, .failed, .cancelled])
     func toolCallEndsWhenItsStatusFinishes(_ finished: ToolCallStatus) throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(toolCallStatus(id: toolCallRawId, .pending))
         wallClock.advance(by: firstStep)
@@ -139,7 +157,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func aLaterToolCallUpdateDoesNotMoveItsEnd() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(toolCallStatus(id: toolCallRawId, .completed))
         wallClock.advance(by: firstStep)
@@ -149,7 +167,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func toolCallDoesNotEndWhenTheNextEntryStarts() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(toolCallStatus(id: toolCallRawId, .inProgress))
         wallClock.advance(by: firstStep)
@@ -160,7 +178,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func terminalEndsWhenItsExitStatusArrives() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(.terminalUpdate(TerminalUpdate(terminalId: terminalId, command: .value("ls"))))
         wallClock.advance(by: firstStep)
@@ -170,7 +188,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func compactionEndsWhenItsStatusFinishes() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.apply(SessionModelFixtures.compactionUpdate(.inProgress))
         wallClock.advance(by: firstStep)
@@ -180,7 +198,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func planHasNoEnd() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
         let plan = PlanUpdate(plan: .items(PlanItems(entries: [], planId: PlanId(rawValue: "plan-1"))))
 
         model.apply(.planUpdate(plan))
@@ -196,7 +214,7 @@ struct TranscriptEntryTimingTests {
     // MARK: - Local entries
 
     @Test func promptUserMessageStartsAndEndsWhenThePromptIsSent() async throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
         model.apply(agentChunk(text: "earlier answer"))
         wallClock.advance(by: firstStep)
 
@@ -212,7 +230,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func errorEntryStartsAndEndsWhenTheClientAddsIt() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
         wallClock.advance(by: firstStep)
 
         model.appendError(code: .internalError, message: "failed", data: nil)
@@ -225,7 +243,7 @@ struct TranscriptEntryTimingTests {
     // MARK: - Replay
 
     @Test func entriesOfAReplayHaveNoTimes() {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
 
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.applyEach([
@@ -241,11 +259,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func bufferedChunksOfAReplayHaveNoTimes() throws {
-        let model = SessionModelFixtures.makeModel(
-            sender: sender,
-            cadence: SessionModelFixtures.bufferedCadence,
-            now: wallClock.now
-        )
+        let model = bufferedModel()
 
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.apply(agentChunk(text: "replayed"))
@@ -257,7 +271,7 @@ struct TranscriptEntryTimingTests {
     }
 
     @Test func aLiveEntryAfterAReplayGetsTimesAndLeavesTheReplayedEntryOpen() throws {
-        let model = SessionModelFixtures.makeModel(sender: sender, now: wallClock.now)
+        let model = timedModel()
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.apply(agentChunk(text: "replayed", message: "old"))
         model.endReplay(succeeded: true)
@@ -271,11 +285,7 @@ struct TranscriptEntryTimingTests {
     // MARK: - Observation
 
     @Test func manyChunksOfOneMessageWriteEachTimeAtMostOneTime() throws {
-        let model = SessionModelFixtures.makeModel(
-            sender: sender,
-            cadence: SessionModelFixtures.bufferedCadence,
-            now: wallClock.now
-        )
+        let model = bufferedModel()
         model.apply(agentChunk(text: "first "))
         model.flushPendingChunks()
         let message = try #require(model.transcript.first?.agentMessage)

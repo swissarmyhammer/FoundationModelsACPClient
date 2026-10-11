@@ -90,7 +90,7 @@ enum SessionModelFixtures {
     /// - Returns: The model.
     @MainActor
     static func immediateModel() -> SessionModel {
-        SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender(), coalescingCadence: .zero)
+        makeModel(sender: FakeSessionRequestSender())
     }
 
     /// Makes a model for the test session that holds chunks in the buffer on
@@ -100,12 +100,7 @@ enum SessionModelFixtures {
     /// - Returns: The model.
     @MainActor
     static func coalescingModel(clock: ManualClock) -> SessionModel {
-        SessionModel(
-            sessionId: testSession,
-            requestSender: FakeSessionRequestSender(),
-            coalescingCadence: bufferedCadence,
-            clock: clock
-        )
+        makeModel(sender: FakeSessionRequestSender(), cadence: bufferedCadence, clock: clock)
     }
 
     /// Makes a permission request for the test session.
@@ -189,9 +184,14 @@ extension SessionModel {
     /// - Parameters:
     ///   - text: The text of the prompt.
     ///   - sender: The fake sender of this model.
+    ///   - meta: The `_meta` of the prompt request, or `nil` for none.
     /// - Returns: The task of the prompt call.
-    func startPrompt(_ text: String, heldBy sender: FakeSessionRequestSender) async -> Task<PromptResponse, any Error> {
-        let call = Task { try await prompt([textBlock(text)]) }
+    func startPrompt(
+        _ text: String,
+        heldBy sender: FakeSessionRequestSender,
+        meta: JSONValue? = nil
+    ) async -> Task<PromptResponse, any Error> {
+        let call = Task { try await prompt([textBlock(text)], meta: meta) }
         var received = sender.receivedPrompts.makeAsyncIterator()
         _ = await received.next()
         return call

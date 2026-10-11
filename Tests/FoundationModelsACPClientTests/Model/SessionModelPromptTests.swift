@@ -189,9 +189,8 @@ struct SessionModelPromptTests {
 
     @Test func promptSendsTheContentSessionAndMetaUnchanged() async throws {
         let model = SessionModelFixtures.makeModel(sender: sender)
-        let call = Task { try await model.prompt([textBlock(promptText)], meta: traceMeta) }
-        var received = sender.receivedPrompts.makeAsyncIterator()
-        let request = try #require(await received.next())
+        let call = await model.startPrompt(promptText, heldBy: sender, meta: traceMeta)
+        let request = try #require(sender.promptRequests.first)
 
         #expect(request == PromptRequest(prompt: [textBlock(promptText)], sessionId: testSession, meta: traceMeta))
         sender.answerPrompt(with: promptedResponse)
@@ -206,9 +205,7 @@ struct SessionModelPromptTests {
     @Test func promptRecordsTheTraceContextOfTheSentRequest() async throws {
         let model = SessionModelFixtures.makeModel(sender: sender)
         let sent = try #require(TraceContextMeta(traceparent: sentTraceparent, tracestate: sentTracestate))
-        let call = Task { try await model.prompt([textBlock(promptText)], meta: sent.inject(into: vendorMeta)) }
-        var received = sender.receivedPrompts.makeAsyncIterator()
-        _ = await received.next()
+        let call = await model.startPrompt(promptText, heldBy: sender, meta: sent.inject(into: vendorMeta))
 
         #expect(model.promptTraceMeta == sent.inject(into: nil))
         sender.answerPrompt(with: promptedResponse)
@@ -221,9 +218,7 @@ struct SessionModelPromptTests {
         let model = SessionModelFixtures.makeModel(sender: sender)
         #expect(model.promptTraceMeta == nil)
 
-        let call = Task { try await model.prompt([textBlock(promptText)], meta: vendorMeta) }
-        var received = sender.receivedPrompts.makeAsyncIterator()
-        _ = await received.next()
+        let call = await model.startPrompt(promptText, heldBy: sender, meta: vendorMeta)
 
         #expect(model.promptTraceMeta == nil)
         sender.answerPrompt(with: promptedResponse)
