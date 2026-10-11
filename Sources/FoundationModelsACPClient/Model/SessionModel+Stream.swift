@@ -166,7 +166,8 @@ extension SessionModel {
     /// event of the earlier attachment and no replay gives it again. When the
     /// request asks for a replay and the model already has a transcript, the
     /// model also clears its transcript and its last-value state, because a
-    /// replayed chunk appends again and would double the text.
+    /// replayed chunk appends again and would double the text. The count of
+    /// replayed updates, ``replayedUpdateCount``, starts again at 0.
     ///
     /// - Parameter replayFrom: The `replayFrom` field of the request that the
     ///   client sends, or `nil` for no replay.
@@ -177,6 +178,7 @@ extension SessionModel {
             resetTranscript()
         }
         replayRequests = ReplayRequests()
+        replayedUpdateCount = 0
         replayPhase = .replaying(from: replayFrom)
     }
 
@@ -186,7 +188,8 @@ extension SessionModel {
     /// sets ``history`` to the retained history of its cursor. A successful
     /// replay from the start gives the full retained history, so it clears
     /// ``hasMissedUpdates``. A failure, and a resume with no replay, keep both
-    /// values.
+    /// values. The model keeps `succeeded` in ``replaySucceeded``, and each
+    /// caller of ``waitForReplayEnd()`` gets it.
     ///
     /// - Parameter succeeded: Whether the agent answered the request with a
     ///   result.
@@ -194,6 +197,7 @@ extension SessionModel {
         let phase = replayPhase
         replayPhase = .idle
         replayRequests = ReplayRequests()
+        replaySucceeded = succeeded
         defer { resumeReplayEndWaiters() }
         flushPendingChunks()
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
@@ -210,30 +214,37 @@ extension SessionModel {
         endReplay(succeeded: false)
     }
 
-    /// Waits until the running replay ends.
+    /// Waits until the running replay ends, and tells whether it ended with
+    /// success.
     ///
     /// The marker of the `session/resume` request ends the replay, after the
     /// model applied each replayed update. The end of the subscription and
-    /// the close also end it. A model with no attached subscription gets no
-    /// marker, so the call then ends the replay as a failure at once. When
-    /// no replay runs, the call returns at once.
-    func waitForReplayEnd() async {
-        guard isReplaying else { return }
+    /// the close also end it, as a failure. A model with no attached
+    /// subscription gets no marker, so the call then ends the replay as a
+    /// failure at once. When no replay runs, for example because the marker
+    /// came before the call, the call returns the result of the last replay
+    /// at once.
+    ///
+    /// - Returns: `true` when the replay ended with success, and `false` when
+    ///   it ended as a failure.
+    func waitForReplayEnd() async -> Bool {
+        guard isReplaying else { return replaySucceeded }
         guard streamTask != nil else {
             endRunningReplayAsFailure()
-            return
+            return replaySucceeded
         }
-        await withCheckedContinuation { waiter in
+        return await withCheckedContinuation { waiter in
             replayEndWaiters.append(waiter)
         }
     }
 
-    /// Resumes each caller that waits for the end of the replay.
+    /// Resumes each caller that waits for the end of the replay, with the
+    /// result of the replay.
     private func resumeReplayEndWaiters() {
         let waiters = replayEndWaiters
         replayEndWaiters.removeAll()
         for waiter in waiters {
-            waiter.resume()
+            waiter.resume(returning: replaySucceeded)
         }
     }
 

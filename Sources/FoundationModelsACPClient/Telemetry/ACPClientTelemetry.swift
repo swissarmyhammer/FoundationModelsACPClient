@@ -35,8 +35,9 @@ import Tracing
 ///
 /// Rule 4: a value that goes with one of these names is an id, an ACP method
 /// name, a count, a duration, an error code, a value of
-/// ``ACPClientTelemetry/OutcomeValue`` or a Boolean. It is never a prompt, a
-/// response, tool arguments, tool output or other content of the user. Each
+/// ``ACPClientTelemetry/OutcomeValue`` or of
+/// ``ACPClientTelemetry/ReplayFromValue``, or a Boolean. It is never a prompt,
+/// a response, tool arguments, tool output or other content of the user. Each
 /// record leaves the process through the backend of the host, and the library
 /// cannot know where that backend sends it.
 public enum ACPClientTelemetry {
@@ -65,6 +66,15 @@ public enum ACPClientTelemetry {
         /// this one name, and the ACP method goes in the
         /// ``ACPClientTelemetry/AttributeKey/rpcMethod`` attribute.
         public static let agentRequest = prefix + "agent.request"
+
+        /// The span of one replay of a `session/resume` request, from the
+        /// moment before the request goes out to the moment that the model
+        /// applied the last replayed update.
+        ///
+        /// The span has the kind `.internal`. The client span of the
+        /// `session/resume` request opens in it, so that span is its child.
+        /// Each resume gets this span, also a resume that asks for no replay.
+        public static let replay = prefix + "replay"
     }
 
     /// The attribute keys of the spans of the library.
@@ -100,6 +110,18 @@ public enum ACPClientTelemetry {
         /// the client answered it with a fallback. No OpenTelemetry
         /// convention names this fact, so the key has the `acp.` namespace.
         public static let routed = "acp.request.routed"
+
+        /// The `replayFrom` cursor of a `session/resume` request. The value
+        /// is always one of ``ACPClientTelemetry/ReplayFromValue``, and never
+        /// a cursor type that the caller sent. No OpenTelemetry convention
+        /// names this fact, so the key has the `acp.` namespace.
+        public static let replayFrom = "acp.replay.from"
+
+        /// The number of updates that the agent replayed before its answer
+        /// to a `session/resume` request. A resume that asks for no replay
+        /// has a count of 0. No OpenTelemetry convention names this fact, so
+        /// the key has the `acp.` namespace.
+        public static let replayUpdateCount = "acp.replay.update_count"
     }
 
     /// The metric names of the library. Each metric has the ACP method as a
@@ -174,6 +196,24 @@ public enum ACPClientTelemetry {
         public static let unmatched = "unmatched"
 
         /// An outcome or an action that is not one of the values above.
+        public static let other = "other"
+    }
+
+    /// The values of the ``ACPClientTelemetry/AttributeKey/replayFrom``
+    /// attribute.
+    ///
+    /// The set of values is small and fixed (rule 4). A cursor of a type
+    /// that this set does not name gets ``other``: the attribute never holds
+    /// a string that the caller sent.
+    public enum ReplayFromValue {
+        /// The request asks for a replay of all retained history.
+        public static let start = "start"
+
+        /// The request has no cursor, so it asks for no replay.
+        public static let none = "none"
+
+        /// The request has a cursor of a type that is not one of the values
+        /// above.
         public static let other = "other"
     }
 

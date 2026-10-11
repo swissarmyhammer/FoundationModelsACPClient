@@ -8,9 +8,10 @@ import Testing
 
 // The queries that the request telemetry tests share. `ClientRequestSpanTests`,
 // `ClientRequestMetricsTests`, `ContentSafetyTests`, `ModelRequestSpanTests`,
-// `AgentRequestSpanTests` and `AgentRequestSpanRoutingTests` read the spans,
-// the metric dimensions and the `traceparent` of an ACP request through these
-// queries, so each query has one copy.
+// `AgentRequestSpanTests`, `AgentRequestSpanRoutingTests` and
+// `ReplaySpanTests` read the spans, the metric dimensions and the
+// `traceparent` of an ACP request through these queries, so each query has
+// one copy.
 
 extension TelemetryCapture.Context {
     /// Gives the finished request spans of one ACP method.
@@ -26,6 +27,12 @@ extension TelemetryCapture.Context {
     /// order of their end.
     var agentRequestSpans: [FinishedInMemorySpan] {
         spans.filter { $0.operationName == ACPClientTelemetry.SpanName.agentRequest }
+    }
+
+    /// The finished spans whose name is the replay span name, in the order
+    /// of their end.
+    var replaySpans: [FinishedInMemorySpan] {
+        spans.filter { $0.operationName == ACPClientTelemetry.SpanName.replay }
     }
 
     /// Gives the finished agent request spans of one ACP method.

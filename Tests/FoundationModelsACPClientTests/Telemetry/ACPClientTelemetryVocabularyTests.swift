@@ -42,6 +42,7 @@ struct ACPClientTelemetryVocabularyTests {
             ACPClientTelemetry.logLabel,
             ACPClientTelemetry.SpanName.request,
             ACPClientTelemetry.SpanName.agentRequest,
+            ACPClientTelemetry.SpanName.replay,
             ACPClientTelemetry.MetricName.requests,
             ACPClientTelemetry.MetricName.requestDuration,
             ACPClientTelemetry.MetricName.requestErrors,
@@ -64,6 +65,23 @@ struct ACPClientTelemetryVocabularyTests {
     func theAgentRequestAttributeKeysHaveTheACPNamespace() {
         #expect(ACPClientTelemetry.AttributeKey.outcome == "acp.response.outcome")
         #expect(ACPClientTelemetry.AttributeKey.routed == "acp.request.routed")
+    }
+
+    @Test("the replay span names have the module prefix and the acp namespace")
+    func theReplaySpanNamesHaveTheACPNamespace() {
+        #expect(ACPClientTelemetry.SpanName.replay == "FoundationModelsACPClient.replay")
+        #expect(ACPClientTelemetry.AttributeKey.replayFrom == "acp.replay.from")
+        #expect(ACPClientTelemetry.AttributeKey.replayUpdateCount == "acp.replay.update_count")
+    }
+
+    @Test("the replay cursor values are start, none and other")
+    func theReplayFromValuesAreStartNoneAndOther() {
+        let values = [
+            ACPClientTelemetry.ReplayFromValue.start,
+            ACPClientTelemetry.ReplayFromValue.none,
+            ACPClientTelemetry.ReplayFromValue.other,
+        ]
+        #expect(values == ["start", "none", "other"])
     }
 
     @Test("the outcome values are the ACP outcome and action names, and other")

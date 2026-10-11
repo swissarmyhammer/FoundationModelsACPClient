@@ -155,9 +155,20 @@ public final class SessionModel {
     /// that came before the start of their request.
     @ObservationIgnored var replayRequests = ReplayRequests()
 
+    /// The number of updates that the running replay, or the last replay,
+    /// applied. ``beginReplay(replayFrom:)`` sets it to 0, and only a replay
+    /// that asks for a replay counts. It changes for each update, so it is
+    /// not observed.
+    @ObservationIgnored var replayedUpdateCount = 0
+
+    /// Whether the last replay ended with success. ``endReplay(succeeded:)``
+    /// keeps the result, so a caller of ``waitForReplayEnd()`` gets it also
+    /// when the replay ended before the call.
+    @ObservationIgnored var replaySucceeded = false
+
     /// The callers that wait for the end of the running replay. The end of
-    /// the replay resumes each one.
-    @ObservationIgnored var replayEndWaiters: [CheckedContinuation<Void, Never>] = []
+    /// the replay resumes each one with its result.
+    @ObservationIgnored var replayEndWaiters: [CheckedContinuation<Bool, Never>] = []
 
     /// The task that folds the updates of the attached subscription, or `nil`
     /// when no subscription is attached.
@@ -306,11 +317,15 @@ public final class SessionModel {
     /// goes to the shared ``ChunkCoalescer``: a coalescible chunk goes into
     /// the buffer, which flushes on the cadence, and any other update flushes
     /// the buffer first and then folds, so the applied order is the arrival
-    /// order. A closed model ignores the update.
+    /// order. A closed model ignores the update. While a replay that asks
+    /// for a replay runs, the update adds 1 to ``replayedUpdateCount``.
     ///
     /// - Parameter update: The update to receive.
     func apply(_ update: SessionUpdate) {
         guard !isClosed else { return }
+        if case .replaying(from: .some) = replayPhase {
+            replayedUpdateCount += 1
+        }
         yieldToUpdateTaps(update)
         coalescer.receive(update)
     }

@@ -253,8 +253,9 @@ struct SessionModelStreamTests {
             continuation.yield(.update(update))
         }
         continuation.yield(requestFinished(.succeeded))
-        await model.waitForReplayEnd()
+        let succeeded = await model.waitForReplayEnd()
 
+        #expect(succeeded)
         #expect(!model.isReplaying)
         #expect(model.transcript.count == replayedEntryCount)
         #expect(model.history == .retained(replayFrom: replayFromStart))
@@ -268,8 +269,9 @@ struct SessionModelStreamTests {
         model.replayRequestDidStart(markedRequestId)
 
         continuation.yield(requestFinished(.failed))
-        await model.waitForReplayEnd()
+        let succeeded = await model.waitForReplayEnd()
 
+        #expect(!succeeded)
         #expect(!model.isReplaying)
         #expect(model.history == .live)
     }
@@ -324,10 +326,21 @@ struct SessionModelStreamTests {
         model.beginReplay(replayFrom: replayFromStart)
 
         continuation.finish()
-        await model.waitForReplayEnd()
+        let succeeded = await model.waitForReplayEnd()
 
+        #expect(!succeeded)
         #expect(!model.isReplaying)
         #expect(model.history == .live)
+    }
+
+    @Test(arguments: [true, false])
+    func aWaitAfterTheReplayEndedGivesTheResultOfThatReplay(succeeded: Bool) async {
+        let model = SessionModelFixtures.immediateModel()
+        model.attach(SessionModelFixtures.handMadeSubscription().0)
+        model.beginReplay(replayFrom: replayFromStart)
+        model.endReplay(succeeded: succeeded)
+
+        #expect(await model.waitForReplayEnd() == succeeded)
     }
 
     @Test func closeEndsTheReplayAsAFailure() {

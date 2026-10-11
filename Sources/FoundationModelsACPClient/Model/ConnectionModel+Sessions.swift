@@ -1,4 +1,7 @@
 import FoundationModelsACP
+import FoundationModelsExtras
+import Logging
+import Tracing
 
 // The session factory of `ConnectionModel`: the request that opens a new
 // session, the request that resumes a session, and the request that closes
@@ -9,7 +12,9 @@ import FoundationModelsACP
 // Each request goes out through `sendRecordingAuth(_:through:)`: the client
 // request span, the request metrics, and the W3C trace context in the `_meta`
 // of the request of `ClientRequestSpan.send(_:parent:through:)`, and a
-// `-32000` answer of the agent recorded in `authState`.
+// `-32000` answer of the agent recorded in `authState`. Each resume also runs
+// in one internal replay span, and the client span of its request is a child
+// of that span.
 
 extension ConnectionModel {
     // MARK: - New session
@@ -156,6 +161,71 @@ extension ConnectionModel {
     }
 
     /// Sends one `session/resume` request and runs its replay in a session
+    /// model, in one replay span.
+    ///
+    /// The span has the name ``ACPClientTelemetry/SpanName/replay`` and the
+    /// kind `.internal`. The client span of the request opens in it, so that
+    /// span is its child. Rule 4: the span holds the session id, the
+    /// ``ACPClientTelemetry/ReplayFromValue`` of the cursor, and the number
+    /// of replayed updates, on each exit path. A refused request, and a
+    /// replay that ends as a failure, give the error status. The span never
+    /// records the error object.
+    ///
+    /// - Parameters:
+    ///   - request: The resume-session request.
+    ///   - session: The model of the session, attached to its subscription.
+    ///   - connection: The connection that sends the request.
+    /// - Throws: The `RequestError` of the agent, or the error of the
+    ///   connection. The replay then ended as a failure.
+    private func replay(
+        _ request: ResumeSessionRequest,
+        into session: SessionModel,
+        over connection: ClientSideConnection
+    ) async throws {
+        try await TracedCall.run(
+            ACPClientTelemetry.SpanName.replay,
+            ofKind: .internal,
+            logger: Logger(label: ACPClientTelemetry.logLabel),
+            attributes: { Self.setReplayAttributes(&$0, of: request) },
+            metadata: [ACPClientTelemetry.LogMetadataKey.sessionID: "\(request.sessionId.rawValue)"]
+        ) { span in
+            defer {
+                span.attributes[ACPClientTelemetry.AttributeKey.replayUpdateCount] = session.replayedUpdateCount
+            }
+            let succeeded = try await runReplay(request, into: session, over: connection)
+            if !succeeded {
+                span.setStatus(SpanStatus(code: .error))
+            }
+        }
+    }
+
+    /// Sets the attributes that a replay span holds from its start: the
+    /// session id and the value of the cursor.
+    ///
+    /// - Parameters:
+    ///   - attributes: The attributes of the span.
+    ///   - request: The resume-session request.
+    private static func setReplayAttributes(_ attributes: inout SpanAttributes, of request: ResumeSessionRequest) {
+        attributes[ACPClientTelemetry.AttributeKey.sessionID] = request.sessionId.rawValue
+        attributes[ACPClientTelemetry.AttributeKey.replayFrom] = replayFromValue(of: request.replayFrom)
+    }
+
+    /// Gives the telemetry value of a replay cursor.
+    ///
+    /// Rule 4: the value comes from a small, fixed set. It is never the type
+    /// of a cursor that this schema revision does not know.
+    ///
+    /// - Parameter replayFrom: The `replayFrom` field of the request.
+    /// - Returns: A value of ``ACPClientTelemetry/ReplayFromValue``.
+    private static func replayFromValue(of replayFrom: ReplayFrom?) -> String {
+        switch replayFrom {
+        case nil: ACPClientTelemetry.ReplayFromValue.none
+        case .start: ACPClientTelemetry.ReplayFromValue.start
+        case .unknown: ACPClientTelemetry.ReplayFromValue.other
+        }
+    }
+
+    /// Sends one `session/resume` request and runs its replay in a session
     /// model.
     ///
     /// The model must already be attached to a subscription of the session.
@@ -175,13 +245,16 @@ extension ConnectionModel {
     ///   - request: The resume-session request.
     ///   - session: The model of the session, attached to its subscription.
     ///   - connection: The connection that sends the request.
+    /// - Returns: `true` when the replay ended with success, and `false` when
+    ///   it ended as a failure after a successful response, for example
+    ///   because the subscription ended before the marker.
     /// - Throws: The `RequestError` of the agent, or the error of the
     ///   connection. The replay then ended as a failure.
-    private func replay(
+    private func runReplay(
         _ request: ResumeSessionRequest,
         into session: SessionModel,
         over connection: ClientSideConnection
-    ) async throws {
+    ) async throws -> Bool {
         // The agent sends the status of its MCP servers after the response,
         // so the list of the request must be in the model before the request
         // goes out. A list set after the response could erase those statuses.
@@ -198,9 +271,10 @@ extension ConnectionModel {
             await endReplay(of: session, afterFailure: error)
             throw error
         }
-        await session.waitForReplayEnd()
+        let succeeded = await session.waitForReplayEnd()
         session.setWorkspace(of: request)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
+        return succeeded
     }
 
     /// Starts the task that gives a session model the wire id of each
@@ -247,7 +321,9 @@ extension ConnectionModel {
             session.endRunningReplayAsFailure()
             return
         }
-        await session.waitForReplayEnd()
+        // The request failed, so the replay is a failure whatever its end
+        // gives.
+        _ = await session.waitForReplayEnd()
     }
 
     /// Makes the model of a session, attached to a new subscription of the
