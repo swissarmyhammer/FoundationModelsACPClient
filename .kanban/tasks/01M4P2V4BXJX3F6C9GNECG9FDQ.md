@@ -27,8 +27,24 @@ comments:
     - evidence: swift test — 485 tests in 38 suites passed, 0 failed, 0 skipped. Only warning: SwiftPM MLX "missing creator for mutated node" (known, task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
     - next: review
   timestamp: 2026-10-11T19:00:40.258200+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4p5mj3pn1ds8s26grfz2g6k
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (e2d41ad) — 0 findings, 0 confirmed, 0 refuted (14 attempted, 0 failed). Acceptance criteria verified against the diff: (1) `rg replayFromStart Tests` shows one declaration only, in SessionModelFixtures.swift; all uses in the six files read `SessionModelFixtures.replayFromStart`. (2) test step: swift test, 485 tests passed, only the known MLX warning (^5qws9qzt).
+    - next: none — task moved to done.
+  timestamp: 2026-10-11T19:04:36.726840+00:00
+- actor: claude-code
+  id: 01m4p5n00ytv07fydbm55ewx6k
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 6 files
+    - test: green — swift test, 485 passed
+    - commit: e2d41ad
+    - review: clean — 0 findings; task in done
+  timestamp: 2026-10-11T19:04:50.974812+00:00
+position_column: done
+position_ordinal: ec80
 title: Fold the private replayFromStart test constants onto SessionModelFixtures.replayFromStart
 ---
 ## What
