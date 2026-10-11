@@ -21,6 +21,9 @@ enum SessionModelFixtures {
     /// or a flush runs.
     static let bufferedCadence: Duration = .milliseconds(bufferedCadenceMilliseconds)
 
+    /// The cursor of a replay of the whole retained history.
+    static let replayFromStart: ReplayFrom = .start(ReplayFromStart())
+
     /// The context window that the usage fixture reports.
     private static let contextWindowSize = 200_000
 

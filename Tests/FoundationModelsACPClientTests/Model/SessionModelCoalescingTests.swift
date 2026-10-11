@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModelsACP
-import Observation
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -23,24 +22,6 @@ private let thoughtMessageId = MessageId(rawValue: "thought-1")
 /// Chunks with combining marks, emoji, and white space, so a coalesced fold
 /// that changed one byte would show.
 private let mixedChunks = ["Hé", "llo,  ", "\n\t", "👋🏽 ", "cafe\u{301}", "  ", "end."]
-
-/// Counts each observable change of the values that `read` reads.
-///
-/// The tracker registers again inside each `onChange`, so it counts every
-/// change one by one, as SwiftUI would see them with an immediate re-render.
-///
-/// - Parameters:
-///   - read: The reads that the observation tracks.
-///   - counter: The change count to increase.
-@MainActor
-private func countChanges(of read: @escaping @MainActor @Sendable () -> Void, into counter: MutationCounter) {
-    withObservationTracking(read) {
-        counter.increase()
-        MainActor.assumeIsolated {
-            countChanges(of: read, into: counter)
-        }
-    }
-}
 
 /// The coalescing tests, in one suite so that `swift test --filter
 /// SessionModelCoalescingTests` selects them. A tap test that waits for an

@@ -12,6 +12,11 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the tool call. The tool call ends
+    /// when its status first becomes `completed`, `failed`, or `cancelled`.
+    /// See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The ACP id of the tool call, as the agent sent it. It never changes.
     public nonisolated let toolCallId: ToolCallId
 

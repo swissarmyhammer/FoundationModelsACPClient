@@ -11,6 +11,10 @@ public final class TerminalEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the terminal. The terminal ends
+    /// when its exit status first arrives. See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The output bytes of the terminal.
     public internal(set) var bytes = Data()
 

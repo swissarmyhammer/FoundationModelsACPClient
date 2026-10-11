@@ -1,8 +1,10 @@
 import Foundation
+import Observation
 import Synchronization
 
-// The shared helpers of the chunk-coalescing tests: a manual clock that moves
-// only when a test advances it, a thread-safe mutation counter, and a
+// The shared helpers of the chunk-coalescing and timing tests: a manual clock
+// and a manual wall clock that move only when a test advances them, a
+// thread-safe mutation counter, an observation change counter, and a
 // cooperative wait. No test that uses them reads the wall clock.
 
 /// The highest number of cooperative yields a test waits for the scheduled
@@ -152,7 +154,53 @@ final class ManualClock: Clock, Sendable {
     }
 }
 
+// MARK: - A manual wall clock
+
+/// A wall clock for tests. The date moves only when a test advances it.
+///
+/// Give ``now()`` as the `now` parameter of a model, so the model reads this
+/// date and not the system date.
+final class ManualWallClock: Sendable {
+    /// The date at which each manual wall clock starts.
+    static let startDate = Date(timeIntervalSinceReferenceDate: 0)
+
+    /// The current date. The mutex is the synchronization for `Sendable`.
+    private let date = Mutex(ManualWallClock.startDate)
+
+    /// Gives the current date.
+    ///
+    /// - Returns: The current date.
+    @Sendable func now() -> Date {
+        date.withLock { $0 }
+    }
+
+    /// Moves the date forward.
+    ///
+    /// - Parameter interval: The distance to move the date, in seconds.
+    func advance(by interval: TimeInterval) {
+        date.withLock { $0 += interval }
+    }
+}
+
 // MARK: - Helpers
+
+/// Counts each observable change of the values that `read` reads.
+///
+/// The tracker registers again inside each `onChange`, so it counts every
+/// change one by one, as SwiftUI would see them with an immediate re-render.
+///
+/// - Parameters:
+///   - read: The reads that the observation tracks.
+///   - counter: The change count to increase.
+@MainActor
+func countChanges(of read: @escaping @MainActor @Sendable () -> Void, into counter: MutationCounter) {
+    withObservationTracking(read) {
+        counter.increase()
+        MainActor.assumeIsolated {
+            countChanges(of: read, into: counter)
+        }
+    }
+}
 
 /// A thread-safe mutation counter for observation tests.
 final class MutationCounter: Sendable {

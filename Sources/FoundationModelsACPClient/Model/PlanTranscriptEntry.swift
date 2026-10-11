@@ -24,6 +24,11 @@ public final class PlanTranscriptEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time of the plan. A plan has no natural end, because each
+    /// plan update replaces it in its first position, so ``endedAt`` stays
+    /// `nil`. See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The identifier of the plan, or `nil` for a plan of unknown content
     /// that names no `planId`.
     public internal(set) var planId: PlanId?

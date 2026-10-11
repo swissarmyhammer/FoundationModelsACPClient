@@ -10,6 +10,11 @@ public final class AgentMessageEntry: MessageTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the message. The message ends when
+    /// the next entry starts, or when the agent becomes idle. See
+    /// ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The content of the message.
     public internal(set) var content: [ContentBlock] = []
 

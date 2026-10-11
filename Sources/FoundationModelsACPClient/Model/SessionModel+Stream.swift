@@ -69,6 +69,16 @@ extension SessionModel {
         replayPhase != .idle
     }
 
+    /// Whether a `session/resume` request that asks for a replay runs. Each
+    /// update that the model applies then is a replayed update of the
+    /// retained history: it adds 1 to ``replayedUpdateCount``, and an entry
+    /// that it makes gets no time. A resume with no replay gives live
+    /// updates only.
+    var isReplayingHistory: Bool {
+        guard case .replaying(from: .some) = replayPhase else { return false }
+        return true
+    }
+
     // MARK: - Attachment
 
     /// Folds the events of a subscription into this model, in order.
@@ -184,7 +194,8 @@ extension SessionModel {
 
     /// Marks the end of a `session/resume` request.
     ///
-    /// The model folds the buffered replay chunks at once. A successful replay
+    /// The model folds the buffered replay chunks at once, before the replay
+    /// phase ends, so an entry that they make gets no time. A successful replay
     /// sets ``history`` to the retained history of its cursor. A successful
     /// replay from the start gives the full retained history, so it clears
     /// ``hasMissedUpdates``. A failure, and a resume with no replay, keep both
@@ -194,12 +205,12 @@ extension SessionModel {
     /// - Parameter succeeded: Whether the agent answered the request with a
     ///   result.
     func endReplay(succeeded: Bool) {
+        flushPendingChunks()
         let phase = replayPhase
         replayPhase = .idle
         replayRequests = ReplayRequests()
         replaySucceeded = succeeded
         defer { resumeReplayEndWaiters() }
-        flushPendingChunks()
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
         history = .retained(replayFrom: replayFrom)
         if case .start = replayFrom {

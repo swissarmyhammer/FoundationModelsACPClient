@@ -15,6 +15,11 @@ public final class UnknownEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the update. The update ends when
+    /// the next entry starts, or when the agent becomes idle. See
+    /// ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The `sessionUpdate` type of the update.
     public internal(set) var type = ""
 

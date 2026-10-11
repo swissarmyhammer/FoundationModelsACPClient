@@ -14,6 +14,10 @@ public final class UserMessageEntry: MessageTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the message. A local message
+    /// starts and ends when the client sends the prompt. See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The content of the message.
     public internal(set) var content: [ContentBlock]
 

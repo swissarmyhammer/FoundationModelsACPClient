@@ -148,6 +148,11 @@ public protocol ObservableTranscriptEntry: AnyObject, Observable, Identifiable w
     /// The `_meta` field of the entry, folded with the patch rules of the
     /// session merge engine, or `nil` when the entry has none.
     var meta: JSONValue? { get }
+
+    /// The start time and the end time of the entry, as the client saw them.
+    /// The object never changes for the life of the entry; only its times
+    /// change, each one time. See ``EntryTiming``.
+    var timing: EntryTiming { get }
 }
 
 extension ObservableTranscriptEntry {

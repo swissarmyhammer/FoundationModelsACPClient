@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 import Observation
 
@@ -19,8 +20,9 @@ import Observation
 /// so the close of the session models has no race with a handler that still
 /// runs.
 ///
-/// Each session model that the connection makes gets the coalescing cadence
-/// and the clock given to ``init(coalescingCadence:clock:logger:)``.
+/// Each session model that the connection makes gets the coalescing cadence,
+/// the clock, and the wall clock given to
+/// ``init(coalescingCadence:clock:now:logger:)``.
 @MainActor @Observable
 public final class ConnectionModel {
     /// The state of the connection. The model starts in
@@ -115,6 +117,10 @@ public final class ConnectionModel {
     /// that this connection makes.
     @ObservationIgnored private let clock: any Clock<Duration>
 
+    /// The wall clock that gives the start time and the end time of each
+    /// transcript entry of each session model that this connection makes.
+    @ObservationIgnored private let now: @Sendable () -> Date
+
     /// The diagnostic sink of the connection when
     /// ``connect(over:logger:bufferLimits:client:)`` gets no logger of its
     /// own.
@@ -134,14 +140,20 @@ public final class ConnectionModel {
     ///   - clock: The clock that schedules the coalesced flushes of each
     ///     session model that the connection makes. Tests give a manual
     ///     clock, so they do not read the wall clock.
+    ///   - now: The wall clock that gives the start time and the end time of
+    ///     each transcript entry of each session model that the connection
+    ///     makes. Tests give a manual wall clock, so they do not read the
+    ///     system date.
     ///   - logger: The diagnostic sink of the connection; never stdout.
     public init(
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock(),
+        now: @escaping @Sendable () -> Date = Date.init,
         logger: ACPLogger = .disabled
     ) {
         self.coalescingCadence = coalescingCadence
         self.clock = clock
+        self.now = now
         self.logger = logger
         connectionLogger = logger
     }
@@ -182,7 +194,7 @@ public final class ConnectionModel {
     /// - Parameters:
     ///   - transport: The bidirectional transport to run over.
     ///   - logger: The diagnostic sink of this connection, or `nil` for the
-    ///     logger given to ``init(coalescingCadence:clock:logger:)``; never
+    ///     logger given to ``init(coalescingCadence:clock:now:logger:)``; never
     ///     stdout.
     ///   - bufferLimits: The limits on the `session/update` notifications that
     ///     the connection keeps for a session with no subscriber, for example
@@ -320,9 +332,9 @@ public final class ConnectionModel {
         openSessions[sessionId]
     }
 
-    /// Makes the model of a session, with the coalescing cadence and the
-    /// clock of this connection. The model is not open until ``register(_:)``
-    /// adds it.
+    /// Makes the model of a session, with the coalescing cadence, the clock,
+    /// and the wall clock of this connection. The model is not open until
+    /// ``register(_:)`` adds it.
     ///
     /// The model tells this connection model each change of its
     /// ``SessionModel/sessionInfo``, so the item of the session in
@@ -337,7 +349,8 @@ public final class ConnectionModel {
             sessionId: sessionId,
             requestSender: requestSender,
             coalescingCadence: coalescingCadence,
-            clock: clock
+            clock: clock,
+            now: now
         )
         model.sessionInfoDidChange = { [weak self] sessionId, info in
             self?.patchListedSession(sessionId, with: info)

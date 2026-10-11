@@ -11,6 +11,12 @@ public final class ThoughtEntry: MessageTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the thought. The thought ends when
+    /// the next entry starts, or when the agent becomes idle, so its
+    /// ``EntryTiming/duration`` gives "Thought for N seconds". See
+    /// ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The content of the thought.
     public internal(set) var content: [ContentBlock] = []
 

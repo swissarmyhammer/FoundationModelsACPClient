@@ -218,6 +218,10 @@ public final class SessionModel {
     /// call. A notice records it as its arrival time.
     @ObservationIgnored private let elapsedTime: @Sendable () -> Duration
 
+    /// The wall clock of the transcript. It writes the start time and the end
+    /// time of each entry that the model sees live.
+    @ObservationIgnored private var timekeeper: TranscriptTimekeeper
+
     /// The chunk buffer. A buffered chunk causes no observation; the flush
     /// folds the whole buffer through ``fold(_:)``, and each other update
     /// folds at once. Each closure holds the model weakly, so the coalescer
@@ -276,17 +280,22 @@ public final class SessionModel {
     ///   - clock: The clock that schedules the coalesced flushes and gives
     ///     the arrival time of each notice. Tests give a manual clock, so
     ///     they do not read the wall clock.
+    ///   - now: The wall clock that gives the start time and the end time of
+    ///     each transcript entry. Tests give a manual wall clock, so they do
+    ///     not read the system date.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: any Clock<Duration> = ContinuousClock(),
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.sessionId = sessionId
         self.requestSender = requestSender
         self.coalescingCadence = coalescingCadence
         self.clock = clock
         self.elapsedTime = Self.makeElapsedTime(on: clock)
+        self.timekeeper = TranscriptTimekeeper(now: now)
     }
 
     /// Makes a function that gives the time on a clock from now to the call.
@@ -323,7 +332,7 @@ public final class SessionModel {
     /// - Parameter update: The update to receive.
     func apply(_ update: SessionUpdate) {
         guard !isClosed else { return }
-        if case .replaying(from: .some) = replayPhase {
+        if isReplayingHistory {
             replayedUpdateCount += 1
         }
         yieldToUpdateTaps(update)
@@ -451,6 +460,7 @@ public final class SessionModel {
         wireEntries.removeAll()
         heldEchoes.removeAll()
         unlinkedPrompts.removeAll()
+        timekeeper.reset()
         promptCorrelator = PendingPromptCorrelator()
         availableCommands = nil
         configOptions = nil
@@ -469,10 +479,20 @@ public final class SessionModel {
         case .availableCommandsChanged(let commands): availableCommands = commands
         case .configOptionsChanged(let options): configOptions = options
         case .usageChanged(let report): usage = report
-        case .agentStateChanged(let state): agentState = state
+        case .agentStateChanged(let state): changeAgentState(state)
         case .sessionInfoChanged(let info): changeSessionInfo(info)
         case .notice(let notice): notices.append(SessionNotice(notice: notice, arrivalTime: elapsedTime()))
         }
+    }
+
+    /// Writes the state that the engine folded. An idle state ends the open
+    /// message, thought, or unknown entry.
+    ///
+    /// - Parameter state: The folded state of the agent.
+    private func changeAgentState(_ state: StateUpdate) {
+        agentState = state
+        guard case .idle = state else { return }
+        timekeeper.agentDidBecomeIdle()
     }
 
     /// Writes the session information that the engine folded, and tells
@@ -508,13 +528,17 @@ public final class SessionModel {
     /// Appends a new object for an engine entry to the transcript.
     ///
     /// A new tool-call entry also takes the links of the pending
-    /// elicitations that arrived before it.
+    /// elicitations that arrived before it. An entry that the model sees live
+    /// gets its start time; an entry of a replay keeps no time.
     ///
     /// - Parameter entry: The engine entry.
     private func appendWireEntry(_ entry: FoundationModelsACP.SessionEntry) {
         let object = TranscriptEntry(wire: entry)
         wireEntries[entry.id] = object
         attachUnresolvedElicitationLinks(to: object)
+        if !isReplayingHistory {
+            timekeeper.entryDidStart(object)
+        }
         transcript.append(object)
     }
 
@@ -537,6 +561,7 @@ public final class SessionModel {
             return
         }
         object.update(from: entry)
+        timekeeper.entryDidChange(object)
     }
 
     /// Records a defect of the model: the assertion stops a debug build, and
@@ -577,13 +602,13 @@ public final class SessionModel {
     }
 
     /// Appends the local user message of a prompt that the client is about
-    /// to send, and records it for the link.
+    /// to send, and records it for the link. The message starts and ends now.
     ///
     /// - Parameter entry: The local user message, in the pending state.
     func addPendingPrompt(_ entry: UserMessageEntry) {
         unlinkedPrompts[entry.id] = entry
         promptCorrelator.addPendingPrompt(entry.id)
-        transcript.append(.userMessage(entry))
+        appendLocalEntry(.userMessage(entry))
     }
 
     /// Records the `session/prompt` response of a local prompt.
@@ -616,10 +641,12 @@ public final class SessionModel {
         showUnclaimedEchoesWhenNoPromptWaits()
     }
 
-    /// Appends an entry that the client made itself to the transcript.
+    /// Appends an entry that the client made itself to the transcript. The
+    /// client makes the entry live, so it gets its times now.
     ///
     /// - Parameter entry: The local entry.
     func appendLocalEntry(_ entry: TranscriptEntry) {
+        timekeeper.entryDidStart(entry)
         transcript.append(entry)
     }
 

@@ -16,6 +16,11 @@ public final class CompactionEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the compaction. The compaction ends
+    /// when its status first becomes `completed`, `failed`, or `cancelled`.
+    /// See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The identifier of the compaction.
     public let compactionId: CompactionId
 

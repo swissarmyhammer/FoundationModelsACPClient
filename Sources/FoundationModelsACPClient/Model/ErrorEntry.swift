@@ -13,6 +13,10 @@ public final class ErrorEntry: ObservableTranscriptEntry {
     /// The stable identity of the entry.
     public nonisolated let id: TranscriptEntry.ID
 
+    /// The start time and the end time of the error. The error starts and
+    /// ends when the client adds it. See ``EntryTiming``.
+    public let timing = EntryTiming()
+
     /// The JSON-RPC error code.
     public let code: ErrorCode
 
