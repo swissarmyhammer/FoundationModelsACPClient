@@ -2,6 +2,7 @@
 // makes one. The testable import reaches its memberwise initializer, so
 // ``SessionModelFixtures/handMadeSubscription(hasMissedUpdates:)`` can make a
 // subscription by hand.
+import Foundation
 @testable import FoundationModelsACP
 @testable import FoundationModelsACPClient
 
@@ -56,6 +57,32 @@ enum SessionModelFixtures {
     ) -> (SessionUpdateSubscription, AsyncStream<SessionStreamEvent>.Continuation) {
         let (events, continuation) = AsyncStream<SessionStreamEvent>.makeStream()
         return (SessionUpdateSubscription(updates: events, hasMissedUpdates: hasMissedUpdates), continuation)
+    }
+
+    /// Makes a model for the test session that sends its requests through
+    /// the given fake sender.
+    ///
+    /// - Parameters:
+    ///   - sender: The fake sender of the model.
+    ///   - cadence: The coalescing cadence of the model. `.zero` applies each
+    ///     chunk at once.
+    ///   - clock: The clock that schedules the coalesced flushes.
+    ///   - now: The wall clock that gives the time of each transcript entry.
+    /// - Returns: The model.
+    @MainActor
+    static func makeModel(
+        sender: FakeSessionRequestSender,
+        cadence: Duration = .zero,
+        clock: ManualClock = ManualClock(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) -> SessionModel {
+        SessionModel(
+            sessionId: testSession,
+            requestSender: sender,
+            coalescingCadence: cadence,
+            clock: clock,
+            now: now
+        )
     }
 
     /// Makes a model for the test session that applies each chunk at once.
@@ -154,6 +181,20 @@ extension SessionModel {
         for update in updates {
             apply(update)
         }
+    }
+
+    /// Starts a prompt of one text block, and waits until the fake sender
+    /// holds the request.
+    ///
+    /// - Parameters:
+    ///   - text: The text of the prompt.
+    ///   - sender: The fake sender of this model.
+    /// - Returns: The task of the prompt call.
+    func startPrompt(_ text: String, heldBy sender: FakeSessionRequestSender) async -> Task<PromptResponse, any Error> {
+        let call = Task { try await prompt([textBlock(text)]) }
+        var received = sender.receivedPrompts.makeAsyncIterator()
+        _ = await received.next()
+        return call
     }
 }
 

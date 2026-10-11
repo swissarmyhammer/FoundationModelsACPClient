@@ -44,28 +44,6 @@ struct SessionModelPromptTests {
     /// The fake sender of the model under test.
     let sender = FakeSessionRequestSender()
 
-    /// Makes the model under test with the fake sender.
-    ///
-    /// - Parameters:
-    ///   - cadence: The coalescing cadence of the model.
-    ///   - clock: The clock that schedules the coalesced flushes.
-    /// - Returns: The model.
-    func makeModel(cadence: Duration = .zero, clock: ManualClock = ManualClock()) -> SessionModel {
-        SessionModel(sessionId: testSession, requestSender: sender, coalescingCadence: cadence, clock: clock)
-    }
-
-    /// Starts a prompt of the test text, and waits until the fake sender
-    /// holds the request.
-    ///
-    /// - Parameter model: The model that sends the prompt.
-    /// - Returns: The task of the prompt call.
-    func startPrompt(on model: SessionModel) async -> Task<PromptResponse, any Error> {
-        let call = Task { try await model.prompt([textBlock(promptText)]) }
-        var received = sender.receivedPrompts.makeAsyncIterator()
-        _ = await received.next()
-        return call
-    }
-
     /// Gives the user-message objects of a transcript, in order.
     ///
     /// - Parameter model: The model to read.
@@ -77,8 +55,8 @@ struct SessionModelPromptTests {
     // MARK: - The link
 
     @Test func responseFirstSetsTheMessageIdAndSentState() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
 
         sender.answerPrompt(with: promptedResponse)
@@ -90,8 +68,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func responseThenEchoKeepsOneLinkedEntryWithTheSameId() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
         let localID = local.id
         sender.answerPrompt(with: promptedResponse)
@@ -109,8 +87,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func echoThenResponseKeepsOneLinkedEntryWithTheSameId() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
         let localID = local.id
 
@@ -129,8 +107,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func echoChunksAfterTheLinkChangeTheLocalEntry() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
         model.apply(userChunk(text: "Hello ", message: promptedMessage))
         sender.answerPrompt(with: promptedResponse)
@@ -144,8 +122,8 @@ struct SessionModelPromptTests {
 
     @Test func echoAfterBufferedChunksLinksTheLocalEntry() async throws {
         let clock = ManualClock()
-        let model = makeModel(cadence: SessionModelFixtures.bufferedCadence, clock: clock)
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender, cadence: SessionModelFixtures.bufferedCadence, clock: clock)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
         sender.answerPrompt(with: promptedResponse)
         _ = try await call.value
@@ -161,8 +139,8 @@ struct SessionModelPromptTests {
 
     @Test func echoBeforeTheResponseThroughTheBufferLinksTheLocalEntry() async throws {
         let clock = ManualClock()
-        let model = makeModel(cadence: SessionModelFixtures.bufferedCadence, clock: clock)
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender, cadence: SessionModelFixtures.bufferedCadence, clock: clock)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
 
         model.apply(agentChunk(text: "Thinking"))
@@ -177,8 +155,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func echoOfAnotherMessageAppearsWhenTheResponseNamesAnotherMessage() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
 
         model.apply(userChunk(text: "From elsewhere", message: "other-user-1"))
@@ -193,13 +171,13 @@ struct SessionModelPromptTests {
     }
 
     @Test func pendingEntryExistsBeforeTheSenderReceivesTheRequest() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
         let seen = Mutex<[SendState]>([])
         sender.observePrompts { _ in
             seen.withLock { $0 = model.transcript.compactMap(\.userMessage).map(\.sendState) }
         }
 
-        let call = await startPrompt(on: model)
+        let call = await model.startPrompt(promptText, heldBy: sender)
 
         #expect(seen.withLock { $0 } == [.pending])
         let local = try #require(model.transcript.first?.userMessage)
@@ -210,7 +188,7 @@ struct SessionModelPromptTests {
     }
 
     @Test func promptSendsTheContentSessionAndMetaUnchanged() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
         let call = Task { try await model.prompt([textBlock(promptText)], meta: traceMeta) }
         var received = sender.receivedPrompts.makeAsyncIterator()
         let request = try #require(await received.next())
@@ -226,7 +204,7 @@ struct SessionModelPromptTests {
     /// goes out, before the agent answers, so a cancel of the turn can name
     /// the prompt span as its parent. The other `_meta` members stay out.
     @Test func promptRecordsTheTraceContextOfTheSentRequest() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
         let sent = try #require(TraceContextMeta(traceparent: sentTraceparent, tracestate: sentTracestate))
         let call = Task { try await model.prompt([textBlock(promptText)], meta: sent.inject(into: vendorMeta)) }
         var received = sender.receivedPrompts.makeAsyncIterator()
@@ -240,7 +218,7 @@ struct SessionModelPromptTests {
     /// A model that sent no prompt, or a prompt with no trace context, has no
     /// prompt trace context to give.
     @Test func promptWithNoTraceContextRecordsNone() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
         #expect(model.promptTraceMeta == nil)
 
         let call = Task { try await model.prompt([textBlock(promptText)], meta: vendorMeta) }
@@ -255,8 +233,8 @@ struct SessionModelPromptTests {
     // MARK: - Failure
 
     @Test func failedPromptMarksTheEntryFailedAndAppendsAnErrorEntry() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         let local = try #require(model.transcript.first?.userMessage)
         let refusal = RequestError(code: .invalidParams, message: "Bad prompt", data: .object(["field": .string("prompt")]))
 
@@ -274,8 +252,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func closedConnectionGivesAnInternalErrorEntryThatNamesTheCause() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
 
         sender.failPrompt(with: ConnectionError.closed)
 
@@ -286,8 +264,8 @@ struct SessionModelPromptTests {
     }
 
     @Test func echoThatAFailedPromptDidNotClaimAppears() async throws {
-        let model = makeModel()
-        let call = await startPrompt(on: model)
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
         model.apply(userChunk(text: "From elsewhere", message: "other-user-1"))
 
         sender.failPrompt(with: ConnectionError.closed)
@@ -298,7 +276,7 @@ struct SessionModelPromptTests {
     }
 
     @Test func appendErrorAddsALocalErrorEntry() throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
 
         model.appendError(code: .authenticationRequired, message: "Log in first", data: .string("login"))
 
@@ -312,7 +290,7 @@ struct SessionModelPromptTests {
     // MARK: - Cancel and configuration
 
     @Test func cancelSendsTheSessionAndMetaUnchanged() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
 
         try await model.cancel(meta: traceMeta)
 
@@ -320,7 +298,7 @@ struct SessionModelPromptTests {
     }
 
     @Test func setConfigOptionSendsTheRequestUnchanged() async throws {
-        let model = makeModel()
+        let model = SessionModelFixtures.makeModel(sender: sender)
         let request = SetSessionConfigOptionRequest(
             configId: SessionConfigId(rawValue: "mode"),
             sessionId: testSession,
