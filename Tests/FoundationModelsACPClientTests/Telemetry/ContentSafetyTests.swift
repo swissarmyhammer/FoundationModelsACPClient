@@ -55,6 +55,16 @@ struct ContentSafetyTests {
         /// The title of the tool call that the permission request is about.
         static let permissionToolTitle = "Content-safety permission tool title: write the ledger"
 
+        /// The name of the option that the user selects in the permission
+        /// request.
+        static let permissionOptionName = "Content-safety option name: refuse the ledger"
+
+        /// The message of the elicitation of the turn.
+        static let elicitationMessage = "Content-safety elicitation message: name the jade harbor"
+
+        /// The form value that the user gives to the elicitation of the turn.
+        static let formValue = "Content-safety form value: the jade harbor"
+
         /// A marker in the `cwd` of the session.
         static let workingDirectoryMarker = "content-safety-cwd-marker"
 
@@ -76,6 +86,9 @@ struct ContentSafetyTests {
             toolOutput,
             permissionTitle,
             permissionToolTitle,
+            permissionOptionName,
+            elicitationMessage,
+            formValue,
             workingDirectoryMarker,
         ]
 
@@ -106,16 +119,18 @@ struct ContentSafetyTests {
         idleState(stopReason: .endTurn),
     ]
 
+    /// The option that the user selects in the permission request of the
+    /// turn.
+    private static let permissionOption = PermissionOption(
+        kind: .rejectOnce,
+        name: Fixture.permissionOptionName,
+        optionId: PermissionOptionId(rawValue: "reject-once")
+    )
+
     /// The permission request that the agent sends in the turn. It is about a
     /// tool call with a title of its own.
     private static let permissionRequest = RequestPermissionRequest(
-        options: [
-            PermissionOption(
-                kind: .rejectOnce,
-                name: "Reject",
-                optionId: PermissionOptionId(rawValue: "reject-once")
-            )
-        ],
+        options: [permissionOption],
         sessionId: testSession,
         title: Fixture.permissionTitle,
         subject: .toolCall(
@@ -128,6 +143,22 @@ struct ContentSafetyTests {
         )
     )
 
+    /// The session-scoped form elicitation that the agent sends in the turn,
+    /// after the permission request.
+    private static let elicitation = CreateElicitationRequest(
+        message: Fixture.elicitationMessage,
+        mode: .form(
+            ElicitationFormMode(
+                requestedSchema: ElicitationFixtures.nameSchema,
+                scope: .session(ElicitationFixtures.sessionScope)
+            )
+        )
+    )
+
+    /// The form values that the user accepts the elicitation of the turn
+    /// with.
+    private static let formContent: JSONValue = .object(["name": .string(Fixture.formValue)])
+
     /// The error that the agent refuses a turn with. Its message and its data
     /// hold fixture strings.
     private static let refusal = RequestError(
@@ -137,8 +168,12 @@ struct ContentSafetyTests {
     )
 
     /// No span, log record or metric of a whole answered turn holds the
-    /// prompt, the answer, the tool call, the permission request or the
-    /// `cwd` of the turn.
+    /// prompt, the answer, the tool call, the permission request, the
+    /// elicitation, the form values or the `cwd` of the turn.
+    ///
+    /// The router of the model gives the permission request and the
+    /// elicitation to the session model, and the test answers each one through
+    /// that model, so the server span of each request is in the capture.
     @MainActor @Test("an answered turn puts no content into telemetry", .timeLimit(.minutes(1)))
     func anAnsweredTurnPutsNoContentIntoTelemetry() async throws {
         try await TelemetryCapture.run(forbidding: Fixture.answeredTurnContent) { context in
@@ -146,9 +181,15 @@ struct ContentSafetyTests {
                 prompt: Fixture.prompt,
                 cwd: Fixture.workingDirectory,
                 script: Self.answeredTurnScript,
-                permissionRequest: Self.permissionRequest
+                permissionRequest: Self.permissionRequest,
+                permissionRoute: .model,
+                elicitation: Self.elicitation
             )
-            try await harness.runWholeSession()
+            try await harness.initialize()
+            let turn = try await harness.startTurn()
+            try await Self.answerTheRequests(of: turn.session)
+            try await turn.finish()
+            try await harness.closeTheTurnSession()
             await harness.teardown()
 
             context.expectEachSignal()
@@ -174,5 +215,22 @@ struct ContentSafetyTests {
 
             context.expectEachSignal()
         }
+    }
+
+    /// Answers the requests of the agent in the answered turn, as a user
+    /// does: selects the option of the permission request, then accepts the
+    /// elicitation with the form values.
+    ///
+    /// - Parameter session: The session model of the turn.
+    /// - Throws: An issue when a request is not pending, or
+    ///   `CancellationError` when the test time limit cancels a wait.
+    @MainActor
+    private static func answerTheRequests(of session: SessionModel) async throws {
+        try await waitUntil { !session.pendingPermissions.isEmpty }
+        let permission = try #require(session.pendingPermissions.first)
+        await session.selectPermission(permission.id, option: permissionOption.optionId)
+        try await waitUntil { !session.pendingElicitations.isEmpty }
+        let elicitation = try #require(session.pendingElicitations.first)
+        session.acceptElicitation(elicitation.id, content: formContent)
     }
 }

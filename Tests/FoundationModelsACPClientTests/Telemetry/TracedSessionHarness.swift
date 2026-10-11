@@ -5,11 +5,12 @@ import Testing
 @testable import FoundationModelsACPClient
 
 // The session harness of the telemetry tests. `ClientRequestSpanTests`,
-// `ClientRequestMetricsTests` and `ContentSafetyTests` drive the real
-// `ConnectionModel` and `SessionModel` with it, in process, over
-// `InMemoryTransport.pair()`, with a `ScriptedStubAgent` on the far end. The
-// turn sends its prompt through the `SessionModel` of the session, so each
-// span of the prompt opens inside the model.
+// `ClientRequestMetricsTests`, `ContentSafetyTests` and
+// `AgentRequestSpanRoutingTests` drive the real `ConnectionModel` and
+// `SessionModel` with it, in process, over `InMemoryTransport.pair()`, with a
+// `ScriptedStubAgent` on the far end. The turn sends its prompt through the
+// `SessionModel` of the session, so each span of the prompt opens inside the
+// model.
 
 /// The text of the prompt of each turn of the harness.
 ///
@@ -40,6 +41,41 @@ private struct PermissionDecliningClient: Client {
 
     func elicitationComplete(_ notification: CompleteElicitationNotification) async {
         await router.elicitationComplete(notification)
+    }
+}
+
+/// The client that answers each permission request of the agent in a
+/// ``TracedSessionHarness``.
+enum PermissionRoute {
+    /// A client in front of the router refuses each permission request with
+    /// the `cancelled` outcome. The test needs no user.
+    case decline
+
+    /// The router of the model gives each permission request to the open
+    /// session model, and the test answers it through that model.
+    case model
+}
+
+/// A turn that a ``TracedSessionHarness`` started: the session of the turn,
+/// and the task that sends its prompt.
+@MainActor
+struct RunningTurn {
+    /// The model of the session of the turn.
+    let session: SessionModel
+
+    /// The task that sends the prompt and waits for the answer of the agent.
+    let prompt: Task<Void, any Error>
+
+    /// Waits until the agent answers the prompt and reports `idle`.
+    ///
+    /// - Throws: Whatever the prompt threw, or `CancellationError` when the
+    ///   test time limit cancels the wait.
+    func finish() async throws {
+        try await prompt.value
+        try await waitUntil {
+            guard case .idle = session.agentState else { return false }
+            return true
+        }
     }
 }
 
@@ -75,6 +111,10 @@ struct TracedSessionHarness {
     ///     prompt, one step per gate.
     ///   - permissionRequest: The permission the stub asks for when the
     ///     prompt arrives, or `nil` to ask for none.
+    ///   - permissionRoute: The client that answers the permission request.
+    ///     The default refuses it, so the test needs no user.
+    ///   - elicitation: The elicitation the stub asks for when the prompt
+    ///     arrives, after the permission request, or `nil` to ask for none.
     ///   - promptError: The error the stub refuses the prompt with, or `nil`
     ///     to answer the prompt.
     ///   - closeSessionError: The error the stub answers `session/close` with.
@@ -84,6 +124,8 @@ struct TracedSessionHarness {
         script: [SessionUpdate] = [idleState(stopReason: .endTurn)],
         deferredScript: [GatedUpdates] = [],
         permissionRequest: RequestPermissionRequest? = nil,
+        permissionRoute: PermissionRoute = .decline,
+        elicitation: CreateElicitationRequest? = nil,
         promptError: RequestError? = nil,
         closeSessionError: RequestError = .methodNotFound(ClientRequestSpan.Method.closeSession)
     ) async {
@@ -98,6 +140,7 @@ struct TracedSessionHarness {
                 session: testSession,
                 script: script,
                 deferredScript: deferredScript,
+                elicitation: elicitation,
                 permissionRequest: permissionRequest,
                 promptError: promptError,
                 closeSessionError: closeSessionError,
@@ -111,7 +154,10 @@ struct TracedSessionHarness {
         // A zero cadence, so each chunk is in the model when it arrives.
         model = ConnectionModel(coalescingCadence: .zero, clock: ContinuousClock())
         _ = await model.connect(over: clientEnd) { router in
-            PermissionDecliningClient(router: router)
+            switch permissionRoute {
+            case .decline: PermissionDecliningClient(router: router)
+            case .model: router
+            }
         }
     }
 
@@ -132,18 +178,27 @@ struct TracedSessionHarness {
         try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: cwd)))
     }
 
+    /// Starts one turn: opens a session, and starts the task that sends the
+    /// prompt. The test can answer the requests of the agent while the turn
+    /// runs.
+    ///
+    /// - Returns: The running turn.
+    /// - Throws: Whatever `session/new` threw.
+    func startTurn() async throws -> RunningTurn {
+        let session = try await openSession()
+        let prompt = Task { [prompt] in
+            _ = try await session.prompt([textBlock(prompt)])
+        }
+        return RunningTurn(session: session, prompt: prompt)
+    }
+
     /// Runs one turn: opens a session, sends the prompt, and waits until the
     /// agent reports `idle`.
     ///
     /// - Throws: Whatever `session/new` or the prompt threw, or
     ///   `CancellationError` when the test time limit cancels the wait.
     func runTurn() async throws {
-        let session = try await openSession()
-        _ = try await session.prompt([textBlock(prompt)])
-        try await waitUntil {
-            guard case .idle = session.agentState else { return false }
-            return true
-        }
+        try await startTurn().finish()
     }
 
     /// Sends each request of one whole session: `initialize`, the turn, and

@@ -101,12 +101,14 @@ extension ConnectionModel {
     ///
     /// - Parameter elicitationId: The elicitation id that the notification
     ///   names.
-    func completeElicitation(elicitationId: ElicitationId) {
+    /// - Returns: `true` when a model held a pending elicitation with that id,
+    ///   `false` when nothing changed.
+    func completeElicitation(elicitationId: ElicitationId) -> Bool {
         // The `where` clause closes the elicitation when the session holds it.
         for session in openSessions.values where session.completeElicitation(elicitationId: elicitationId) {
-            return
+            return true
         }
-        elicitations.complete(elicitationId: elicitationId)
+        return elicitations.complete(elicitationId: elicitationId) != nil
     }
 
     /// Starts the task that reads the outgoing-request events of a

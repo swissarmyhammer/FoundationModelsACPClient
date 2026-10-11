@@ -224,7 +224,7 @@ struct ModelClientTests {
         let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
         let call = try await routed.startElicitation(request, on: session)
 
-        routed.model.completeElicitation(elicitationId: ElicitationId(rawValue: "elicit-other"))
+        #expect(!routed.model.completeElicitation(elicitationId: ElicitationId(rawValue: "elicit-other")))
 
         #expect(session.pendingElicitations.map(\.request) == [request])
         session.cancelAllPending()

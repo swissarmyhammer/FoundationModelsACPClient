@@ -191,10 +191,3 @@ struct AgentRequestSpanTests {
         ) { _ in }
     }
 }
-
-extension TelemetryCapture.Context {
-    /// The finished spans whose name is the agent request span name.
-    fileprivate var agentRequestSpans: [FinishedInMemorySpan] {
-        spans.filter { $0.operationName == ACPClientTelemetry.SpanName.agentRequest }
-    }
-}

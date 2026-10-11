@@ -7,9 +7,10 @@ import Testing
 @testable import FoundationModelsACPClient
 
 // The queries that the request telemetry tests share. `ClientRequestSpanTests`,
-// `ClientRequestMetricsTests`, `ContentSafetyTests` and `ModelRequestSpanTests`
-// read the spans, the metric dimensions and the `traceparent` of an ACP
-// request through these queries, so each query has one copy.
+// `ClientRequestMetricsTests`, `ContentSafetyTests`, `ModelRequestSpanTests`,
+// `AgentRequestSpanTests` and `AgentRequestSpanRoutingTests` read the spans,
+// the metric dimensions and the `traceparent` of an ACP request through these
+// queries, so each query has one copy.
 
 extension TelemetryCapture.Context {
     /// Gives the finished request spans of one ACP method.
@@ -18,8 +19,34 @@ extension TelemetryCapture.Context {
     /// - Returns: Each finished span whose name is the request span name and
     ///   whose method attribute is `method`.
     func requestSpans(of method: String) -> [FinishedInMemorySpan] {
+        spans(named: ACPClientTelemetry.SpanName.request, of: method)
+    }
+
+    /// The finished spans whose name is the agent request span name, in the
+    /// order of their end.
+    var agentRequestSpans: [FinishedInMemorySpan] {
+        spans.filter { $0.operationName == ACPClientTelemetry.SpanName.agentRequest }
+    }
+
+    /// Gives the finished agent request spans of one ACP method.
+    ///
+    /// - Parameter method: The ACP method that the agent sent.
+    /// - Returns: Each finished span whose name is the agent request span name
+    ///   and whose method attribute is `method`.
+    func agentRequestSpans(of method: String) -> [FinishedInMemorySpan] {
+        spans(named: ACPClientTelemetry.SpanName.agentRequest, of: method)
+    }
+
+    /// Gives the finished spans of one name and one ACP method.
+    ///
+    /// - Parameters:
+    ///   - spanName: The name of the spans.
+    ///   - method: The ACP method.
+    /// - Returns: Each finished span whose name is `spanName` and whose method
+    ///   attribute is `method`.
+    private func spans(named spanName: String, of method: String) -> [FinishedInMemorySpan] {
         spans.filter { span in
-            span.operationName == ACPClientTelemetry.SpanName.request
+            span.operationName == spanName
                 && span.attributes.get(ACPClientTelemetry.AttributeKey.rpcMethod) == .string(method)
         }
     }
