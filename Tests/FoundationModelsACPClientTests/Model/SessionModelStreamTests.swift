@@ -12,9 +12,6 @@ import Testing
 /// The tool call of the replay fixture.
 private let replayedToolCallId = ToolCallId(rawValue: "tool-1")
 
-/// The replay cursor that asks for the full retained history.
-private let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
 /// The replay cursor of a type that this schema revision does not know.
 private let replayFromCursor: ReplayFrom = .unknown("cursor", .object([:]))
 
@@ -104,7 +101,7 @@ private let compactedRecord: [SessionUpdate] = [
 ///   - model: The model that receives the replay.
 @MainActor
 private func replayFixture(_ updates: [SessionUpdate] = replayedUpdates, into model: SessionModel) {
-    model.beginReplay(replayFrom: replayFromStart)
+    model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
     model.applyEach(updates)
     model.endReplay(succeeded: true)
 }
@@ -172,7 +169,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: true)
 
         #expect(!model.hasMissedUpdates)
@@ -182,7 +179,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         model.attach(SessionModelFixtures.handMadeSubscription(hasMissedUpdates: true).0)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: false)
 
         #expect(model.hasMissedUpdates)
@@ -214,7 +211,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         #expect(!model.isReplaying)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         #expect(model.isReplaying)
 
         model.endReplay(succeeded: true)
@@ -224,7 +221,7 @@ struct SessionModelStreamTests {
     @Test func isReplayingIsFalseAfterAFailedReplay() {
         let model = SessionModelFixtures.immediateModel()
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: false)
 
         #expect(!model.isReplaying)
@@ -233,7 +230,7 @@ struct SessionModelStreamTests {
     @Test func theEndOfAReplayFlushesTheBufferedChunks() throws {
         let model = SessionModelFixtures.coalescingModel(clock: ManualClock())
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.apply(agentChunk(text: "replayed"))
         model.endReplay(succeeded: true)
 
@@ -246,7 +243,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.replayRequestDidStart(markedRequestId)
 
         for update in replayedUpdates {
@@ -258,14 +255,14 @@ struct SessionModelStreamTests {
         #expect(succeeded)
         #expect(!model.isReplaying)
         #expect(model.transcript.count == replayedEntryCount)
-        #expect(model.history == .retained(replayFrom: replayFromStart))
+        #expect(model.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func aFailedResumeMarkerEndsTheReplayAsAFailure() async {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.replayRequestDidStart(markedRequestId)
 
         continuation.yield(requestFinished(.failed))
@@ -280,7 +277,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.replayRequestDidStart(runningRequestId)
 
         continuation.yield(requestFinished(.failed))
@@ -294,7 +291,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         continuation.yield(requestFinished(.succeeded))
         continuation.yield(.update(agentChunk(text: "after the marker")))
         try await waitUntil { !model.transcript.isEmpty }
@@ -303,14 +300,14 @@ struct SessionModelStreamTests {
         model.replayRequestDidStart(markedRequestId)
 
         #expect(!model.isReplaying)
-        #expect(model.history == .retained(replayFrom: replayFromStart))
+        #expect(model.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func theMarkerOfAnotherRequestLeavesTheReplayRunning() async throws {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
 
         continuation.yield(requestFinished(.succeeded, method: ClientRequestSpan.Method.prompt))
         continuation.yield(.update(agentChunk(text: "after the marker")))
@@ -323,7 +320,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
 
         continuation.finish()
         let succeeded = await model.waitForReplayEnd()
@@ -337,7 +334,7 @@ struct SessionModelStreamTests {
     func aWaitAfterTheReplayEndedGivesTheResultOfThatReplay(succeeded: Bool) async {
         let model = SessionModelFixtures.immediateModel()
         model.attach(SessionModelFixtures.handMadeSubscription().0)
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: succeeded)
 
         #expect(await model.waitForReplayEnd() == succeeded)
@@ -345,7 +342,7 @@ struct SessionModelStreamTests {
 
     @Test func closeEndsTheReplayAsAFailure() {
         let model = SessionModelFixtures.immediateModel()
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
 
         model.markClosed()
 
@@ -362,10 +359,10 @@ struct SessionModelStreamTests {
     @Test func aSuccessfulReplayGivesTheRetainedHistoryOfItsCursor() {
         let model = SessionModelFixtures.immediateModel()
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: true)
 
-        #expect(model.history == .retained(replayFrom: replayFromStart))
+        #expect(model.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func aResumeWithNoReplayKeepsLiveHistory() {
@@ -380,7 +377,7 @@ struct SessionModelStreamTests {
     @Test func aFailedReplayKeepsLiveHistory() {
         let model = SessionModelFixtures.immediateModel()
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: false)
 
         #expect(model.history == .live)
@@ -409,7 +406,7 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         replayFixture(into: model)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
 
         #expect(model.transcript.isEmpty)
         #expect(model.usage == nil)
@@ -500,7 +497,7 @@ struct SessionModelStreamTests {
 
     @Test func anUpdateAfterAFailedReplayApplies() throws {
         let model = SessionModelFixtures.immediateModel()
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.endReplay(succeeded: false)
 
         model.apply(agentChunk(text: "live"))

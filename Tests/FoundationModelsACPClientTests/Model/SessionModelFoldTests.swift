@@ -44,9 +44,6 @@ private let otherToolCallId = ToolCallId(rawValue: "tool-2")
 /// running call (`inProgress`) must stay two states.
 private let everyToolCallStatus: [ToolCallStatus] = [.pending, .inProgress, .completed, .failed, .cancelled]
 
-/// The replay cursor that asks for the full retained history.
-private let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
 /// Makes a model for the test session, and folds each update into it.
 ///
 /// The model has no coalescing cadence, so each chunk that a test applies to
@@ -293,7 +290,7 @@ struct SessionModelFoldTests {
         let model = foldedModel(toolCallStatus(id: toolCallId.rawValue, .pending))
         let entryBeforeReset = try #require(model.toolCallEntry(for: toolCallId))
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         #expect(model.toolCallEntry(for: toolCallId) == nil)
         model.apply(toolCallStatus(id: toolCallId.rawValue, .completed))
         model.endReplay(succeeded: true)

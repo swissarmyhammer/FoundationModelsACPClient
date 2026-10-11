@@ -22,9 +22,6 @@ private let failureReason = "The context window is too small."
 /// The `sessionUpdate` wire type of a compaction update.
 private let compactionUpdateType = "compaction_update"
 
-/// The replay cursor that asks for the full retained history.
-private let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
 /// The compaction tests, in one suite so that `swift test --filter
 /// SessionModelCompactionTests` selects them.
 @MainActor
@@ -214,7 +211,7 @@ struct SessionModelCompactionTests {
         let model = SessionModelFixtures.immediateModel()
         model.applyEach(updates)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.applyEach(agentHistory.transcriptUpdates)
         model.endReplay(succeeded: true)
 

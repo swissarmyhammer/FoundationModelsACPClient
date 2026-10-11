@@ -23,15 +23,12 @@ private enum SessionFactoryFixtures {
     /// The new-session request that each test sends.
     static let newSessionRequest = NewSessionRequest(cwd: workingDirectory)
 
-    /// The replay cursor that asks for the full retained history.
-    static let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
     /// The resume request that each test sends: the test session, with a
     /// replay from the start.
     static let resumeRequest = ResumeSessionRequest(
         cwd: workingDirectory,
         sessionId: testSession,
-        replayFrom: replayFromStart
+        replayFrom: SessionModelFixtures.replayFromStart
     )
 
     /// One agent message, replayed in two chunks.
@@ -138,7 +135,7 @@ private enum SessionFactoryFixtures {
         cwd: workingDirectory,
         sessionId: testSession,
         mcpServers: [searchServer],
-        replayFrom: replayFromStart
+        replayFrom: SessionModelFixtures.replayFromStart
     )
 
     /// The servers of ``newSessionServers`` that an agent which advertises
@@ -244,7 +241,7 @@ private enum SessionFactoryFixtures {
         cwd: projectDirectory,
         sessionId: testSession,
         additionalDirectories: [documentsDirectory],
-        replayFrom: replayFromStart
+        replayFrom: SessionModelFixtures.replayFromStart
     )
 
     /// The resume request of the test session that sends
@@ -253,7 +250,7 @@ private enum SessionFactoryFixtures {
     static let resumeRequestWithNoDirectories = ResumeSessionRequest(
         cwd: projectDirectory,
         sessionId: testSession,
-        replayFrom: replayFromStart
+        replayFrom: SessionModelFixtures.replayFromStart
     )
 
     /// The error of a new session with additional directories that the agent
@@ -567,7 +564,7 @@ struct ConnectionModelSessionTests {
         #expect(connected.model.session(for: testSession) === session)
         #expect(SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText])
         #expect(!session.isReplaying)
-        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(session.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func aReplayGoesIntoTheModelWhileTheModelReplays() async throws {
@@ -750,7 +747,7 @@ struct ConnectionModelSessionTests {
         answerGate.open()
         #expect(try await resuming.value === session)
         #expect(!session.isReplaying)
-        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(session.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func twoConcurrentResumesOfANewSessionGiveOneModelWithOneReplayEach() async throws {
@@ -777,7 +774,7 @@ struct ConnectionModelSessionTests {
         #expect(connected.model.session(for: testSession) === firstModel)
         #expect(SessionFactoryFixtures.messageTexts(of: firstModel) == [SessionFactoryFixtures.replayedText])
         #expect(!firstModel.isReplaying)
-        #expect(firstModel.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(firstModel.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
         #expect(SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.concurrentResumeCount)
     }
 
@@ -810,7 +807,7 @@ struct ConnectionModelSessionTests {
         answerGate.open()
         #expect(try await resuming.value === session)
         #expect(!session.isReplaying)
-        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(session.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     @Test func aWaitingResumeThatItsTaskCancelsThrowsAtOnceAndSendsNothing() async throws {
@@ -841,7 +838,7 @@ struct ConnectionModelSessionTests {
 
         #expect(SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount)
         #expect(!session.isReplaying)
-        #expect(session.history == .retained(replayFrom: SessionFactoryFixtures.replayFromStart))
+        #expect(session.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
 
     // MARK: - MCP servers

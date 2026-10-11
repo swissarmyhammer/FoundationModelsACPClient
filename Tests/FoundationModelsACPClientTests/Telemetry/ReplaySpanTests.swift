@@ -22,9 +22,6 @@ private enum ReplaySpanFixtures {
     /// The working directory of each request.
     static let workingDirectory = AbsolutePath(rawValue: "/")
 
-    /// The replay cursor that asks for the full retained history.
-    static let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
     /// A replay cursor of a type that this schema revision does not know.
     static let replayFromUnknownCursor: ReplayFrom = .unknown("cursor", .object([:]))
 
@@ -125,7 +122,7 @@ struct ReplaySpanTests {
             let connected = try await ReplaySpanFixtures.connect()
 
             _ = try await connected.model.resumeSession(
-                ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+                ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
             )
 
             #expect(context.replaySpans.count == 1)
@@ -151,7 +148,7 @@ struct ReplaySpanTests {
             let connected = try await ReplaySpanFixtures.connect()
 
             _ = try await connected.model.resumeSession(
-                ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+                ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
             )
 
             let replaySpan = try #require(context.replaySpans.first)
@@ -210,7 +207,7 @@ struct ReplaySpanTests {
 
             await #expect(throws: refusal) {
                 try await connected.model.resumeSession(
-                    ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+                    ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
                 )
             }
 
@@ -236,7 +233,7 @@ struct ReplaySpanTests {
             session.attach(subscription)
             let resuming = Task { [model = connected.model] in
                 try await model.resumeSession(
-                    ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+                    ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
                 )
             }
             try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
@@ -258,7 +255,7 @@ struct ReplaySpanTests {
     @Test func twoResumesOfOneSessionGiveTwoReplaySpansWithTheirOwnCounts() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
-            let request = ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+            let request = ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
 
             for _ in 0..<ReplaySpanFixtures.twoResumes {
                 _ = try await connected.model.resumeSession(request)
@@ -278,7 +275,7 @@ struct ReplaySpanTests {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
             let session = try await connected.model.resumeSession(
-                ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromStart)
+                ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
             )
 
             _ = try await session.prompt(ReplaySpanFixtures.promptContent)

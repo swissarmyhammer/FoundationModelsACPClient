@@ -23,9 +23,6 @@ private let rateNotice = Notice(severity: .info, title: "The rate limit resets i
 /// milliseconds.
 private let arrivalMilliseconds = 250
 
-/// The replay cursor that asks for the full retained history.
-private let replayFromStart: ReplayFrom = .start(ReplayFromStart())
-
 /// The notice tests, in one suite so that `swift test --filter
 /// SessionModelNoticeTests` selects them. A tap that never yields would
 /// suspend forever, so the suite has a time limit.
@@ -117,7 +114,7 @@ struct SessionModelNoticeTests {
         let model = SessionModelFixtures.immediateModel()
         model.applyEach(updates)
 
-        model.beginReplay(replayFrom: replayFromStart)
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.applyEach(agentHistory.transcriptUpdates)
         model.endReplay(succeeded: true)
 
