@@ -26,13 +26,13 @@ extension TelemetryCapture.Context {
     /// The finished spans whose name is the agent request span name, in the
     /// order of their end.
     var agentRequestSpans: [FinishedInMemorySpan] {
-        spans.filter { $0.operationName == ACPClientTelemetry.SpanName.agentRequest }
+        spans(named: ACPClientTelemetry.SpanName.agentRequest)
     }
 
     /// The finished spans whose name is the replay span name, in the order
     /// of their end.
     var replaySpans: [FinishedInMemorySpan] {
-        spans.filter { $0.operationName == ACPClientTelemetry.SpanName.replay }
+        spans(named: ACPClientTelemetry.SpanName.replay)
     }
 
     /// Gives the finished agent request spans of one ACP method.
@@ -52,10 +52,18 @@ extension TelemetryCapture.Context {
     /// - Returns: Each finished span whose name is `spanName` and whose method
     ///   attribute is `method`.
     private func spans(named spanName: String, of method: String) -> [FinishedInMemorySpan] {
-        spans.filter { span in
-            span.operationName == spanName
-                && span.attributes.get(ACPClientTelemetry.AttributeKey.rpcMethod) == .string(method)
+        spans(named: spanName).filter { span in
+            span.attributes.get(ACPClientTelemetry.AttributeKey.rpcMethod) == .string(method)
         }
+    }
+
+    /// Gives the finished spans of one name.
+    ///
+    /// - Parameter spanName: The name of the spans.
+    /// - Returns: Each finished span whose name is `spanName`, in the order of
+    ///   its end.
+    private func spans(named spanName: String) -> [FinishedInMemorySpan] {
+        spans.filter { $0.operationName == spanName }
     }
 
     /// Records an issue for each signal that the capture did not see: a span,

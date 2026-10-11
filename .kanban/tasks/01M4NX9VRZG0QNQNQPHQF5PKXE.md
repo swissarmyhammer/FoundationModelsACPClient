@@ -33,6 +33,38 @@ comments:
     - evidence: swift test — 466 tests in 37 suites passed, 0 failed, 0 skipped. No build warning except the known SwiftPM MLX "missing creator for mutated node" warning (task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
     - next: review. No code changed in this step. No commit made.
   timestamp: 2026-10-11T17:49:48.045159+00:00
+- actor: claude-code
+  id: 01m4p1k266psd367mhn0248e97
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (d44487d). 1 finding (1 confirmed, 0 refuted): Tests/FoundationModelsACPClientTests/Telemetry/RequestTelemetryQueries.swift:34 (reuse/reuse).
+    - next: /implement the open item in "## Review Findings (2026-10-11 12:50)". The task stays in review.
+  timestamp: 2026-10-11T17:53:53.350608+00:00
+- actor: claude-code
+  id: 01m4p1kdeddjg8ghjjv84qbk0s
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 8 files
+    - test: green — swift test, 466 passed
+    - commit: d44487d
+    - review: findings — Tests/FoundationModelsACPClientTests/Telemetry/RequestTelemetryQueries.swift:34
+  timestamp: 2026-10-11T17:54:04.877337+00:00
+- actor: claude-code
+  id: 01m4p1s1wy5xp07j600ycb55jw
+  text: |-
+    Review finding fixed. `RequestTelemetryQueries.swift` now has one private `spans(named:)` helper that holds the only name filter. `agentRequestSpans` and `replaySpans` call it. `spans(named:of:)` calls it and adds the method filter. No other `operationName ==` filter stays in the file. This is a refactor with no change in behavior, so no new test is necessary. The existing telemetry tests cover each query. Note: `dump validators` wrote a rules file of 754K characters, which is too large to read in one pass.
+
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPClientTests/Telemetry/RequestTelemetryQueries.swift. `swift test`: 466 tests in 37 suites passed. The one warning is the accepted SwiftPM MLX "missing creator for mutated node" warning.
+    - next: /review
+  timestamp: 2026-10-11T17:57:09.662063+00:00
+- actor: claude-code
+  id: 01m4p1vdamddnc137dnz2dbxq9
+  text: |-
+    ### test — green
+    - evidence: swift test — 466 tests in 37 suites passed, 0 failed, 0 skipped. Only warning: the accepted SwiftPM MLX "missing creator for mutated node" (task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
+    - next: review
+  timestamp: 2026-10-11T17:58:26.900636+00:00
 depends_on:
 - 01M4NX8Q4WFYJMHPCGWG6RJXDC
 position_column: doing
@@ -81,3 +113,12 @@ Span content:
 
 ## Workflow
 - Use `/tdd`: write the failing tests first, then write the code that makes them pass. #telemetry
+
+## Review Findings (2026-10-11 12:50)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 8 file(s) reviewed, 8 not reviewed.
+
+> 8 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 8 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Telemetry/RequestTelemetryQueries.swift:34` `reuse/reuse` — The new `replaySpans` property repeats the body of the existing `agentRequestSpans` property, `spans.filter { $0.operationName == <name> }`, as a third copy. The file already holds a `spans(named:of:)` helper, but it also filters on the method attribute, so a shared name-only filter is missing. The change adds a near-copy instead of extending the existing code, so the filter logic now lives in three places. Add one private helper, for example `spans(named:)`, that returns `spans.filter { $0.operationName == spanName }`. Use it in `replaySpans` and `agentRequestSpans`, and let `spans(named:of:)` call it and add the method filter. This keeps one filter implementation and changes no test result.
