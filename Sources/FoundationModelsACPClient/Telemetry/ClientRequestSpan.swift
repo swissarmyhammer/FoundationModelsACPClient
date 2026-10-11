@@ -71,8 +71,8 @@ import Tracing
 /// keeps the factory of the time that it was made, so a metric in a stored
 /// value would not see a factory that a test or a host binds later.
 public enum ClientRequestSpan {
-    /// The ACP wire method names that the models send. A host can give each of these, or another ACP method name, as
-    /// the `method` of
+    /// The ACP wire method names that the models send, and the ACP wire method names that the agent sends to the
+    /// client. A host can give each of these, or another ACP method name, as the `method` of
     /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
     public enum Method {
         /// The `initialize` request.
@@ -109,6 +109,17 @@ public enum ClientRequestSpan {
 
         /// The request that logs out.
         public static let logout = "auth/logout"
+
+        /// The request of the agent that asks the user for permission, for
+        /// example to run a tool call.
+        public static let requestPermission = "session/request_permission"
+
+        /// The request of the agent that asks the user for structured input.
+        public static let createElicitation = "elicitation/create"
+
+        /// The notification of the agent that an elicitation in URL mode is
+        /// complete.
+        public static let completeElicitation = "elicitation/complete"
     }
 
     /// The trace context that a request span starts in.
@@ -183,10 +194,7 @@ public enum ClientRequestSpan {
                 ofKind: .client,
                 tracer: activeTracer,
                 logger: logger ?? Logger(label: ACPClientTelemetry.logLabel),
-                attributes: { attributes in
-                    attributes[ACPClientTelemetry.AttributeKey.rpcMethod] = method
-                    attributes[ACPClientTelemetry.AttributeKey.sessionID] = sessionId?.rawValue
-                },
+                attributes: { setRequestAttributes(&$0, method: method, sessionId: sessionId) },
                 metadata: enterMetadata(method: method, sessionId: sessionId)
             ) { span in
                 await outcome(
@@ -200,13 +208,32 @@ public enum ClientRequestSpan {
         return try result.get()
     }
 
-    /// Gives the metadata of the "enter" record of one request.
+    /// Sets the attributes that each ACP request span holds: the ACP method,
+    /// and the session id when the request names a session.
+    ///
+    /// The client span of this type and the server span of
+    /// ``AgentRequestSpan`` both use this function, so that the two spans
+    /// hold the same attributes.
+    ///
+    /// - Parameters:
+    ///   - attributes: The attributes of the span.
+    ///   - method: The ACP wire method.
+    ///   - sessionId: The session that the request names, or `nil`.
+    static func setRequestAttributes(_ attributes: inout SpanAttributes, method: String, sessionId: SessionId?) {
+        attributes[ACPClientTelemetry.AttributeKey.rpcMethod] = method
+        attributes[ACPClientTelemetry.AttributeKey.sessionID] = sessionId?.rawValue
+    }
+
+    /// Gives the metadata of the "enter" record of one ACP request.
+    ///
+    /// The client span of this type and the server span of
+    /// ``AgentRequestSpan`` both use this function.
     ///
     /// - Parameters:
     ///   - method: The ACP wire method.
     ///   - sessionId: The session that the request names, or `nil`.
     /// - Returns: The method, and the session id when the request names one.
-    private static func enterMetadata(method: String, sessionId: SessionId?) -> Logger.Metadata {
+    static func enterMetadata(method: String, sessionId: SessionId?) -> Logger.Metadata {
         var metadata: Logger.Metadata = [ACPClientTelemetry.LogMetadataKey.rpcMethod: "\(method)"]
         if let sessionId {
             metadata[ACPClientTelemetry.LogMetadataKey.sessionID] = "\(sessionId.rawValue)"

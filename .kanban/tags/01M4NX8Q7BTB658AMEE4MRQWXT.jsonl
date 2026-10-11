@@ -1,0 +1,1 @@
+{"id":"01M4NX8Q7J2QDWAACK4CW68ETZ","timestamp":"2026-10-11T16:38:20.146753Z","op":"create","item_id":"01M4NX8Q7BTB658AMEE4MRQWXT","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: d73a4a\n+tag_name: telemetry\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: d73a4a\n-tag_name: telemetry\n","transaction_id":null}

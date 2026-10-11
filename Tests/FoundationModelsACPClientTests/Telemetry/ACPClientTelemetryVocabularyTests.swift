@@ -41,6 +41,7 @@ struct ACPClientTelemetryVocabularyTests {
         let names = [
             ACPClientTelemetry.logLabel,
             ACPClientTelemetry.SpanName.request,
+            ACPClientTelemetry.SpanName.agentRequest,
             ACPClientTelemetry.MetricName.requests,
             ACPClientTelemetry.MetricName.requestDuration,
             ACPClientTelemetry.MetricName.requestErrors,
@@ -57,6 +58,27 @@ struct ACPClientTelemetryVocabularyTests {
         #expect(ACPClientTelemetry.AttributeKey.rpcMethod == "rpc.method")
         #expect(ACPClientTelemetry.AttributeKey.sessionID == "session.id")
         #expect(ACPClientTelemetry.AttributeKey.errorCode == "rpc.jsonrpc.error_code")
+    }
+
+    @Test("the ACP attribute keys of an agent request have the acp namespace")
+    func theAgentRequestAttributeKeysHaveTheACPNamespace() {
+        #expect(ACPClientTelemetry.AttributeKey.outcome == "acp.response.outcome")
+        #expect(ACPClientTelemetry.AttributeKey.routed == "acp.request.routed")
+    }
+
+    @Test("the outcome values are the ACP outcome and action names, and other")
+    func theOutcomeValuesAreTheACPNames() {
+        let values = [
+            ACPClientTelemetry.OutcomeValue.selected,
+            ACPClientTelemetry.OutcomeValue.cancelled,
+            ACPClientTelemetry.OutcomeValue.accept,
+            ACPClientTelemetry.OutcomeValue.decline,
+            ACPClientTelemetry.OutcomeValue.cancel,
+            ACPClientTelemetry.OutcomeValue.matched,
+            ACPClientTelemetry.OutcomeValue.unmatched,
+            ACPClientTelemetry.OutcomeValue.other,
+        ]
+        #expect(values == ["selected", "cancelled", "accept", "decline", "cancel", "matched", "unmatched", "other"])
     }
 
     @Test("each log metadata key is the attribute key of the same value")

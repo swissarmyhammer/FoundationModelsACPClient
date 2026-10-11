@@ -34,7 +34,8 @@ import Tracing
 /// ## No content
 ///
 /// Rule 4: a value that goes with one of these names is an id, an ACP method
-/// name, a count, a duration or an error code. It is never a prompt, a
+/// name, a count, a duration, an error code, a value of
+/// ``ACPClientTelemetry/OutcomeValue`` or a Boolean. It is never a prompt, a
 /// response, tool arguments, tool output or other content of the user. Each
 /// record leaves the process through the backend of the host, and the library
 /// cannot know where that backend sends it.
@@ -54,6 +55,16 @@ public enum ACPClientTelemetry {
         /// keeps the set of span names small and fixed, and a query that
         /// wants one method filters on the attribute.
         public static let request = prefix + "request"
+
+        /// The span of one ACP request or notification that the agent sends
+        /// to the client, from its arrival to the answer of the client.
+        ///
+        /// The span has the kind `.server`. It starts in the W3C trace
+        /// context that the agent put in the `_meta` of the message, so it
+        /// joins the trace of the agent. As for ``request``, all methods use
+        /// this one name, and the ACP method goes in the
+        /// ``ACPClientTelemetry/AttributeKey/rpcMethod`` attribute.
+        public static let agentRequest = prefix + "agent.request"
     }
 
     /// The attribute keys of the spans of the library.
@@ -76,6 +87,19 @@ public enum ACPClientTelemetry {
         /// conventions, because ACP is JSON-RPC 2.0. A request that did not
         /// fail has no such attribute.
         public static let errorCode = "rpc.jsonrpc.error_code"
+
+        /// The outcome of a request that the agent sent, as the client
+        /// answered it. The value is always one of
+        /// ``ACPClientTelemetry/OutcomeValue``, and never a string that the
+        /// agent sent. No OpenTelemetry convention names this fact, so the
+        /// key has the `acp.` namespace.
+        public static let outcome = "acp.response.outcome"
+
+        /// A Boolean: `true` when the client gave a request of the agent to
+        /// a model that waits for the answer of the user, and `false` when
+        /// the client answered it with a fallback. No OpenTelemetry
+        /// convention names this fact, so the key has the `acp.` namespace.
+        public static let routed = "acp.request.routed"
     }
 
     /// The metric names of the library. Each metric has the ACP method as a
@@ -113,6 +137,43 @@ public enum ACPClientTelemetry {
         public static let cancelled = "cancelled"
 
         /// Another error that is not one of the errors above.
+        public static let other = "other"
+    }
+
+    /// The values of the ``ACPClientTelemetry/AttributeKey/outcome``
+    /// attribute.
+    ///
+    /// Each value is the name of an ACP permission outcome, an ACP
+    /// elicitation action, or the result of an `elicitation/complete`. The set
+    /// of values is small and fixed (rule 4). An outcome or an action that
+    /// this set does not name gets ``other``: the attribute never holds a
+    /// string that the agent sent.
+    public enum OutcomeValue {
+        /// The user selected one option of a permission request.
+        public static let selected = "selected"
+
+        /// The permission request was cancelled, for example because the
+        /// turn was cancelled.
+        public static let cancelled = "cancelled"
+
+        /// The user accepted an elicitation.
+        public static let accept = "accept"
+
+        /// The user declined an elicitation.
+        public static let decline = "decline"
+
+        /// The user cancelled an elicitation.
+        public static let cancel = "cancel"
+
+        /// An `elicitation/complete` named an elicitation that the client
+        /// waits for.
+        public static let matched = "matched"
+
+        /// An `elicitation/complete` named no elicitation that the client
+        /// waits for.
+        public static let unmatched = "unmatched"
+
+        /// An outcome or an action that is not one of the values above.
         public static let other = "other"
     }
 
