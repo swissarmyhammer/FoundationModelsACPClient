@@ -37,6 +37,45 @@ comments:
     - evidence: swift test — 455 tests in 36 suites passed, 0 failed, 0 skipped. The only warning is the known SwiftPM MLX "missing creator for mutated node" warning (task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
     - next: review
   timestamp: 2026-10-11T17:22:21.489392+00:00
+- actor: claude-code
+  id: 01m4p00bqhj1zm5pa3340mt6g2
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (b8ad025): 2 findings (2 confirmed, 1 refuted) — Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:160, Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:228
+    - next: put the form values and the permission and elicitation answer helpers in one shared test support file, and call them from ContentSafetyTests and AgentRequestSpanRoutingTests. Then review again.
+  timestamp: 2026-10-11T17:26:11.953681+00:00
+- actor: claude-code
+  id: 01m4p00sy7a24e6smtv6zmgkds
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 8 files
+    - test: green — swift test, 455 passed
+    - commit: b8ad025
+    - review: findings — Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:160, Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:228
+  timestamp: 2026-10-11T17:26:26.503746+00:00
+- actor: claude-code
+  id: 01m4p08ds39pwpejn4n24jvpq7
+  text: |-
+    Review findings fixed.
+    - New shared test support file Tests/FoundationModelsACPClientTests/Telemetry/UserAnswers.swift, beside TracedSessionHarness. It holds `ElicitationAnswer` (moved from AgentRequestSpanRoutingTests), the one copy of the accepted form values (`ElicitationAnswer.formValue` and `formContent`), and `UserAnswers` (`firstPendingPermission`, `firstPendingElicitation`, `selectPermission(_:in:)`, `cancelPermission(in:)`). `ElicitationAnswer.give(in:)` now waits for the pending elicitation itself.
+    - AgentRequestSpanRoutingTests: removed the private `formContent`, `selectThePermission` and each inline wait-and-answer sequence. Each test calls the shared helpers.
+    - ContentSafetyTests: removed `Fixture.formValue`, `formContent` and `answerTheRequests`. The answered turn calls `UserAnswers.selectPermission` and `ElicitationAnswer.accept.give(in:)`. The forbidden strings hold `ElicitationAnswer.formValue` ("Accepted form value: the jade harbor"), so the form content check stays meaningful.
+    - Not changed: ModelClientTests and ConnectionModelElicitationTests also have a private `formContent` ("orion"). Those are tests that existed before this task and are outside the findings scope.
+  timestamp: 2026-10-11T17:30:36.195560+00:00
+- actor: claude-code
+  id: 01m4p08g6b7jsphw0djmdgvems
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — Tests/FoundationModelsACPClientTests/Telemetry/UserAnswers.swift (new), Tests/FoundationModelsACPClientTests/Telemetry/AgentRequestSpanRoutingTests.swift, Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift. `swift test --filter "AgentRequestSpanRouting|ContentSafety"`: 14 tests in 2 suites passed. `swift test`: 455 tests in 36 suites passed. The only warning is the accepted MLX "missing creator for mutated node" warning. Both review findings are checked.
+    - next: review. The task stays in doing.
+  timestamp: 2026-10-11T17:30:38.667293+00:00
+- actor: claude-code
+  id: 01m4p0bcee5zgeh9nqs5swdmb2
+  text: |-
+    ### test — green
+    - evidence: swift test — 455 tests in 36 suites passed, 0 failed, 0 skipped. One warning only: SwiftPM MLX "missing creator for mutated node" (known, accepted, task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
+    - next: review
+  timestamp: 2026-10-11T17:32:13.134793+00:00
 depends_on:
 - 01M4NX8Q4WFYJMHPCGWG6RJXDC
 position_column: doing
@@ -81,3 +120,13 @@ Each handler:
 
 ## Workflow
 - Use `/tdd`: write the failing tests first, then write the code that makes them pass. #telemetry
+
+## Review Findings (2026-10-11 12:22)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 8 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:160` `reuse/reuse` — `formContent` is a second copy of the same form value that `AgentRequestSpanRoutingTests` defines as `formContent`. Two independent constants hold the form values of the same elicitation flow. Define the accepted form values once, in `ElicitationFixtures` or in the shared test support file, and reference that value from both suites.
+- [x] `Tests/FoundationModelsACPClientTests/Telemetry/ContentSafetyTests.swift:228` `reuse/reuse` — `answerTheRequests` repeats the answer flow of `AgentRequestSpanRoutingTests.selectThePermission` and `ElicitationAnswer.give(to:in:)`: it waits for a pending permission, selects its option, waits for a pending elicitation, and accepts it. A second copy of this sequence must be kept in step with the first, and a fix to one copy does not reach the other. Move the permission and elicitation answer helpers into one shared test support file, for example beside `TracedSessionHarness`, and call that helper from both suites. Do not rely on the private copies.

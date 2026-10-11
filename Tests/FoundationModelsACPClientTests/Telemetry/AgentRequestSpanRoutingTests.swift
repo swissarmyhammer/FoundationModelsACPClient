@@ -30,47 +30,8 @@ private let agentSpanID = "b7ad6b7169203331"
 /// The id of a session that no model holds.
 private let unknownSession = SessionId(rawValue: "session-not-open")
 
-/// The form values that the user gives to an accepted form elicitation.
-private let formContent: JSONValue = .object(["name": .string("orion")])
-
 /// The id of an elicitation that no model holds.
 private let unknownElicitationID = ElicitationId(rawValue: "elicit-unknown")
-
-/// One answer that the user gives to an elicitation, and the outcome that the
-/// span of the elicitation records for it.
-enum ElicitationAnswer: CaseIterable, Sendable {
-    /// The user accepts the elicitation, with the form values.
-    case accept
-
-    /// The user declines the elicitation.
-    case decline
-
-    /// The user cancels the elicitation.
-    case cancel
-
-    /// The outcome that the span records for this answer.
-    var outcome: String {
-        switch self {
-        case .accept: ACPClientTelemetry.OutcomeValue.accept
-        case .decline: ACPClientTelemetry.OutcomeValue.decline
-        case .cancel: ACPClientTelemetry.OutcomeValue.cancel
-        }
-    }
-
-    /// Gives this answer to one pending elicitation of a session.
-    ///
-    /// - Parameters:
-    ///   - id: The id of the pending elicitation.
-    ///   - session: The session model that holds the elicitation.
-    @MainActor
-    func give(to id: PendingElicitation.ID, in session: SessionModel) {
-        switch self {
-        case .accept: session.acceptElicitation(id, content: formContent)
-        case .decline: session.declineElicitation(id)
-        case .cancel: session.cancelElicitation(id)
-        }
-    }
-}
 
 @MainActor
 @Suite("agent request span routing", .timeLimit(.minutes(1)))
@@ -84,7 +45,7 @@ struct AgentRequestSpanRoutingTests {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
             try await Self.runTurn(of: harness) { session in
-                try await Self.selectThePermission(in: session)
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
             }
 
             let spans = context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission)
@@ -105,9 +66,7 @@ struct AgentRequestSpanRoutingTests {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
             try await Self.runTurn(of: harness) { session in
-                try await waitUntil { !session.pendingPermissions.isEmpty }
-                let pending = try #require(session.pendingPermissions.first)
-                await session.cancelPermission(pending.id)
+                try await UserAnswers.cancelPermission(in: session)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).first)
@@ -146,7 +105,7 @@ struct AgentRequestSpanRoutingTests {
             request.meta = .object([SpanIdentity.traceparentField: .string(agentSpan.traceparent)])
             let harness = await Self.permissionHarness(request: request)
             try await Self.runTurn(of: harness) { session in
-                try await Self.selectThePermission(in: session)
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).first)
@@ -162,10 +121,10 @@ struct AgentRequestSpanRoutingTests {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
             try await Self.runTurn(of: harness) { session in
-                try await waitUntil { !session.pendingPermissions.isEmpty }
+                _ = try await UserAnswers.firstPendingPermission(of: session)
                 let spansBeforeTheAnswer = context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission)
                 #expect(spansBeforeTheAnswer.isEmpty, "The span ended before the user answered.")
-                try await Self.selectThePermission(in: session)
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
             }
 
             #expect(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).count == 1)
@@ -182,9 +141,7 @@ struct AgentRequestSpanRoutingTests {
             let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
             let harness = await TracedSessionHarness(elicitation: request)
             try await Self.runTurn(of: harness) { session in
-                try await waitUntil { !session.pendingElicitations.isEmpty }
-                let pending = try #require(session.pendingElicitations.first)
-                answer.give(to: pending.id, in: session)
+                try await answer.give(in: session)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.createElicitation).first)
@@ -235,7 +192,7 @@ struct AgentRequestSpanRoutingTests {
             let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
             let harness = await TracedSessionHarness(elicitation: request)
             try await Self.runTurn(of: harness) { session in
-                try await waitUntil { !session.pendingElicitations.isEmpty }
+                _ = try await UserAnswers.firstPendingElicitation(of: session)
                 try await harness.agentConnection.elicitationComplete(
                     CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
                 )
@@ -320,18 +277,6 @@ struct AgentRequestSpanRoutingTests {
         try await answer(turn.session)
         try await turn.finish()
         await harness.teardown()
-    }
-
-    /// Waits until the session holds a pending permission request, and
-    /// selects its allow option.
-    ///
-    /// - Parameter session: The session model of the turn.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
-    private static func selectThePermission(in session: SessionModel) async throws {
-        try await waitUntil { !session.pendingPermissions.isEmpty }
-        let pending = try #require(session.pendingPermissions.first)
-        await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
     }
 
     /// Sends one elicitation from the agent with no session open, and gives

@@ -62,9 +62,6 @@ struct ContentSafetyTests {
         /// The message of the elicitation of the turn.
         static let elicitationMessage = "Content-safety elicitation message: name the jade harbor"
 
-        /// The form value that the user gives to the elicitation of the turn.
-        static let formValue = "Content-safety form value: the jade harbor"
-
         /// A marker in the `cwd` of the session.
         static let workingDirectoryMarker = "content-safety-cwd-marker"
 
@@ -88,7 +85,7 @@ struct ContentSafetyTests {
             permissionToolTitle,
             permissionOptionName,
             elicitationMessage,
-            formValue,
+            ElicitationAnswer.formValue,
             workingDirectoryMarker,
         ]
 
@@ -155,10 +152,6 @@ struct ContentSafetyTests {
         )
     )
 
-    /// The form values that the user accepts the elicitation of the turn
-    /// with.
-    private static let formContent: JSONValue = .object(["name": .string(Fixture.formValue)])
-
     /// The error that the agent refuses a turn with. Its message and its data
     /// hold fixture strings.
     private static let refusal = RequestError(
@@ -187,7 +180,8 @@ struct ContentSafetyTests {
             )
             try await harness.initialize()
             let turn = try await harness.startTurn()
-            try await Self.answerTheRequests(of: turn.session)
+            try await UserAnswers.selectPermission(Self.permissionOption.optionId, in: turn.session)
+            try await ElicitationAnswer.accept.give(in: turn.session)
             try await turn.finish()
             try await harness.closeTheTurnSession()
             await harness.teardown()
@@ -215,22 +209,5 @@ struct ContentSafetyTests {
 
             context.expectEachSignal()
         }
-    }
-
-    /// Answers the requests of the agent in the answered turn, as a user
-    /// does: selects the option of the permission request, then accepts the
-    /// elicitation with the form values.
-    ///
-    /// - Parameter session: The session model of the turn.
-    /// - Throws: An issue when a request is not pending, or
-    ///   `CancellationError` when the test time limit cancels a wait.
-    @MainActor
-    private static func answerTheRequests(of session: SessionModel) async throws {
-        try await waitUntil { !session.pendingPermissions.isEmpty }
-        let permission = try #require(session.pendingPermissions.first)
-        await session.selectPermission(permission.id, option: permissionOption.optionId)
-        try await waitUntil { !session.pendingElicitations.isEmpty }
-        let elicitation = try #require(session.pendingElicitations.first)
-        session.acceptElicitation(elicitation.id, content: formContent)
     }
 }
