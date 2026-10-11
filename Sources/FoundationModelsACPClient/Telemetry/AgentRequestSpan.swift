@@ -1,5 +1,4 @@
 import FoundationModelsACP
-import FoundationModelsExtras
 import Logging
 import Tracing
 
@@ -79,17 +78,16 @@ enum AgentRequestSpan {
         _ body: nonisolated(nonsending) (any Span) async throws -> Output
     ) async throws -> Output {
         let activeTracer = tracer ?? InstrumentationSystem.tracer
-        return try await ServiceContext.withValue(startContext(of: meta, tracer: activeTracer)) {
-            try await TracedCall.run(
-                ACPClientTelemetry.SpanName.agentRequest,
-                ofKind: .server,
-                tracer: activeTracer,
-                logger: logger ?? Logger(label: ACPClientTelemetry.logLabel),
-                attributes: { ClientRequestSpan.setRequestAttributes(&$0, method: method, sessionId: sessionId) },
-                metadata: ClientRequestSpan.enterMetadata(method: method, sessionId: sessionId),
-                body
-            )
-        }
+        return try await ClientRequestSpan.withRequestSpan(
+            named: ACPClientTelemetry.SpanName.agentRequest,
+            ofKind: .server,
+            in: startContext(of: meta, tracer: activeTracer),
+            tracer: activeTracer,
+            logger: logger,
+            method: method,
+            sessionId: sessionId,
+            body
+        )
     }
 
     /// Gives the service context that the span of one message starts in.

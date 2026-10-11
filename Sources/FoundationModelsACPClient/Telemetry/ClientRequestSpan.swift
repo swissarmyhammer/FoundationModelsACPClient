@@ -187,53 +187,93 @@ public enum ClientRequestSpan {
         _ send: nonisolated(nonsending) (_ meta: JSONValue?) async throws -> Output
     ) async throws -> Output {
         let activeTracer = tracer ?? InstrumentationSystem.tracer
-        let startContext = parent ?? .current
-        let result: Result<Output, any Error> = try await ServiceContext.withValue(startContext.serviceContext) {
-            try await TracedCall.run(
-                ACPClientTelemetry.SpanName.request,
-                ofKind: .client,
-                tracer: activeTracer,
-                logger: logger ?? Logger(label: ACPClientTelemetry.logLabel),
-                attributes: { setRequestAttributes(&$0, method: method, sessionId: sessionId) },
-                metadata: enterMetadata(method: method, sessionId: sessionId)
-            ) { span in
-                await outcome(
-                    of: send,
-                    meta: injected(into: meta, from: span, by: activeTracer),
-                    in: span,
-                    metrics: RequestMetrics(method: method, factory: metricsFactory)
-                )
-            }
+        let result: Result<Output, any Error> = try await withRequestSpan(
+            named: ACPClientTelemetry.SpanName.request,
+            ofKind: .client,
+            in: (parent ?? .current).serviceContext,
+            tracer: activeTracer,
+            logger: logger,
+            method: method,
+            sessionId: sessionId
+        ) { span in
+            await outcome(
+                of: send,
+                meta: injected(into: meta, from: span, by: activeTracer),
+                in: span,
+                metrics: RequestMetrics(method: method, factory: metricsFactory)
+            )
         }
         return try result.get()
+    }
+
+    /// Runs `body` in one new span of an ACP request or notification.
+    ///
+    /// The client span of this type and the server span of
+    /// ``AgentRequestSpan`` both use this function, so that the two spans
+    /// hold the same attributes and write the same "enter" record. Only the
+    /// name, the kind and the start context of the two spans are different.
+    ///
+    /// The function sets `startContext` as the service context of the task,
+    /// and then opens the span through `TracedCall` of FoundationModelsExtras.
+    /// Thus the span is a child of the span in `startContext`, or a root span
+    /// when `startContext` holds no span. The span holds the ACP method, and
+    /// the session id when the request names a session. The "enter" record
+    /// holds the same values.
+    ///
+    /// - Parameters:
+    ///   - spanName: The name of the span.
+    ///   - kind: The kind of the span.
+    ///   - startContext: The service context that the span starts in.
+    ///   - tracer: The tracer of the span.
+    ///   - logger: The logger of the "enter" record, or `nil` for a new logger
+    ///     with the label ``ACPClientTelemetry/logLabel``.
+    ///   - method: The ACP wire method.
+    ///   - sessionId: The session that the request names, or `nil`.
+    ///   - body: The call. It gets the open span.
+    /// - Returns: The value of `body`.
+    /// - Throws: The error of `body`.
+    nonisolated(nonsending) static func withRequestSpan<Output>(
+        named spanName: String,
+        ofKind kind: SpanKind,
+        in startContext: ServiceContext,
+        tracer: any Tracer,
+        logger: Logger?,
+        method: String,
+        sessionId: SessionId?,
+        _ body: nonisolated(nonsending) (any Span) async throws -> Output
+    ) async throws -> Output {
+        try await ServiceContext.withValue(startContext) {
+            try await TracedCall.run(
+                spanName,
+                ofKind: kind,
+                tracer: tracer,
+                logger: logger ?? Logger(label: ACPClientTelemetry.logLabel),
+                attributes: { setRequestAttributes(&$0, method: method, sessionId: sessionId) },
+                metadata: enterMetadata(method: method, sessionId: sessionId),
+                body
+            )
+        }
     }
 
     /// Sets the attributes that each ACP request span holds: the ACP method,
     /// and the session id when the request names a session.
     ///
-    /// The client span of this type and the server span of
-    /// ``AgentRequestSpan`` both use this function, so that the two spans
-    /// hold the same attributes.
-    ///
     /// - Parameters:
     ///   - attributes: The attributes of the span.
     ///   - method: The ACP wire method.
     ///   - sessionId: The session that the request names, or `nil`.
-    static func setRequestAttributes(_ attributes: inout SpanAttributes, method: String, sessionId: SessionId?) {
+    private static func setRequestAttributes(_ attributes: inout SpanAttributes, method: String, sessionId: SessionId?) {
         attributes[ACPClientTelemetry.AttributeKey.rpcMethod] = method
         attributes[ACPClientTelemetry.AttributeKey.sessionID] = sessionId?.rawValue
     }
 
     /// Gives the metadata of the "enter" record of one ACP request.
     ///
-    /// The client span of this type and the server span of
-    /// ``AgentRequestSpan`` both use this function.
-    ///
     /// - Parameters:
     ///   - method: The ACP wire method.
     ///   - sessionId: The session that the request names, or `nil`.
     /// - Returns: The method, and the session id when the request names one.
-    static func enterMetadata(method: String, sessionId: SessionId?) -> Logger.Metadata {
+    private static func enterMetadata(method: String, sessionId: SessionId?) -> Logger.Metadata {
         var metadata: Logger.Metadata = [ACPClientTelemetry.LogMetadataKey.rpcMethod: "\(method)"]
         if let sessionId {
             metadata[ACPClientTelemetry.LogMetadataKey.sessionID] = "\(sessionId.rawValue)"

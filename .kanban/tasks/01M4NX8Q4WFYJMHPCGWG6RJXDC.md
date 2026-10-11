@@ -36,6 +36,46 @@ comments:
     - evidence: swift test — 443 tests in 35 suites passed, 0 failed, 0 skipped. One warning only: the known "missing creator for mutated node" warning from the MLX bundle (task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
     - next: review
   timestamp: 2026-10-11T16:58:11.940675+00:00
+- actor: claude-code
+  id: 01m4nyk1w5vya465rdtebvk4mc
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (b2616a1). 1 finding (1 confirmed, 2 refuted) — Sources/FoundationModelsACPClient/Telemetry/AgentRequestSpan.swift:82 (duplication/duplication).
+    - next: Extract one internal span helper that ClientRequestSpan.run and AgentRequestSpan.run both call. Then review again.
+  timestamp: 2026-10-11T17:01:27.301243+00:00
+- actor: claude-code
+  id: 01m4nykgdf1hqg2gqkn091wfx4
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 5 files
+    - test: green — swift test, 443 passed
+    - commit: b2616a1
+    - review: findings — Sources/FoundationModelsACPClient/Telemetry/AgentRequestSpan.swift:82
+  timestamp: 2026-10-11T17:01:42.191635+00:00
+- actor: claude-code
+  id: 01m4nyswdxt8ymzwk89fqn0kg6
+  text: |-
+    Review finding fixed (duplication/duplication, AgentRequestSpan.swift:82).
+    - New internal helper `ClientRequestSpan.withRequestSpan(named:ofKind:in:tracer:logger:method:sessionId:_:)`. It sets the start `ServiceContext`, and runs the body in `TracedCall.run` with the shared attributes, the shared "enter" metadata and the default logger label. The span name is also a parameter, because the two spans have different names.
+    - `ClientRequestSpan.run` and `AgentRequestSpan.run` both call the helper. The copied `ServiceContext.withValue` + `TracedCall.run` wrapper is gone from both files.
+    - `setRequestAttributes` and `enterMetadata` are now `private`, because only the helper calls them (grep: no test calls them).
+    - `AgentRequestSpan.swift` no longer imports FoundationModelsExtras, because it no longer calls `TracedCall`.
+    - This is a refactor with no new behavior. The existing span tests (ClientRequestSpanTests, AgentRequestSpanTests, ModelRequestSpanTests, content safety) cover it and stay green.
+  timestamp: 2026-10-11T17:05:11.101703+00:00
+- actor: claude-code
+  id: 01m4nysz22ys8904s2h36px0qq
+  text: |-
+    ### implement — changed
+    - evidence: 2 files — Sources/FoundationModelsACPClient/Telemetry/ClientRequestSpan.swift, Sources/FoundationModelsACPClient/Telemetry/AgentRequestSpan.swift (plus the finding checkbox on the card). `swift test`: 443 tests in 35 suites passed, 0 failed. The one warning is the known MLX "missing creator for mutated node" warning (01M3Z8M7YKRR5TQ5NRPZWS9QZT).
+    - next: /review
+  timestamp: 2026-10-11T17:05:13.794363+00:00
+- actor: claude-code
+  id: 01m4nyvs1ks2ycpw9c293a4xpj
+  text: |-
+    ### test — green
+    - evidence: swift test — 443 tests in 35 suites passed, 0 failed, 0 skipped. The only warning is the known SwiftPM "missing creator for mutated node" MLX warning (task 01M3Z8M7YKRR5TQ5NRPZWS9QZT).
+    - next: review
+  timestamp: 2026-10-11T17:06:13.171938+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Add AgentRequestSpan: a server span for each request that the agent sends'
@@ -82,3 +122,12 @@ Approach:
 
 ## Workflow
 - Use `/tdd`: write the failing tests first, then write the code that makes them pass. #telemetry
+
+## Review Findings (2026-10-11 11:58)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 8 not reviewed.
+
+> 8 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 8 file(s)
+
+- [x] `Sources/FoundationModelsACPClient/Telemetry/AgentRequestSpan.swift:82` `duplication/duplication` — The body of AgentRequestSpan.run repeats the wrapper of ClientRequestSpan.run: ServiceContext.withValue around a TracedCall.run call that takes the same name, logger, attributes and metadata. Only the span kind (.server instead of .client), the start context, and the body differ. The two copies can drift apart, for example when the span name, the logger label or the attribute handling changes in one copy and not the other. Extract one internal helper that takes the span kind, the start context, the tracer, the logger, the method and the session id, and that runs the body inside TracedCall.run. Call it from ClientRequestSpan.run and from AgentRequestSpan.run, and delete the copied wrapper from both. The helper can keep the Output and the nonsending body as its parameters.
