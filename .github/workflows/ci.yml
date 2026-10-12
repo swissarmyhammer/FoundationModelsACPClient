@@ -18,15 +18,20 @@ name: CI
 #   must not stay unseen between runs. The integration job then builds and runs
 #   that package, after the unit job.
 # - The integration test drives this library against a real agent:
-#   `RoutedACPAgent` of FoundationModelsACPAgent, in process, with the real
-#   model `mlx-community/Qwen3-4B-4bit` and greedy decoding. The test loads a
-#   model, so `integration-no-parallel` holds the run to one test at a time.
-# - MLX is in the dependency graph of the integration package, through the
-#   agent and FoundationModelsRouter. MLX needs its shader library for the
-#   model. Thus this workflow gives `integration-metallib-glob`, the same as
-#   the sibling packages: the shared workflow copies the `default.metallib`
-#   that SwiftPM puts in the Cmlx bundle beside each `.xctest` bundle before
-#   the run.
+#   `RoutedACPAgent` of FoundationModelsACPAgent, with the real model
+#   `mlx-community/Qwen3-4B-4bit` and greedy decoding. The agent runs in a
+#   separate process: the `live-agent-server` executable of the
+#   `IntegrationTests/LiveAgentServer` package. The test builds that package
+#   with `swift build --package-path` and starts the executable, so the
+#   integration job builds the agent on each run, inside the test. That
+#   package stays out of the graph of `IntegrationTests`, because a graph
+#   that holds FoundationModelsACPAgent and this library by path gives the
+#   SwiftPM warning "Conflicting identity for foundationmodelsacpclient".
+#   The agent loads a model, so `integration-no-parallel` holds the run to
+#   one test at a time.
+# - The test process loads no model, so this workflow gives no
+#   `integration-metallib-glob`. The agent process is a SwiftPM executable,
+#   and MLX finds its shader library in the Cmlx bundle beside it.
 
 on:
   push:
@@ -44,4 +49,3 @@ jobs:
     with:
       integration-package-path: IntegrationTests
       integration-no-parallel: true
-      integration-metallib-glob: "*Cmlx*/default.metallib"

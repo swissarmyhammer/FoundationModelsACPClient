@@ -1,9 +1,6 @@
 import Foundation
 import FoundationModelsACP
-import FoundationModelsACPAgent
 import FoundationModelsACPClient
-import FoundationModelsRouter
-import FoundationModelsRouterTestSupport
 import Testing
 
 // The integration test of this library: one turn of `ConnectionModel` and
@@ -11,47 +8,21 @@ import Testing
 //
 // The test uses the public API of the library only: it imports the library
 // with no `@testable`. The agent is `RoutedACPAgent` of
-// FoundationModelsACPAgent, in this process, over an `InMemoryTransport`
-// pair. The package boundary selects this test: the root `swift test` does
-// not see this target, and `swift test --package-path IntegrationTests` runs
-// it.
+// FoundationModelsACPAgent, with greedy decoding, in the `live-agent-server`
+// process, over its stdio. `LiveAgentServerBuild` builds that executable. The
+// package boundary selects this test: the root `swift test` does not see this
+// target, and `swift test --package-path IntegrationTests` runs it.
 
-/// The time limit of the test, in minutes. It includes the download of the
-/// model on the first run, and the load of the model.
-private let liveTurnTimeLimitMinutes = 20
+/// The time limit of the test, in minutes. It includes the build of the
+/// agent server, the download of the model on the first run, and the load of
+/// the model.
+private let liveTurnTimeLimitMinutes = 30
 
 /// One turn against a real agent: connect, initialize, open a session, send
 /// one prompt, and disconnect.
 struct LiveAgentTurnTests {
-    /// The dotfolder name of the agent. The configuration stack and the
-    /// transcripts of the agent use this name.
-    private static let agentName = "acp-client-integration"
-
-    /// The model of the `standard` slot, which answers the prompt. It is the
-    /// smallest generation model that the integration suites of
-    /// FoundationModelsACPAgent load. See the manifest of this package.
-    private static let standardModel = "mlx-community/Qwen3-4B-4bit"
-
-    /// The model of the `flash` slot. The router refuses a profile that names
-    /// one model for the `standard` slot and the `flash` slot, so this slot
-    /// names a smaller model. The `agents-demo` example of
-    /// FoundationModelsAgents uses the same pair.
-    private static let flashModel = "mlx-community/Qwen3-1.7B-4bit"
-
-    /// The user-layer `config.yaml` of the agent.
-    ///
-    /// The profile names two small models. The skills marketplace list is
-    /// empty and the code context is off, so the turn does not use the
-    /// network and does not index the workspace.
-    private static let userConfigYAML = """
-        tools:
-          codeContext: false
-          skills:
-            marketplaces: []
-        profile:
-          standard: ["\(standardModel)"]
-          flash: ["\(flashModel)"]
-        """
+    /// The prefix of the name of the temporary directory of the test.
+    private static let temporaryDirectoryPrefix = "acp-client-integration"
 
     /// The text of the one prompt.
     private static let promptText = "Say hello in one short sentence."
@@ -79,15 +50,10 @@ struct LiveAgentTurnTests {
         let root = try Self.makeTemporaryDirectory()
         let workspace = root.appendingPathComponent("workspace", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
-        let agent = try await Self.makeAgent(under: root, workspace: workspace)
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agentConnection = await AgentSideConnection(stream: agentEnd, logger: .disabled) { connection in
-            agent.bind(connection: connection)
-            return agent
-        }
+        let agentProcess = try await Self.startAgent(under: root, workspace: workspace)
 
         let model = ConnectionModel(coalescingCadence: .zero)
-        _ = await model.connect(over: clientEnd)
+        _ = await model.connect(over: agentProcess.transport)
         _ = try await model.initialize(
             InitializeRequest(
                 info: Self.clientInfo,
@@ -110,8 +76,10 @@ struct LiveAgentTurnTests {
         #expect(session.isClosed)
         #expect(model.state == .disconnected)
 
-        _ = await agentConnection.closed
-        await agent.waitForConnectionTeardown()
+        // The disconnect ends the stdio transport, and the end of the
+        // transport ends and reaps the agent process.
+        let agentExit = try await agentProcess.waitForExit()
+        #expect(agentExit != .notCollected, "the teardown did not reap the agent process")
         try FileManager.default.removeItem(at: root)
     }
 
@@ -122,49 +90,27 @@ struct LiveAgentTurnTests {
     /// - Throws: The error of the directory creation.
     private static func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(agentName)-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("\(temporaryDirectoryPrefix)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.resolvingSymlinksInPath()
     }
 
-    /// Makes the real agent: writes ``userConfigYAML`` into a user layer under
-    /// `root`, loads the configuration, and resolves the profile through a
-    /// router that loads the real model and decodes greedy.
+    /// Builds the agent server, and starts it as an external agent over
+    /// stdio.
+    ///
+    /// The server writes its user layer and its recordings under `root`, and
+    /// loads its models before it reads the first frame.
     ///
     /// - Parameters:
-    ///   - root: The temporary directory of the test.
-    ///   - workspace: The working directory of the session.
-    /// - Returns: The agent, with its models loaded.
-    /// - Throws: The error of the file write, of the configuration load, or of
-    ///   the profile resolution.
-    private static func makeAgent(under root: URL, workspace: URL) async throws -> RoutedACPAgent {
-        // Under `swift test`, MLX does not find its shader library beside the
-        // test binary. This bootstrap links it there, before the first model
-        // load.
-        _ = MetalLibraryTestBootstrap.ensureColocatedMetallib
-        let userDirectory = root.appendingPathComponent("user", isDirectory: true)
-        let recordingsDirectory = root.appendingPathComponent("recordings", isDirectory: true)
-        try FileManager.default.createDirectory(at: userDirectory, withIntermediateDirectories: true)
-        try userConfigYAML.write(
-            to: userDirectory.appendingPathComponent(ConfigurationLoader.configFileName),
-            atomically: true, encoding: .utf8)
-        let name = try DotfolderName(agentName)
-        let configuration = try ConfigurationLoader(
-            name: name,
-            workingDirectory: workspace,
-            userDirectory: userDirectory,
-            environment: [:]
-        ).load().configuration
-        let router = Router(
-            recordingsDir: recordingsDirectory,
-            loader: LiveModelLoader(),
-            samplingMode: .greedy)
-        return try await RoutedACPAgent(
-            name: name,
-            router: router,
-            configuration: configuration,
-            userDirectory: userDirectory,
-            environment: [:])
+    ///   - root: The temporary directory of the test. It also receives the
+    ///     log of each `swift build`.
+    ///   - workspace: The working directory of the configuration load of the
+    ///     agent.
+    /// - Returns: The agent process. Its transport carries the connection.
+    /// - Throws: The error of the build or of the start of the process.
+    private static func startAgent(under root: URL, workspace: URL) async throws -> AgentProcess {
+        let executable = try await LiveAgentServerBuild(logDirectory: root).makeExecutable()
+        return try AgentProcess(command: executable, arguments: [root.path, workspace.path])
     }
 
     /// Gives the first user message of the transcript of `session`.
