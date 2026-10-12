@@ -122,22 +122,19 @@ enum SessionModelFixtures {
         RequestPermissionRequest(options: [allowOption, rejectOption], sessionId: testSession, title: title)
     }
 
-    /// Starts one permission request and waits until it is pending.
+    /// Starts one permission request. The request is pending when the call
+    /// returns.
     ///
     /// - Parameters:
     ///   - model: The model that holds the request.
     ///   - request: The request to start.
     /// - Returns: The task of the agent's call.
-    /// - Throws: `CancellationError` when the test time limit cancels the wait.
     @MainActor
     static func startPermission(
         on model: SessionModel,
         _ request: RequestPermissionRequest = permissionRequest()
-    ) async throws -> Task<RequestPermissionResponse, Never> {
-        let count = model.pendingPermissions.count
-        let task = Task { await model.awaitPermissionDecision(for: request) }
-        try await waitUntil { model.pendingPermissions.count == count + 1 }
-        return task
+    ) -> Task<RequestPermissionResponse, Never> {
+        model.startPermissionDecision(for: request)
     }
 
     // MARK: - Compaction and notice updates

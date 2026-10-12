@@ -43,8 +43,24 @@ comments:
     - evidence: b8620a0 feat(model)!: make openSessions an ordered list of Identifiable SessionModel (sha before the amend that adds this comment; the amend changes the sha)
     - next: review
   timestamp: 2026-10-12T20:14:07.626500+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4rw30zqkwxhysp97esh3k2c
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (8cc5afe). 0 findings, 0 confirmed, 0 refuted. 14 of 14 validator runs completed, 0 failed. 9 files reviewed. 4 .kanban files were not reviewed because of .reviewignore.
+    - next: none. The task is in done.
+  timestamp: 2026-10-12T20:15:28.247791+00:00
+- actor: claude-code
+  id: 01m4rw37r9am8a278dnk0sz86r
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 9 files
+    - test: green — swift test, 514 passed, 0 failed
+    - commit: 8cc5afe
+    - review: clean — 0 findings
+  timestamp: 2026-10-12T20:15:35.177199+00:00
+position_column: done
+position_ordinal: ee80
 title: Make openSessions an ordered list of Identifiable SessionModel
 ---
 ## Goal

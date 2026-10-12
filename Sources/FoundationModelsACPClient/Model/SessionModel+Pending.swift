@@ -81,6 +81,25 @@ extension SessionModel {
         return response
     }
 
+    /// Starts ``awaitPermissionDecision(for:afterResponse:)`` for a request,
+    /// with no connection, and gives the task of the wait.
+    ///
+    /// The task starts at once on the main actor, so the request is in
+    /// ``pendingPermissions`` when this call returns. The task holds the
+    /// model until a resolution, a cancel of the task, or the close of the
+    /// model answers the request. A preview model and a unit test start a
+    /// pending request this way.
+    ///
+    /// - Parameter request: The permission request.
+    /// - Returns: The task, which gives the decision of the user, or the
+    ///   `cancelled` outcome.
+    @discardableResult
+    func startPermissionDecision(for request: RequestPermissionRequest) -> Task<RequestPermissionResponse, Never> {
+        Task.immediate { @MainActor in
+            await self.awaitPermissionDecision(for: request)
+        }
+    }
+
     /// Answers one pending permission request with the selected option, and
     /// waits until the connection wrote the response.
     ///

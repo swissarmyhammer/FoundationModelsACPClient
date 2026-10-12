@@ -46,6 +46,28 @@ its own entry, so a view redraws only that row.
 For an agent in the same process, make a transport pair with
 `InMemoryTransport.pair()` and connect over the client end.
 
+## Previews
+
+A SwiftUI `#Preview` or a test of your app can make a populated model with
+no agent and no connection. Each transcript item goes through the same merge
+engine as a live update, so the preview shows the real state. A preview never
+opens a process or a socket.
+
+```swift
+#Preview {
+    TranscriptView(session: .preview(transcript: [
+        .user("Why does the build fail?"),
+        .agent("Parser.swift does not import Foundation."),
+        .toolCall(title: "Run swift test", kind: .execute, status: .completed),
+    ]))
+}
+```
+
+`SessionModel.previewSample` and `ConnectionModel.previewSample` give ready
+models. `prompt(_:meta:)` on a preview model adds the user message and gets
+an answer from `PreviewSessionRequestSender`, so its `sendState` changes as
+it does in a live model.
+
 ## Install
 
 Add the package to the dependencies in your `Package.swift`:

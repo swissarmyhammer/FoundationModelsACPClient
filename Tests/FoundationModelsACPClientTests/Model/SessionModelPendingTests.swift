@@ -75,7 +75,7 @@ struct SessionModelPendingTests {
     @Test func selectingAnOptionResolvesThePermissionWithThatOption() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let request = SessionModelFixtures.permissionRequest()
-        let task = try await SessionModelFixtures.startPermission(on: model, request)
+        let task = SessionModelFixtures.startPermission(on: model, request)
 
         // The pending state carries the whole request, so the UI can show the
         // options and the subject context.
@@ -91,7 +91,7 @@ struct SessionModelPendingTests {
 
     @Test func cancellingTheAgentCallAnswersCancelledAndClearsThePermission() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await SessionModelFixtures.startPermission(on: model)
+        let task = SessionModelFixtures.startPermission(on: model)
 
         // Task cancellation is how the connection delivers the agent's
         // withdrawal. The await returns only when the continuation resumed, so
@@ -105,7 +105,7 @@ struct SessionModelPendingTests {
 
     @Test func cancellingFromTheUIAnswersCancelledAndClearsThePermission() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await SessionModelFixtures.startPermission(on: model)
+        let task = SessionModelFixtures.startPermission(on: model)
 
         let pending = try #require(model.pendingPermissions.first)
         await model.cancelPermission(pending.id)
@@ -117,7 +117,7 @@ struct SessionModelPendingTests {
 
     @Test func aSecondResolutionOfOnePermissionChangesNothing() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let task = try await SessionModelFixtures.startPermission(on: model)
+        let task = SessionModelFixtures.startPermission(on: model)
         let pending = try #require(model.pendingPermissions.first)
 
         await model.selectPermission(pending.id, option: allowOptionId)
@@ -132,8 +132,8 @@ struct SessionModelPendingTests {
 
     @Test func twoOverlappingPermissionsResolveIndependently() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let firstTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
-        let secondTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
+        let firstTask = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
+        let secondTask = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
 
         // More than one outstanding request is supported, in arrival order.
         #expect(model.pendingPermissions.map(\.request.title) == ["First?", "Second?"])
@@ -307,7 +307,7 @@ struct SessionModelPendingTests {
 
     @Test func cancelAllPendingAnswersEveryItem() async throws {
         let (model, entry) = try modelWithToolCall()
-        let permissionTask = try await SessionModelFixtures.startPermission(on: model)
+        let permissionTask = SessionModelFixtures.startPermission(on: model)
         let formTask = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
         let urlTask = try await startElicitation(
             on: model,
@@ -333,8 +333,8 @@ struct SessionModelPendingTests {
     @Test func cancelAnswersEachPendingPermissionWithCancelled() async throws {
         let sender = FakeSessionRequestSender()
         let model = SessionModel(sessionId: testSession, requestSender: sender)
-        let firstTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
-        let secondTask = try await SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
+        let firstTask = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "First?"))
+        let secondTask = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "Second?"))
 
         try await model.cancel()
 
@@ -366,7 +366,7 @@ struct SessionModelPendingTests {
         let sender = FakeSessionRequestSender()
         sender.failCancels(with: ConnectionError.closed)
         let model = SessionModel(sessionId: testSession, requestSender: sender)
-        let task = try await SessionModelFixtures.startPermission(on: model)
+        let task = SessionModelFixtures.startPermission(on: model)
 
         await #expect(throws: ConnectionError.closed) {
             try await model.cancel()

@@ -28,7 +28,7 @@ import Observation
 public final class ConnectionModel {
     /// The state of the connection. The model starts in
     /// ``ConnectionState/disconnected``.
-    public private(set) var state: ConnectionState = .disconnected
+    public internal(set) var state: ConnectionState = .disconnected
 
     /// The model of each open session, in registration order.
     ///

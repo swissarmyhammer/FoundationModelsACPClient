@@ -484,7 +484,7 @@ struct SessionModelStreamTests {
     @Test func aPendingPermissionStaysPendingAcrossAReplay() async throws {
         let model = SessionModelFixtures.immediateModel()
         replayFixture(into: model)
-        let permission = try await SessionModelFixtures.startPermission(on: model)
+        let permission = SessionModelFixtures.startPermission(on: model)
 
         replayFixture(compactedRecord, into: model)
 

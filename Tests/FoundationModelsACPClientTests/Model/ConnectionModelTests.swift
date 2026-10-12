@@ -351,7 +351,7 @@ struct ConnectionModelTests {
         _ = await model.connect(over: clientEnd)
         let session = SessionModelFixtures.immediateModel()
         model.register(session)
-        let permission = try await SessionModelFixtures.startPermission(on: session)
+        let permission = SessionModelFixtures.startPermission(on: session)
 
         agentEnd.close()
 
@@ -432,7 +432,7 @@ struct ConnectionModelTests {
         let connected = await ConnectedModel()
         try await connected.initialize()
         let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
-        let permission = try await SessionModelFixtures.startPermission(on: session)
+        let permission = SessionModelFixtures.startPermission(on: session)
 
         await connected.model.disconnect()
 
