@@ -1,8 +1,32 @@
 name: CI
 
-# This package is a library, and each of its tests runs in process. So CI runs
-# the one unit suite of the root `Package.swift`, and there is no integration
-# package.
+# Delegates to the shared swift-ci workflow, the same as the sibling packages.
+#
+# The org test contract (`docs/swift-ci.md` of swissarmyhammer/workflows)
+# applies here in full, and this repository satisfies it with Shape 2, a
+# nested integration package:
+#
+# - `swift test` at the root runs each unit test of this repository, and only
+#   unit tests. Each unit test runs in process, against an in-memory or a
+#   scripted stub agent. The one test that needs a real external system lives
+#   in the nested `IntegrationTests/` package. The root manifest does not name
+#   that package, so the root run cannot see it.
+# - No environment variable selects a suite. The package path selects the
+#   suite by the build graph.
+# - The unit job of the shared workflow builds the nested package on each run,
+#   because the root build does not compile it, and a broken integration test
+#   must not stay unseen between runs. The integration job then builds and runs
+#   that package, after the unit job.
+# - The integration test drives this library against a real agent:
+#   `RoutedACPAgent` of FoundationModelsACPAgent, in process, with the real
+#   model `mlx-community/Qwen3-4B-4bit` and greedy decoding. The test loads a
+#   model, so `integration-no-parallel` holds the run to one test at a time.
+# - MLX is in the dependency graph of the integration package, through the
+#   agent and FoundationModelsRouter. MLX needs its shader library for the
+#   model. Thus this workflow gives `integration-metallib-glob`, the same as
+#   the sibling packages: the shared workflow copies the `default.metallib`
+#   that SwiftPM puts in the Cmlx bundle beside each `.xctest` bundle before
+#   the run.
 
 on:
   push:
@@ -17,3 +41,7 @@ concurrency:
 jobs:
   unit:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
+    with:
+      integration-package-path: IntegrationTests
+      integration-no-parallel: true
+      integration-metallib-glob: "*Cmlx*/default.metallib"
