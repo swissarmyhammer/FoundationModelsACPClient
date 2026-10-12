@@ -526,18 +526,11 @@ extension MCPServer {
         case .stdio(let configuration):
             (configuration.name, MCPServerTransport.stdio.rawValue)
         case .unknown(let transport, let payload):
-            (payload.nameMember, transport)
+            (payload.stringMember(Self.nameMember), transport)
         }
     }
-}
 
-extension JSONValue {
-    /// The string `name` member of an object, or `nil` when the value is not
-    /// an object or has no string `name` member.
-    fileprivate var nameMember: String? {
-        guard case .object(let members) = self, case .string(let name)? = members["name"] else {
-            return nil
-        }
-        return name
-    }
+    /// The name of the member that holds the name of a server in its
+    /// payload.
+    private static let nameMember = "name"
 }

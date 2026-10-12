@@ -94,10 +94,18 @@ public final class SessionModel {
 
     /// The commands that the agent advertises. `nil` means that the agent did
     /// not report commands; an empty list means that the agent has none.
+    ///
+    /// The list holds one command for each name. When the agent sends a name
+    /// more than one time, the list keeps the last command with that name in
+    /// the position of the first, and the model logs one warning.
     public private(set) var availableCommands: [AvailableCommand]?
 
     /// The configuration options of the session. `nil` means that the agent
     /// did not report options.
+    ///
+    /// The list holds one option for each id. When the agent sends an id more
+    /// than one time, the list keeps the last option with that id in the
+    /// position of the first, and the model logs one warning.
     public private(set) var configOptions: [SessionConfigOption]?
 
     /// The last usage report, or `nil` when the agent did not report usage.
@@ -240,6 +248,10 @@ public final class SessionModel {
     /// The sender of the requests of this session.
     @ObservationIgnored let requestSender: any SessionRequestSender
 
+    /// The diagnostic sink of the connection of this session. The model logs
+    /// a warning here when the agent sends a list with a repeated id.
+    @ObservationIgnored private let logger: ACPLogger
+
     /// The W3C trace context of the last `session/prompt` that this model
     /// sent, as a `_meta` value that holds only the `traceparent` and
     /// `tracestate` members. It is `nil` before the first prompt, and when
@@ -283,12 +295,15 @@ public final class SessionModel {
     ///   - now: The wall clock that gives the start time and the end time of
     ///     each transcript entry. Tests give a manual wall clock, so they do
     ///     not read the system date.
+    ///   - logger: The diagnostic sink of the connection of the session;
+    ///     never stdout.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock(),
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        logger: ACPLogger = .disabled
     ) {
         self.sessionId = sessionId
         self.requestSender = requestSender
@@ -296,6 +311,7 @@ public final class SessionModel {
         self.clock = clock
         self.elapsedTime = Self.makeElapsedTime(on: clock)
         self.timekeeper = TranscriptTimekeeper(now: now)
+        self.logger = logger
     }
 
     /// Makes a function that gives the time on a clock from now to the call.
@@ -476,8 +492,10 @@ public final class SessionModel {
         switch change {
         case .entryAdded(_, let entry): addEntry(entry)
         case .entryChanged(_, let entry): changeEntry(entry)
-        case .availableCommandsChanged(let commands): availableCommands = commands
-        case .configOptionsChanged(let options): configOptions = options
+        case .availableCommandsChanged(let commands):
+            availableCommands = commands.keepingLastOfEachID(in: "SessionModel.availableCommands", warningTo: logger)
+        case .configOptionsChanged(let options):
+            configOptions = options.keepingLastOfEachID(in: "SessionModel.configOptions", warningTo: logger)
         case .usageChanged(let report): usage = report
         case .agentStateChanged(let state): changeAgentState(state)
         case .sessionInfoChanged(let info): changeSessionInfo(info)

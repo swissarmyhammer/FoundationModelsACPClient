@@ -68,20 +68,23 @@ enum SessionModelFixtures {
     ///     chunk at once.
     ///   - clock: The clock that schedules the coalesced flushes.
     ///   - now: The wall clock that gives the time of each transcript entry.
+    ///   - logger: The diagnostic sink of the model.
     /// - Returns: The model.
     @MainActor
     static func makeModel(
         sender: FakeSessionRequestSender,
         cadence: Duration = .zero,
         clock: ManualClock = ManualClock(),
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        logger: ACPLogger = .disabled
     ) -> SessionModel {
         SessionModel(
             sessionId: testSession,
             requestSender: sender,
             coalescingCadence: cadence,
             clock: clock,
-            now: now
+            now: now,
+            logger: logger
         )
     }
 

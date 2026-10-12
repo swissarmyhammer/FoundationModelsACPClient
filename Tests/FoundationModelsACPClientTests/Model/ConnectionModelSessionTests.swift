@@ -517,6 +517,19 @@ struct ConnectionModelSessionTests {
         #expect(session.availableCommands == SessionFactoryFixtures.commands)
     }
 
+    @Test func aRepeatedCommandOfTheAnswerGivesOneWarningOnTheConnectionLogger() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionFactoryFixtures.connect(
+            logger: ACPLogger { messages.append($0) },
+            newSessionCommands: SessionFactoryFixtures.commands + SessionFactoryFixtures.commands
+        )
+
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+
+        #expect(session.availableCommands == SessionFactoryFixtures.commands)
+        #expect(messages.elements.filter { $0.contains("SessionModel.availableCommands") }.count == 1)
+    }
+
     @Test func newSessionWithNoConnectionThrowsClosed() async {
         let model = ConnectionModel()
 

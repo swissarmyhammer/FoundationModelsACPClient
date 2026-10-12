@@ -255,6 +255,28 @@ struct ConnectionModelInitializeTests {
         #expect(connected.model.canLogout)
     }
 
+    @Test func aRepeatedAuthMethodKeepsOneMethodAndLogsOneWarning() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let renamedAgentMethod = AuthMethod.agent(
+            AuthMethodAgent(methodId: InitializeFixtures.agentMethodId, name: "API key, renamed")
+        )
+        let connected = await ConnectedModel(model: ConnectionModel(logger: ACPLogger { messages.append($0) })) {
+            ScriptedStubAgent(
+                connection: $0,
+                session: testSession,
+                script: [],
+                authMethods: [InitializeFixtures.agentMethod, InitializeFixtures.terminalMethod, renamedAgentMethod]
+            )
+        }
+
+        try await connected.initialize()
+
+        let unique = [renamedAgentMethod, InitializeFixtures.terminalMethod]
+        #expect(connected.model.authMethods == unique)
+        #expect(connected.model.authState == .required(unique))
+        #expect(messages.elements.filter { $0.contains("ConnectionModel.authMethods") }.count == 1)
+    }
+
     @Test func noAuthMethodsAllowsNeither() async throws {
         let connected = await ConnectedModel()
 

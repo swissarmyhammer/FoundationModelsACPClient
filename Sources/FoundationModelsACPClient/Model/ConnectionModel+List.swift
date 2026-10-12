@@ -54,7 +54,9 @@ extension ConnectionModel {
 
     /// Sends `session/list` for the next page, with the cursor and the
     /// working directory of the last page, and appends that page to
-    /// ``sessions``.
+    /// ``sessions``. An item of the page whose session id the list already
+    /// holds replaces the earlier item in its position, so the count of the
+    /// list does not change for it.
     ///
     /// When ``hasMoreSessions`` is `false`, the call sends nothing. A page
     /// that arrives after a refresh started, or after another page landed,
@@ -75,6 +77,11 @@ extension ConnectionModel {
     /// Sends one `session/list` request, and puts its page in ``sessions``
     /// when no refresh and no other page changed the list in the meantime.
     ///
+    /// The list keeps one item for each session id. An item of the page
+    /// whose session id the list already holds replaces the earlier item in
+    /// its position, and does not go at the end. When the page gives a
+    /// session id again, the call logs one warning on the connection logger.
+    ///
     /// - Parameters:
     ///   - request: The list request.
     ///   - connection: The connection that sends the request.
@@ -89,10 +96,11 @@ extension ConnectionModel {
         let page = try await sendRecordingAuth(request) { try await connection.listSessions($0) }
         guard generation == sessionListGeneration else { return }
         sessionListGeneration += 1
-        switch merge {
-        case .replace: sessions = page.sessions
-        case .append: sessions.append(contentsOf: page.sessions)
+        let merged = switch merge {
+        case .replace: page.sessions
+        case .append: sessions + page.sessions
         }
+        sessions = merged.keepingLastOfEachID(in: "ConnectionModel.sessions", warningTo: connectionLogger)
         sessionListCursor = page.nextCursor
     }
 

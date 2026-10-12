@@ -37,6 +37,10 @@ extension ConnectionModel {
 
     /// The auth methods of the agent. The list is empty before
     /// ``initialize(_:)`` succeeds, and when the agent lists none.
+    ///
+    /// The list holds one method for each method id. When the agent lists a
+    /// method id more than one time, the list keeps the last method with that
+    /// id in the position of the first, and the model logs one warning.
     public var authMethods: [AuthMethod] {
         initializeResponse?.authMethods ?? []
     }
@@ -157,6 +161,8 @@ extension ConnectionModel {
     /// The answer sets ``initializeResponse``, each capability flag, and
     /// ``authState``: ``AuthState/notRequired`` when the agent lists no auth
     /// method, and ``AuthState/required(_:)`` with the methods otherwise.
+    /// ``initializeResponse`` holds one auth method for each method id; see
+    /// ``authMethods``. The call returns the answer as the agent sent it.
     ///
     /// After a successful ``loginWithTerminal(_:runner:)``, when the answer
     /// still lists that `terminal` method, ``authState`` becomes
@@ -174,10 +180,29 @@ extension ConnectionModel {
     public func initialize(_ request: InitializeRequest) async throws -> InitializeResponse {
         let connection = try openConnection()
         let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
-        initializeResponse = response
+        initializeResponse = keepingOneAuthMethodForEachID(in: response)
         hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
         return response
+    }
+
+    /// Gives a copy of an `initialize` answer with one auth method for each
+    /// method id, and logs one warning when the agent lists a method id more
+    /// than one time.
+    ///
+    /// The last method with a method id goes in the position of the first
+    /// method with that id. Each other field of the copy is as the agent sent
+    /// it.
+    ///
+    /// - Parameter response: The answer of the agent.
+    /// - Returns: The copy of `response`, with unique auth methods.
+    private func keepingOneAuthMethodForEachID(in response: InitializeResponse) -> InitializeResponse {
+        var kept = response
+        kept.authMethods = response.authMethods?.keepingLastOfEachID(
+            in: "ConnectionModel.authMethods",
+            warningTo: connectionLogger
+        )
+        return kept
     }
 
     // MARK: - Auth

@@ -22,7 +22,8 @@ import Observation
 ///
 /// Each session model that the connection makes gets the coalescing cadence,
 /// the clock, and the wall clock given to
-/// ``init(coalescingCadence:clock:now:logger:)``.
+/// ``init(coalescingCadence:clock:now:logger:)``, and the diagnostic sink of
+/// the connection.
 @MainActor @Observable
 public final class ConnectionModel {
     /// The state of the connection. The model starts in
@@ -37,6 +38,10 @@ public final class ConnectionModel {
     /// ``loadMoreSessions()`` appends to it, ``deleteSession(_:)`` removes
     /// an item, and a `session_info_update` of an open session patches its
     /// item.
+    ///
+    /// The list holds one item for each session id. When a page gives a
+    /// session id that the list already holds, the new item replaces the
+    /// earlier item in its position, and the model logs one warning.
     public internal(set) var sessions: [SessionInfo] = []
 
     /// The cursor of the next `session/list` page, or `nil` when the last
@@ -54,7 +59,8 @@ public final class ConnectionModel {
 
     /// The answer of the agent to the last `initialize` of the open
     /// connection, or `nil` before ``initialize(_:)`` succeeds. Each new
-    /// connection sets it back to `nil`.
+    /// connection sets it back to `nil`. Its auth methods hold one method for
+    /// each method id; see ``authMethods``.
     public internal(set) var initializeResponse: InitializeResponse?
 
     /// The auth state of the connection. It is ``AuthState/unknown`` before
@@ -333,8 +339,8 @@ public final class ConnectionModel {
     }
 
     /// Makes the model of a session, with the coalescing cadence, the clock,
-    /// and the wall clock of this connection. The model is not open until
-    /// ``register(_:)`` adds it.
+    /// the wall clock, and the diagnostic sink of this connection. The model
+    /// is not open until ``register(_:)`` adds it.
     ///
     /// The model tells this connection model each change of its
     /// ``SessionModel/sessionInfo``, so the item of the session in
@@ -350,7 +356,8 @@ public final class ConnectionModel {
             requestSender: requestSender,
             coalescingCadence: coalescingCadence,
             clock: clock,
-            now: now
+            now: now,
+            logger: connectionLogger
         )
         model.sessionInfoDidChange = { [weak self] sessionId, info in
             self?.patchListedSession(sessionId, with: info)

@@ -44,6 +44,34 @@ private enum SessionListFixtures {
         secondPageCursor: secondPage,
     ]
 
+    /// The title that a later page gives the test session.
+    static let updatedTitle = "Updated title"
+
+    /// The test session, as a later page lists it again with a new title.
+    static let updatedFirstItem = SessionInfo(cwd: workingDirectory, sessionId: testSession, title: updatedTitle)
+
+    /// A last page that lists the test session of the first page again.
+    static let repeatingSecondPage = ListSessionsResponse(sessions: [updatedFirstItem, secondItem])
+
+    /// Two pages whose second page repeats the test session of the first
+    /// page, keyed by the cursor that asks for each one.
+    static let pagesWithRepeat: [SessionListCursor?: ListSessionsResponse] = [
+        nil: firstPage,
+        secondPageCursor: repeatingSecondPage,
+    ]
+
+    /// One last page that lists the test session two times.
+    static let pageWithRepeat: [SessionListCursor?: ListSessionsResponse] = [
+        nil: ListSessionsResponse(sessions: [firstItem, secondItem, updatedFirstItem])
+    ]
+
+    /// The list that the model keeps from each repeat of the test session:
+    /// the last item of the test session in its first position.
+    static let listAfterRepeat = [updatedFirstItem, secondItem]
+
+    /// The name of the list in the warning for a repeated session.
+    static let sessionsListName = "ConnectionModel.sessions"
+
     /// The new-session request that opens the test session.
     static let newSessionRequest = NewSessionRequest(cwd: workingDirectory)
 
@@ -78,22 +106,28 @@ private enum SessionListFixtures {
     ///   - gates: The gate that must open before the page of a cursor
     ///     answers, keyed by that cursor.
     ///   - promptScript: The updates the agent sends during each prompt turn.
+    ///   - pages: The page that `session/list` answers, keyed by the cursor
+    ///     of the request.
+    ///   - logger: The diagnostic sink of the model.
     /// - Returns: The connected model, after `initialize`.
     /// - Throws: Whatever `initialize` threw.
     @MainActor
     static func connect(
         capabilities: AgentCapabilities = InitializeFixtures.fullCapabilities,
         gates: [SessionListCursor?: UpdateGate] = [:],
-        promptScript: [SessionUpdate] = []
+        promptScript: [SessionUpdate] = [],
+        pages: [SessionListCursor?: ListSessionsResponse] = twoPages,
+        logger: ACPLogger = .disabled
     ) async throws -> ConnectedModel {
-        let connected = await ConnectedModel(model: ConnectionModel(coalescingCadence: .zero)) { connection in
+        let model = ConnectionModel(coalescingCadence: .zero, logger: logger)
+        let connected = await ConnectedModel(model: model) { connection in
             ScriptedStubAgent(
                 connection: connection,
                 session: testSession,
                 script: promptScript,
                 closeSessionError: nil,
                 capabilities: capabilities,
-                sessionListPages: twoPages,
+                sessionListPages: pages,
                 sessionListGates: gates
             )
         }
@@ -178,6 +212,46 @@ struct ConnectionModelListTests {
 
         #expect(connected.model.sessions == [SessionListFixtures.firstItem])
         #expect(connected.model.hasMoreSessions)
+    }
+
+    // MARK: - One item for each session id
+
+    @Test func aPageThatRepeatsAnEarlierSessionUpdatesItInItsPosition() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionListFixtures.connect(
+            pages: SessionListFixtures.pagesWithRepeat,
+            logger: ACPLogger { messages.append($0) }
+        )
+        try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
+
+        try await connected.model.loadMoreSessions()
+
+        #expect(connected.model.sessions == SessionListFixtures.listAfterRepeat)
+        #expect(messages.elements.filter { $0.contains(SessionListFixtures.sessionsListName) }.count == 1)
+    }
+
+    @Test func aPageThatListsASessionTwoTimesKeepsTheLastItemInTheFirstPosition() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionListFixtures.connect(
+            pages: SessionListFixtures.pageWithRepeat,
+            logger: ACPLogger { messages.append($0) }
+        )
+
+        try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
+
+        #expect(connected.model.sessions == SessionListFixtures.listAfterRepeat)
+        #expect(messages.elements.filter { $0.contains(SessionListFixtures.sessionsListName) }.count == 1)
+    }
+
+    @Test func pagesWithNoRepeatLogNoWarning() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = try await SessionListFixtures.connect(logger: ACPLogger { messages.append($0) })
+
+        try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
+        try await connected.model.loadMoreSessions()
+
+        #expect(connected.model.sessions == [SessionListFixtures.firstItem, SessionListFixtures.secondItem])
+        #expect(!messages.elements.contains { $0.contains(SessionListFixtures.sessionsListName) })
     }
 
     // MARK: - session_info_update
