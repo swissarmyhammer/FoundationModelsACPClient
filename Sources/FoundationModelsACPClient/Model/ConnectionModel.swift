@@ -30,8 +30,21 @@ public final class ConnectionModel {
     /// ``ConnectionState/disconnected``.
     public private(set) var state: ConnectionState = .disconnected
 
-    /// The model of each open session, keyed by its session id.
-    public private(set) var openSessions: [SessionId: SessionModel] = [:]
+    /// The model of each open session, in registration order.
+    ///
+    /// The list holds one model for each session id, so a SwiftUI view can
+    /// use `ForEach(connection.openSessions)` and open one window for each
+    /// new model. A new session goes at the end. A model for a session that
+    /// the list already holds replaces the earlier model in its position. The
+    /// close of a session removes its model, and the other models keep their
+    /// order. ``session(for:)`` finds the model of a session id.
+    public private(set) var openSessions: [SessionModel] = []
+
+    /// The position of each model of ``openSessions``, keyed by its session
+    /// id. ``register(_:)``, ``unregister(_:)``, and the close of the
+    /// connection keep it in agreement with ``openSessions``, so a lookup by
+    /// id needs no search of the list.
+    @ObservationIgnored private var openSessionPositions: [SessionId: Int] = [:]
 
     /// The sessions that the `session/list` pages of the last refresh gave,
     /// in page order. ``refreshSessions(cwd:)`` replaces the list,
@@ -303,8 +316,9 @@ public final class ConnectionModel {
     /// The close of a model cancels each of its pending permission requests
     /// and elicitations.
     private func closeOpenSessions() {
-        let closing = openSessions.values
+        let closing = openSessions
         openSessions.removeAll()
+        openSessionPositions.removeAll()
         for session in closing {
             session.markClosed()
         }
@@ -335,7 +349,8 @@ public final class ConnectionModel {
     /// - Parameter sessionId: The id of the session.
     /// - Returns: The model, or `nil` when the session is not open.
     public func session(for sessionId: SessionId) -> SessionModel? {
-        openSessions[sessionId]
+        guard let position = openSessionPositions[sessionId] else { return nil }
+        return openSessions[position]
     }
 
     /// Makes the model of a session, with the coalescing cadence, the clock,
@@ -365,19 +380,30 @@ public final class ConnectionModel {
         return model
     }
 
-    /// Adds a session model to ``openSessions``, keyed by its session id. A
-    /// model with the same session id goes out of the registry.
+    /// Adds a session model at the end of ``openSessions``. When the list
+    /// already holds a model with the same session id, the new model
+    /// replaces that model in its position, and the list does not get
+    /// longer.
     ///
     /// - Parameter model: The model of the open session.
     func register(_ model: SessionModel) {
-        openSessions[model.sessionId] = model
+        if let position = openSessionPositions[model.id] {
+            openSessions[position] = model
+        } else {
+            openSessionPositions[model.id] = openSessions.endIndex
+            openSessions.append(model)
+        }
     }
 
-    /// Removes the model of a session from ``openSessions``. An id that is
-    /// not open changes nothing.
+    /// Removes the model of a session from ``openSessions``. The other
+    /// models keep their order. An id that is not open changes nothing.
     ///
     /// - Parameter sessionId: The id of the session.
     func unregister(_ sessionId: SessionId) {
-        openSessions[sessionId] = nil
+        guard let position = openSessionPositions.removeValue(forKey: sessionId) else { return }
+        openSessions.remove(at: position)
+        for later in openSessions.indices[position...] {
+            openSessionPositions[openSessions[later].id] = later
+        }
     }
 }

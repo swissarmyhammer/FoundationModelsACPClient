@@ -55,9 +55,17 @@ import Observation
 /// UI only reads ``hasMissedUpdates``, ``isReplaying``, ``history``, and
 /// ``isClosed``.
 @MainActor @Observable
-public final class SessionModel {
+public final class SessionModel: Identifiable {
     /// The identifier of the session.
-    public let sessionId: SessionId
+    public nonisolated let sessionId: SessionId
+
+    /// The identity of the model: the id of its session. A
+    /// ``ConnectionModel`` holds one open model for each session id, so a
+    /// SwiftUI view can use `ForEach(connection.openSessions)` with no `id:`
+    /// key path.
+    public nonisolated var id: SessionId {
+        sessionId
+    }
 
     /// The working directory of the session: the `cwd` of the last
     /// successful `session/new` or `session/resume` request. `nil` means

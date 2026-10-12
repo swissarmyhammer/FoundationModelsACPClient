@@ -25,6 +25,30 @@ private let clockStepMilliseconds = 1
 /// deadline.
 private let clockStep: Duration = .milliseconds(clockStepMilliseconds)
 
+/// The id of a third session, for the tests of the order of the open
+/// sessions.
+private let thirdTestSession = SessionId(rawValue: "session-3")
+
+/// Three session ids, in the order that the order tests register them.
+private let threeSessionIds = [testSession, otherTestSession, thirdTestSession]
+
+extension ConnectionModel {
+    /// Makes one session model for each id, and registers each model, in
+    /// order.
+    ///
+    /// - Parameter sessionIds: The id of each session to register.
+    /// - Returns: The registered models, in registration order.
+    fileprivate func registerSessions(_ sessionIds: [SessionId]) -> [SessionModel] {
+        let sessions = sessionIds.map { sessionId in
+            makeSessionModel(sessionId: sessionId, requestSender: FakeSessionRequestSender())
+        }
+        for session in sessions {
+            register(session)
+        }
+        return sessions
+    }
+}
+
 extension ConnectionState {
     /// The error of a failed state, or `nil` for each other state.
     fileprivate var failure: (any Error)? {
@@ -259,7 +283,56 @@ struct ConnectionModelTests {
         model.register(session)
 
         #expect(model.session(for: testSession) === session)
-        #expect(Array(model.openSessions.keys) == [testSession])
+        #expect(model.openSessions.map(\.id) == [testSession])
+    }
+
+    @Test func aSessionModelIsIdentifiedByItsSessionId() {
+        let session = SessionModelFixtures.immediateModel()
+
+        #expect(session.id == session.sessionId)
+    }
+
+    @Test func theOpenSessionsAreInRegistrationOrder() {
+        let model = ConnectionModel()
+
+        let registered = model.registerSessions(threeSessionIds)
+
+        #expect(model.openSessions.map(\.id) == threeSessionIds)
+        #expect(model.openSessions.identities == registered.identities)
+    }
+
+    @Test func aSecondRegisterOfAnIdReplacesTheModelInItsPosition() {
+        let model = ConnectionModel()
+        let registered = model.registerSessions(threeSessionIds)
+        let replacement = model.makeSessionModel(sessionId: otherTestSession, requestSender: FakeSessionRequestSender())
+
+        model.register(replacement)
+
+        #expect(model.openSessions.map(\.id) == threeSessionIds)
+        #expect(model.openSessions.identities == [registered[0], replacement, registered[2]].identities)
+        #expect(model.session(for: otherTestSession) === replacement)
+    }
+
+    @Test func unregisterKeepsTheOrderOfTheOtherSessions() {
+        let model = ConnectionModel()
+        let registered = model.registerSessions(threeSessionIds)
+
+        model.unregister(otherTestSession)
+
+        #expect(model.openSessions.identities == [registered[0], registered[2]].identities)
+        #expect(model.session(for: otherTestSession) == nil)
+        #expect(model.session(for: thirdTestSession) === registered[2])
+    }
+
+    @Test func aRegisterAfterAnUnregisterReplacesTheModelInItsNewPosition() {
+        let model = ConnectionModel()
+        let registered = model.registerSessions(threeSessionIds)
+        model.unregister(testSession)
+        let replacement = model.makeSessionModel(sessionId: thirdTestSession, requestSender: FakeSessionRequestSender())
+
+        model.register(replacement)
+
+        #expect(model.openSessions.identities == [registered[1], replacement].identities)
     }
 
     @Test func anUnregisteredSessionIsNotOpen() {

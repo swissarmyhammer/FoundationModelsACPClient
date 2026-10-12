@@ -23,6 +23,23 @@ private enum SessionFactoryFixtures {
     /// The new-session request that each test sends.
     static let newSessionRequest = NewSessionRequest(cwd: workingDirectory)
 
+    /// The session ids of the first two `session/new` answers, in answer
+    /// order.
+    static let twoSessionIds = [testSession, otherTestSession]
+
+    /// Opens two sessions with `session/new`, one after the other.
+    ///
+    /// - Parameter connected: A connected model whose stub agent answers
+    ///   with ``twoSessionIds``.
+    /// - Returns: The two models, in call order.
+    /// - Throws: Whatever `newSession(_:)` threw.
+    @MainActor
+    static func openTwoSessions(on connected: ConnectedModel) async throws -> [SessionModel] {
+        let first = try await connected.model.newSession(newSessionRequest)
+        let second = try await connected.model.newSession(newSessionRequest)
+        return [first, second]
+    }
+
     /// The resume request that each test sends: the test session, with a
     /// replay from the start.
     static let resumeRequest = ResumeSessionRequest(
@@ -275,6 +292,8 @@ private enum SessionFactoryFixtures {
     ///   - afterNewSessionScript: The updates the agent sends after its
     ///     `session/new` answer.
     ///   - newSessionCommands: The command list of the `session/new` answer.
+    ///   - newSessionIds: The session id of each `session/new` answer, in
+    ///     order. When the list is empty, each answer has the test session.
     ///   - closeSessionError: The error the agent refuses each close with, or
     ///     `nil` to accept each close.
     ///   - newSessionGate: The gate that must open before the agent answers
@@ -299,6 +318,7 @@ private enum SessionFactoryFixtures {
         newSessionScript: [SessionUpdate] = [],
         afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
+        newSessionIds: [SessionId] = [],
         closeSessionError: RequestError? = nil,
         newSessionGate: UpdateGate? = nil,
         resumeSessionScript: [SessionUpdate] = [],
@@ -318,6 +338,7 @@ private enum SessionFactoryFixtures {
                 newSessionScript: newSessionScript,
                 afterNewSessionScript: afterNewSessionScript,
                 newSessionCommands: newSessionCommands,
+                newSessionIds: newSessionIds,
                 resumeSessionScript: resumeSessionScript,
                 resumeSessionCommands: resumeSessionCommands,
                 resumeSessionError: resumeSessionError,
@@ -1118,6 +1139,51 @@ struct ConnectionModelSessionTests {
         try await session.setConfigOption(SessionFactoryFixtures.setModeRequest)
 
         #expect(connected.receivedMethods.last == ClientRequestSpan.Method.setConfigOption)
+    }
+
+    // MARK: - The order of the open sessions
+
+    @Test func twoNewSessionsGiveTwoOpenModelsInCallOrder() async throws {
+        let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+
+        let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
+
+        #expect(connected.model.openSessions.map(\.id) == SessionFactoryFixtures.twoSessionIds)
+        #expect(connected.model.openSessions.identities == opened.identities)
+    }
+
+    @Test func aResumeOfAnOpenSessionAddsNoModel() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+        let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+
+        let resumed = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
+
+        #expect(resumed === session)
+        #expect(connected.model.openSessions.identities == [session].identities)
+    }
+
+    @Test func aCloseOfTheFirstModelKeepsTheSecondModel() async throws {
+        let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+        let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
+
+        try await connected.model.close(opened[0])
+
+        #expect(connected.model.openSessions.identities == [opened[1]].identities)
+        #expect(connected.model.session(for: otherTestSession) === opened[1])
+        #expect(connected.model.session(for: testSession) == nil)
+    }
+
+    @Test func aCloseOfTheConnectionEmptiesTheOpenSessions() async throws {
+        let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+        let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
+
+        connected.agentEnd.close()
+
+        try await waitUntil { connected.model.state == .disconnected }
+        #expect(connected.model.openSessions.isEmpty)
+        #expect(connected.model.session(for: testSession) == nil)
+        #expect(connected.model.session(for: otherTestSession) == nil)
+        #expect(opened.map(\.isClosed) == [true, true])
     }
 
     // MARK: - Routing of the updates

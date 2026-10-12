@@ -24,7 +24,10 @@ import Synchronization
 /// prove that an update which comes before the session id is not lost. The
 /// stub sends the `afterNewSessionScript` after the answer: the connection
 /// writes the answer first, so a test can prove that an update which follows
-/// the answer is in the model.
+/// the answer is in the model. A stub built with a list of new-session ids
+/// answers each `session/new` with the next id of that list, so a test can
+/// open more than one session. When the list is empty, the answer has the
+/// session the script belongs to.
 ///
 /// `session/resume` sends the `resumeSessionScript` as the replay, and then
 /// refuses with the error the test chose, or answers with the
@@ -232,6 +235,14 @@ final class ScriptedStubAgent: Agent {
     /// member out.
     private let newSessionCommands: [AvailableCommand]?
 
+    /// The session ids that the next `session/new` answers give, in order.
+    /// Each answer takes the first id. When the list is empty, the answer
+    /// has ``session``.
+    ///
+    /// The connection serves `session/new` on a task of its own, so the
+    /// list must tolerate a change from a thread other than the test body's.
+    private let remainingNewSessionIds: Mutex<[SessionId]>
+
     /// The updates to send, in order, as the replay of a `session/resume`,
     /// before its answer.
     private let resumeSessionScript: [SessionUpdate]
@@ -347,6 +358,8 @@ final class ScriptedStubAgent: Agent {
     ///     answer.
     ///   - newSessionCommands: The command list of the `session/new` answer,
     ///     or `nil` to leave the member out.
+    ///   - newSessionIds: The session id of each `session/new` answer, in
+    ///     order. When the list is empty, the answer has `session`.
     ///   - resumeSessionScript: The updates to send as the replay of a
     ///     `session/resume`, before its answer.
     ///   - resumeSessionCommands: The command list of the `session/resume`
@@ -389,6 +402,7 @@ final class ScriptedStubAgent: Agent {
         newSessionScript: [SessionUpdate] = [],
         afterNewSessionScript: [SessionUpdate] = [],
         newSessionCommands: [AvailableCommand]? = nil,
+        newSessionIds: [SessionId] = [],
         resumeSessionScript: [SessionUpdate] = [],
         resumeSessionCommands: [AvailableCommand]? = nil,
         resumeSessionError: RequestError? = .methodNotFound(ClientRequestSpan.Method.resumeSession),
@@ -419,6 +433,7 @@ final class ScriptedStubAgent: Agent {
         self.newSessionScript = newSessionScript
         self.afterNewSessionScript = afterNewSessionScript
         self.newSessionCommands = newSessionCommands
+        remainingNewSessionIds = Mutex(newSessionIds)
         self.resumeSessionScript = resumeSessionScript
         self.resumeSessionCommands = resumeSessionCommands
         self.resumeSessionError = resumeSessionError
@@ -474,7 +489,17 @@ final class ScriptedStubAgent: Agent {
             try await send(update)
         }
         sendAfterTheAnswer(afterNewSessionScript)
-        return NewSessionResponse(sessionId: session, availableCommands: newSessionCommands)
+        return NewSessionResponse(sessionId: takeNewSessionId(), availableCommands: newSessionCommands)
+    }
+
+    /// Takes the session id of the next `session/new` answer.
+    ///
+    /// - Returns: The first id of ``remainingNewSessionIds``, which the call
+    ///   removes, or ``session`` when the list is empty.
+    private func takeNewSessionId() -> SessionId {
+        remainingNewSessionIds.withLock { ids in
+            ids.isEmpty ? session : ids.removeFirst()
+        }
     }
 
     func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {

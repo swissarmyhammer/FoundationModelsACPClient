@@ -135,7 +135,7 @@ extension ConnectionModel {
     public func deleteSession(_ sessionId: SessionId) async throws {
         try requireCapability(canDeleteSessions, method: ClientRequestSpan.Method.deleteSession)
         let connection = try openConnection()
-        if let open = openSessions[sessionId] {
+        if let open = session(for: sessionId) {
             try await close(open)
         }
         _ = try await sendRecordingAuth(DeleteSessionRequest(sessionId: sessionId)) {

@@ -13,6 +13,14 @@ import Foundation
 // The builders are static members of a namespace, so every function belongs
 // to a type and no function stands alone at file scope.
 
+extension Array where Element: AnyObject {
+    /// The object identity of each element, in order. Two lists with equal
+    /// identities hold the same instances in the same order.
+    var identities: [ObjectIdentifier] {
+        map(ObjectIdentifier.init)
+    }
+}
+
 /// The shared fixtures and model builders of the `SessionModel` tests.
 enum SessionModelFixtures {
     /// The buffered cadence, in milliseconds.

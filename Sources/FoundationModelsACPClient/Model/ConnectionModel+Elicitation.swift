@@ -105,7 +105,7 @@ extension ConnectionModel {
     ///   `false` when nothing changed.
     func completeElicitation(elicitationId: ElicitationId) -> Bool {
         // The `where` clause closes the elicitation when the session holds it.
-        for session in openSessions.values where session.completeElicitation(elicitationId: elicitationId) {
+        for session in openSessions where session.completeElicitation(elicitationId: elicitationId) {
             return true
         }
         return elicitations.complete(elicitationId: elicitationId) != nil

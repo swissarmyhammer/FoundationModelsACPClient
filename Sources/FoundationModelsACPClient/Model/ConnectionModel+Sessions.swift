@@ -145,7 +145,7 @@ extension ConnectionModel {
     private func resumeInTurn(_ request: ResumeSessionRequest) async throws -> SessionModel {
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
-        if let open = openSessions[sent.sessionId] {
+        if let open = self.session(for: sent.sessionId) {
             try await replay(sent, into: open, over: connection)
             return open
         }
