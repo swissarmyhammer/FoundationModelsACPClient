@@ -50,8 +50,24 @@ comments:
     - evidence: test(integration): add live-agent test and run it in CI (local commit, not pushed)
     - next: review
   timestamp: 2026-10-12T21:24:16.078442+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4s0484mcmvsn2hhpdj4msnf
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (3a82905). 0 findings, 0 confirmed, 0 refuted. 7 validator pairs attempted, 0 failed. 3 files reviewed. 4 .kanban files not reviewed (.reviewignore).
+    - next: none. The task is in done.
+  timestamp: 2026-10-12T21:26:02.644101+00:00
+- actor: claude-code
+  id: 01m4s04jngpp6feghwvazr85p9
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files
+    - test: green — root swift test 533 passed; IntegrationTests 1 passed
+    - commit: 3a82905
+    - review: clean — 0 findings
+  timestamp: 2026-10-12T21:26:13.424316+00:00
+position_column: done
+position_ordinal: f080
 title: 'CI: add one simple integration test in a nested IntegrationTests package, and always run it'
 ---
 ## Problem
