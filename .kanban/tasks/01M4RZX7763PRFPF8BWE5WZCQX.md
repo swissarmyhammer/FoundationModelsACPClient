@@ -41,8 +41,30 @@ comments:
     - known warning, tracked elsewhere: MLX "missing creator for mutated node" (one line in each run). Not changed.
     - next: review and commit.
   timestamp: 2026-10-12T23:02:55.184294+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4s5scvz05zjtajdxb7ft4tw
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 14638cb). 0 findings, 0 confirmed, 0 refuted. 6 files reviewed. 2 `.kanban/` files not reviewed (`.reviewignore`).
+    - metallib check (removal of `integration-metallib-glob` from `.github/workflows/ci.yml`):
+      - The copy step of the shared `swift-ci.yaml` copies the metallib only beside the `.xctest` bundles below `IntegrationTests/.build`. It runs before the tests. The test builds the helper into `IntegrationTests/LiveAgentServer/.build`, during the test. Thus the copy step cannot reach the helper, with or without the glob.
+      - `swift build` puts `mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib` beside the executable in the bin path. Local check: `IntegrationTests/LiveAgentServer/.build/debug` links to `out/Products/Debug`, and that directory holds `live-agent-server` and `mlx-swift_Cmlx.bundle` with `default.metallib`. The `.xctest` case needs the copy because the main bundle of a test is the test runner. For a command-line executable, the main bundle is the directory of the executable, and MLX finds the Cmlx bundle there.
+      - The integration job runs on `[self-hosted, macOS]`. The sibling packages use the glob `*Cmlx*/default.metallib` in that job. This shows that SwiftPM on that runner makes `default.metallib` in the Cmlx bundle.
+      - The cold local run (`swift test --package-path IntegrationTests`, 1 test passed, 95.8 s) loaded the real model in the helper. This shows that the helper finds the metallib.
+      - Result: the helper finds `default.metallib` on the CI runner. The removal of the glob is correct. Open item: the first CI run after this push must show the integration job green.
+    - next: none. Task is in done.
+  timestamp: 2026-10-12T23:04:58.495045+00:00
+- actor: claude-code
+  id: 01m4s5sryy9th8mfh8krncn0ef
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 6 files (new helper package IntegrationTests/LiveAgentServer, LiveAgentServerBuild.swift, LiveAgentTurnTests.swift, IntegrationTests/Package.swift, ci.yml)
+    - test: green — swift test 533 passed; swift test --package-path IntegrationTests 1 passed; 0 "Conflicting identity" warnings
+    - commit: 14638cb
+    - review: clean — 0 findings
+  timestamp: 2026-10-12T23:05:10.878803+00:00
+position_column: done
+position_ordinal: f180
 title: Remove the SwiftPM "Conflicting identity for foundationmodelsacpclient" warning of the IntegrationTests package
 ---
 ## Problem
