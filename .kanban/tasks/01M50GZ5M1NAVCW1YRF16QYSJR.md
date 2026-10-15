@@ -1,8 +1,20 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8180'
+comments:
+- actor: claude-code
+  id: 01m50hga3xczhgfv6es5v5fdx6
+  text: |-
+    ### implement — changed
+    - New `public enum PendingRequest: Identifiable, Hashable, Sendable` with `permission(PendingPermissionRequest)` and `elicitation(PendingElicitation)`. The id is the UUID of the item.
+    - `PendingArrivalCounter` (main actor) gives each item a number when its call suspends. `PendingRequestQueue` records the number and gives `requestsWithArrival(_:)`.
+    - `SessionModel.pendingRequests` merges both queues in arrival order. `ConnectionModel.pendingRequests` has the same shape and holds the request-scoped elicitations.
+    - The typed lists `pendingPermissions` and `pendingElicitations` do not change.
+    - Tests: `pendingRequestsGivesBothKindsInArrivalOrder` (P1, E1, P2), `aResolutionKeepsTheOrderOfTheOtherRequestsAndTheTypedLists`, `anArrivalAndAResolutionEachFireTheObservationOfPendingRequests`, `pendingRequestsGivesEachRequestScopedElicitationInArrivalOrder`.
+    - Full run: 559 tests in 44 suites pass. IntegrationTests builds.
+  timestamp: 2026-10-15T19:44:24.701469+00:00
+position_column: done
+position_ordinal: ff8380
 title: 'Elicitation phase 6, task 30: one FIFO list of the pending permissions and elicitations of a session'
 ---
 Source: elicitation-plan.md task 30 and section 4 (one deck, one FIFO order by arrival time).

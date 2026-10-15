@@ -145,6 +145,20 @@ struct ConnectionModelElicitationTests {
         try await harness.finish(login)
     }
 
+    @Test func pendingRequestsGivesEachRequestScopedElicitationInArrivalOrder() async throws {
+        let harness = await LoginHarness()
+        let (login, requestId) = try await harness.startLogin()
+        let call = try await harness.startElicitation(naming: requestId)
+
+        let pending = try #require(harness.model.pendingElicitations.first)
+        #expect(harness.model.pendingRequests == [.elicitation(pending)])
+
+        harness.model.cancelElicitation(pending.id)
+        #expect(harness.model.pendingRequests.isEmpty)
+        #expect(try await call.value == ElicitationResponseWire.cancelResponse)
+        try await harness.finish(login)
+    }
+
     // MARK: - Replies
 
     @Test func acceptResumesTheAgentOneTimeWithTheContent() async throws {

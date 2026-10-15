@@ -35,6 +35,21 @@ extension SessionModel {
         elicitations.items
     }
 
+    /// The permission requests and the session-scoped elicitations that wait
+    /// for the user's answer, in one list, in arrival order.
+    ///
+    /// This list holds the same items as ``pendingPermissions`` and
+    /// ``pendingElicitations``. A resolution removes the item from this list
+    /// and from its typed list, and the other items keep their order. Resolve
+    /// each item through its typed call, for example
+    /// ``selectPermission(_:option:)`` or ``acceptElicitation(_:content:)``.
+    public var pendingRequests: [PendingRequest] {
+        PendingRequest.inArrivalOrder([
+            permissions.requestsWithArrival(PendingRequest.permission),
+            elicitations.requestsWithArrival(PendingRequest.elicitation),
+        ])
+    }
+
     // MARK: - Permissions
 
     /// Registers the "written" signal of one permission response.

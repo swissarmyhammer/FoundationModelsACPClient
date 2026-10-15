@@ -28,6 +28,18 @@ extension ConnectionModel {
         elicitations.items
     }
 
+    /// The requests that wait for the user's answer, in one list, in arrival
+    /// order.
+    ///
+    /// The connection model holds only the request-scoped elicitations, so
+    /// this list holds the same items as ``pendingElicitations``, each as
+    /// ``PendingRequest/elicitation(_:)``. It has the same shape as
+    /// ``SessionModel/pendingRequests``, so a UI can show the queue of a
+    /// session and the queue of the connection with one view.
+    public var pendingRequests: [PendingRequest] {
+        PendingRequest.inArrivalOrder([elicitations.requestsWithArrival(PendingRequest.elicitation)])
+    }
+
     /// Gives the reason to refuse an elicitation at once, because the last
     /// successful ``initialize(_:)`` did not advertise its mode.
     ///

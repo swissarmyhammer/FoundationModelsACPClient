@@ -29,6 +29,11 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// storage is not observable; the UI binds to ``items`` instead.
     @ObservationIgnored private let calls: KeyedWaiters<UUID, Response>
 
+    /// The arrival number of each item in ``items``, keyed by the item id.
+    /// The number comes from ``PendingArrivalCounter`` when the call
+    /// suspends.
+    @ObservationIgnored private var arrivals: [UUID: UInt64] = [:]
+
     /// The response for an item that the user did not decide.
     @ObservationIgnored private let cancelledResponse: Response
 
@@ -50,9 +55,23 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
         let id = item.id
         return await calls.wait(
             for: id,
-            onSuspend: { items.append(item) },
+            onSuspend: {
+                arrivals[id] = PendingArrivalCounter.next()
+                items.append(item)
+            },
             onCancel: { [weak self] in self?.removeItem(id) }
         )
+    }
+
+    /// Gives each item of ``items`` as a ``PendingRequest``, with its
+    /// arrival number. A read of it tracks ``items``.
+    ///
+    /// - Parameter wrap: Makes the request of one item.
+    /// - Returns: The requests, in arrival order, each with its number.
+    func requestsWithArrival(_ wrap: (Item) -> PendingRequest) -> [(arrival: UInt64, request: PendingRequest)] {
+        items.compactMap { item in
+            arrivals[item.id].map { (arrival: $0, request: wrap(item)) }
+        }
     }
 
     /// Removes one item and resumes its call with the response.
@@ -94,6 +113,7 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// - Returns: The removed item, or `nil` when no item has that id.
     @discardableResult
     private func removeItem(_ id: UUID) -> Item? {
-        items.firstIndex { $0.id == id }.map { items.remove(at: $0) }
+        arrivals[id] = nil
+        return items.firstIndex { $0.id == id }.map { items.remove(at: $0) }
     }
 }

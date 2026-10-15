@@ -328,6 +328,79 @@ struct SessionModelPendingTests {
         #expect(urlResponse == cancel)
     }
 
+    // MARK: - One list in arrival order
+
+    /// Starts a permission, an elicitation, and a second permission, in that
+    /// order.
+    ///
+    /// - Parameter model: The model that holds the requests.
+    /// - Returns: The tasks of the three calls of the agent.
+    private func startPermissionElicitationPermission(
+        on model: SessionModel
+    ) async throws -> [Task<Void, Never>] {
+        let first = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "P1"))
+        let elicitation = try await startElicitation(on: model)
+        let second = SessionModelFixtures.startPermission(on: model, SessionModelFixtures.permissionRequest(title: "P2"))
+        return [
+            Task { _ = await first.value },
+            Task { _ = await elicitation.value },
+            Task { _ = await second.value },
+        ]
+    }
+
+    @Test func pendingRequestsGivesBothKindsInArrivalOrder() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        let tasks = try await startPermissionElicitationPermission(on: model)
+        let p1 = try #require(model.pendingPermissions.first)
+        let p2 = try #require(model.pendingPermissions.last)
+        let e1 = try #require(model.pendingElicitations.first)
+
+        #expect(model.pendingRequests == [.permission(p1), .elicitation(e1), .permission(p2)])
+        #expect(model.pendingRequests.map(\.id) == [p1.id, e1.id, p2.id])
+
+        model.cancelAllPending()
+        for task in tasks { await task.value }
+    }
+
+    @Test func aResolutionKeepsTheOrderOfTheOtherRequestsAndTheTypedLists() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        let tasks = try await startPermissionElicitationPermission(on: model)
+        let p1 = try #require(model.pendingPermissions.first)
+        let p2 = try #require(model.pendingPermissions.last)
+        let e1 = try #require(model.pendingElicitations.first)
+
+        model.declineElicitation(e1.id)
+
+        #expect(model.pendingRequests == [.permission(p1), .permission(p2)])
+        #expect(model.pendingPermissions == [p1, p2])
+        #expect(model.pendingElicitations.isEmpty)
+
+        await model.cancelPermission(p1.id)
+
+        #expect(model.pendingRequests == [.permission(p2)])
+        #expect(model.pendingPermissions == [p2])
+        model.cancelAllPending()
+        for task in tasks { await task.value }
+    }
+
+    @Test func anArrivalAndAResolutionEachFireTheObservationOfPendingRequests() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        var permissionTask: Task<RequestPermissionResponse, Never>?
+
+        let arrivalFires = observationFires(reading: { _ = model.pendingRequests }) {
+            permissionTask = SessionModelFixtures.startPermission(on: model)
+        }
+        #expect(model.pendingRequests.count == 1)
+        let resolutionFires = observationFires(reading: { _ = model.pendingRequests }) {
+            model.cancelAllPending()
+        }
+
+        #expect(arrivalFires)
+        #expect(resolutionFires)
+        #expect(model.pendingRequests.isEmpty)
+        #expect(await permissionTask?.value.outcome == .cancelled)
+    }
+
     // MARK: - Cancel of the work
 
     @Test func cancelAnswersEachPendingPermissionWithCancelled() async throws {
