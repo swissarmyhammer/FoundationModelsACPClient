@@ -28,6 +28,34 @@ extension ConnectionModel {
         elicitations.items
     }
 
+    /// Gives the reason to refuse an elicitation at once, because the last
+    /// successful ``initialize(_:)`` did not advertise its mode.
+    ///
+    /// - When that `initialize` sent no `elicitation` capability (a host with
+    ///   no user, see ``ACPClient/UserPresence/headless``), the reason is
+    ///   ``ACPClient/noUserPresentReason``.
+    /// - When it advertised only the other mode, the reason is
+    ///   ``ACPClient/unadvertisedElicitationModeReason``.
+    ///
+    /// Before ``initialize(_:)`` succeeds, the model refuses nothing, so a host
+    /// that does not send `initialize` through the model keeps the routing of
+    /// earlier versions. An elicitation of a mode that the client does not know
+    /// is not refused here: the router answers it with `cancel` as before.
+    ///
+    /// - Parameter request: The elicitation request of the agent.
+    /// - Returns: The reason, or `nil` when the model routes the elicitation.
+    func refusedElicitationReason(for request: CreateElicitationRequest) -> String? {
+        guard initializeResponse != nil else { return nil }
+        guard let advertised = advertisedElicitation else { return ACPClient.noUserPresentReason }
+        let isAdvertised =
+            switch request.mode {
+            case .form: advertised.form != nil
+            case .url: advertised.url != nil
+            case .unknown: true
+            }
+        return isAdvertised ? nil : ACPClient.unadvertisedElicitationModeReason
+    }
+
     /// Suspends until the user answers or cancels a request-scoped
     /// elicitation.
     ///

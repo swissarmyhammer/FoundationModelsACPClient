@@ -10,7 +10,66 @@ public enum ACPClient {
     /// `initialize`.
     public static let supportedProtocolVersion: ProtocolVersion = .v2
 
-    /// The client capabilities that this client sends during `initialize`.
+    /// Tells whether a user is present to answer the questions of the agent.
+    ///
+    /// The host sets it when it builds the capabilities of `initialize` with
+    /// ``capabilities(for:)``. A host with a UI is ``interactive``. A host
+    /// with no UI, for example a command-line run with no terminal prompt, is
+    /// ``headless``.
+    public enum UserPresence: Sendable, Hashable {
+        /// A user is present. The client advertises both elicitation modes,
+        /// and each elicitation becomes pending state that the UI answers.
+        case interactive
+
+        /// No user is present. The client advertises no `elicitation`
+        /// capability, and answers each elicitation at once with `cancel`
+        /// and the reason ``ACPClient/noUserPresentReason``.
+        case headless
+    }
+
+    /// The reason of the `cancel` that ``ConnectionModel`` gives at once to an
+    /// elicitation when the last `initialize` sent no `elicitation`
+    /// capability. The text is the same as the reason of the headless cancel
+    /// in FoundationModelsExtras, so each layer reports the same words.
+    public static let noUserPresentReason = "no user is present"
+
+    /// The reason of the `cancel` that ``ConnectionModel`` gives at once to an
+    /// elicitation whose mode the last `initialize` did not advertise, when
+    /// it advertised the other mode.
+    public static let unadvertisedElicitationModeReason = "the client did not advertise this elicitation mode"
+
+    /// The key of the reason in the `_meta` object of an elicitation
+    /// response.
+    ///
+    /// The ACP elicitation response has no reason field, so a `cancel` that
+    /// the client gives without the user carries its reason as
+    /// `"_meta": {"reason": "<text>"}`. The key is stable; an agent can read
+    /// it.
+    public static let elicitationReasonMetaKey = "reason"
+
+    /// The client capabilities for the given user presence.
+    ///
+    /// - ``UserPresence/interactive`` gives the `elicitation` capability with
+    ///   `form` and `url`, the same value as ``advertisedCapabilities``.
+    /// - ``UserPresence/headless`` gives no `elicitation` capability, so a
+    ///   conforming agent sends no question that would wait for ever.
+    ///
+    /// Both values omit the `auth` capability; see
+    /// ``advertisedCapabilities``.
+    ///
+    /// - Parameter presence: Whether a user is present.
+    /// - Returns: The capabilities to send in `initialize`.
+    public static func capabilities(for presence: UserPresence) -> ClientCapabilities {
+        switch presence {
+        case .interactive: advertisedCapabilities
+        case .headless: ClientCapabilities()
+        }
+    }
+
+    /// The client capabilities that this client sends during `initialize`
+    /// when a user is present: the same value as
+    /// ``capabilities(for:)`` with ``UserPresence/interactive``. A host with
+    /// no UI uses ``capabilities(for:)`` with ``UserPresence/headless``.
     ///
     /// The client advertises only the modes it implements, and nothing
     /// more. ``SessionModel`` and ``ConnectionModel`` implement both

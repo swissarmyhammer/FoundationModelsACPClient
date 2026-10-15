@@ -146,6 +146,22 @@ enum ElicitationResponseWire {
         actionKey: .string(cancelAction)
     ])
 
+    /// The key of the `_meta` member.
+    static let metaKey = "_meta"
+
+    /// Makes the cancel action object with a reason in its `_meta`, under
+    /// ``ACPClient/elicitationReasonMetaKey``. The ACP elicitation response
+    /// has no reason field.
+    ///
+    /// - Parameter reason: Why the client cancelled without the user.
+    /// - Returns: The cancel action object with the reason.
+    static func cancelResponse(reason: String) -> CreateElicitationResponse {
+        .object([
+            actionKey: .string(cancelAction),
+            metaKey: .object([ACPClient.elicitationReasonMetaKey: .string(reason)]),
+        ])
+    }
+
     /// Makes the accept action object, with the content when it is given.
     ///
     /// - Parameter content: The form values, or `nil` for no content.

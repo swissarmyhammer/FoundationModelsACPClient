@@ -28,4 +28,23 @@ struct ACPClientTests {
         // to put no `terminal` entry in its `authMethods`.
         #expect(ACPClient.advertisedCapabilities.auth == nil)
     }
+
+    @Test func theCapabilitiesOfEachUserPresence() {
+        // A host with a user advertises the same value as before.
+        #expect(ACPClient.capabilities(for: .interactive) == ACPClient.advertisedCapabilities)
+
+        // A host with no user advertises no `elicitation` capability, so a
+        // conforming agent sends no question that would wait for ever.
+        let headless = ACPClient.capabilities(for: .headless)
+        #expect(headless.elicitation == nil)
+        #expect(headless.auth == nil)
+        #expect(headless == ClientCapabilities())
+    }
+
+    @Test func theNoUserReasonIsTheTextOfExtras() {
+        // FoundationModelsExtras `RunPlane.noUserPresentReason` has the same
+        // text, so each layer reports the same words.
+        #expect(ACPClient.noUserPresentReason == "no user is present")
+        #expect(ACPClient.elicitationReasonMetaKey == "reason")
+    }
 }

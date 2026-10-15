@@ -24,6 +24,12 @@ import FoundationModelsACP
 /// flight, and an elicitation of a mode that the client does not know, also
 /// log one warning.
 ///
+/// After a successful `initialize`, an elicitation of a mode that the client
+/// did not advertise goes to no model. It gets the `cancel` action at once,
+/// with the reason in `_meta` under ``ACPClient/elicitationReasonMetaKey``,
+/// and the router logs one warning. A headless host (no `elicitation`
+/// capability) gets the reason ``ACPClient/noUserPresentReason``.
+///
 /// The router ignores each `session/update`: each ``SessionModel`` reads its
 /// updates from its own subscription.
 ///
@@ -91,17 +97,26 @@ struct ModelClient: Client {
     /// Gives the elicitation to the model of its scope, and waits for the
     /// user's response.
     ///
+    /// When the last `initialize` did not advertise the mode of the
+    /// elicitation, the router gives it to no model. It answers at once with
+    /// the `cancel` action and the reason in `_meta`; see
+    /// ``ConnectionModel/refusedElicitationReason(for:)``.
+    ///
     /// - Parameter params: The elicitation request.
     /// - Returns: The user's response, or the `cancel` action when no model
     ///   can take the elicitation.
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
-        try await traceRequest(
+        let refusal = await model?.refusedElicitationReason(for: params)
+        if let refusal {
+            logger.log(Self.logPrefix + "answered cancel to an elicitation that the client did not advertise: \(refusal)")
+        }
+        return try await traceRequest(
             ClientRequestSpan.Method.createElicitation,
             sessionId: Self.sessionId(of: params),
             meta: params.meta,
-            fallback: ElicitationResponseWire.cancelResponse,
+            fallback: refusal.map(ElicitationResponseWire.cancelResponse(reason:)) ?? ElicitationResponseWire.cancelResponse,
             outcome: Self.elicitationOutcome(of:),
-            route: { await routeElicitation(params) }
+            route: { refusal == nil ? await routeElicitation(params) : nil }
         )
     }
 

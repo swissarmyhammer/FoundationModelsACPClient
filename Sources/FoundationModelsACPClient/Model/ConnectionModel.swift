@@ -107,6 +107,12 @@ public final class ConnectionModel {
     /// `false`.
     @ObservationIgnored var hasAdvertisedTerminalAuth = false
 
+    /// The `elicitation` capability that the last successful
+    /// ``initialize(_:)`` sent, or `nil` when it sent none. It is `nil`
+    /// before ``initialize(_:)`` succeeds, and each new connection sets it
+    /// back to `nil`. ``refusedElicitationReason(for:)`` reads it.
+    @ObservationIgnored var advertisedElicitation: ElicitationCapabilities?
+
     /// The open connection, or `nil` when no connection is open. A close
     /// that comes from an earlier connection changes nothing.
     @ObservationIgnored private(set) var connection: ClientSideConnection?
@@ -243,6 +249,7 @@ public final class ConnectionModel {
         initializeResponse = nil
         authState = .unknown
         hasAdvertisedTerminalAuth = false
+        advertisedElicitation = nil
         stopWatchingRequests()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger

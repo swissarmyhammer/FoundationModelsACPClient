@@ -173,6 +173,11 @@ extension ConnectionModel {
     /// `capabilities.auth.terminal`. ``loginWithTerminal(_:runner:)`` runs a
     /// method only when it does.
     ///
+    /// The model also records the `capabilities.elicitation` of `request`.
+    /// After a successful `initialize`, the model answers at once with
+    /// `cancel` and a reason each elicitation of a mode that `request` did not
+    /// advertise; see ``ACPClient/capabilities(for:)``.
+    ///
     /// - Parameter request: The initialize request.
     /// - Returns: The answer of the agent.
     /// - Throws: `ConnectionError.closed` when no connection is open, or the
@@ -182,6 +187,7 @@ extension ConnectionModel {
         let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
         initializeResponse = keepingOneAuthMethodForEachID(in: response)
         hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
+        advertisedElicitation = request.capabilities.elicitation
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
         return response
     }
