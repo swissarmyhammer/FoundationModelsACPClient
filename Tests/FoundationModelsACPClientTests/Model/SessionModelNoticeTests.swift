@@ -24,10 +24,9 @@ private let rateNotice = Notice(severity: .info, title: "The rate limit resets i
 private let arrivalMilliseconds = 250
 
 /// The notice tests, in one suite so that `swift test --filter
-/// SessionModelNoticeTests` selects them. A tap that never yields would
-/// suspend forever, so the suite has a time limit.
+/// SessionModelNoticeTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelNoticeTests {
     // MARK: - Add
 

@@ -70,12 +70,13 @@ enum ElicitationFixtures {
     ///   - isPending: Tells whether the model that must hold the
     ///     elicitation holds it.
     /// - Returns: The task of the agent's call.
-    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    /// - Throws: Nothing today. The signature keeps `throws` because
+    ///   ``waitUntil(_:)`` throws.
     @MainActor
     static func start(
         _ request: CreateElicitationRequest,
         over agentConnection: AgentSideConnection,
-        until isPending: () -> Bool
+        until isPending: @escaping @MainActor () -> Bool
     ) async throws -> Task<CreateElicitationResponse, any Error> {
         let call = Task { try await agentConnection.createElicitation(request) }
         try await waitUntil(isPending)

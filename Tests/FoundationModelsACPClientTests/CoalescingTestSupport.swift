@@ -4,13 +4,8 @@ import Synchronization
 
 // The shared helpers of the chunk-coalescing and timing tests: a manual clock
 // and a manual wall clock that move only when a test advances them, a
-// thread-safe mutation counter, an observation change counter, and a
-// cooperative wait. No test that uses them reads the wall clock.
-
-/// The highest number of cooperative yields a test waits for the scheduled
-/// flush task to run. The wait is cooperative, so no test reads the wall
-/// clock.
-private let maxYieldCount = 10_000
+// thread-safe mutation counter, an observation change counter, and an event
+// wait. No test that uses them reads the wall clock.
 
 // MARK: - A manual clock
 
@@ -119,7 +114,9 @@ final class ManualClock: Clock, Sendable {
                 }
                 switch readiness {
                 case .wait:
-                    break
+                    // The sleeper count changed, so a wait for a sleeper
+                    // reads it again.
+                    TestChangeSignal.post()
                 case .resume:
                     continuation.resume()
                 case .cancelled:
@@ -135,6 +132,7 @@ final class ManualClock: Clock, Sendable {
                 return sleeper
             }
             sleeper?.continuation.resume(throwing: CancellationError())
+            TestChangeSignal.post()
         }
     }
 
@@ -151,6 +149,7 @@ final class ManualClock: Clock, Sendable {
         for sleeper in due {
             sleeper.continuation.resume()
         }
+        TestChangeSignal.post()
     }
 }
 
@@ -218,14 +217,18 @@ final class MutationCounter: Sendable {
     }
 }
 
-/// Yields until the condition is true, or until the yield limit is reached.
+/// Waits until the condition is true, with no clock, no poll and no time
+/// limit.
+///
+/// The wait reads `condition` again after each change of the observable state
+/// that it reads, and after each ``TestChangeSignal/post()`` of a test store
+/// that is not observable, for example the sleepers of ``ManualClock``.
 ///
 /// - Parameter condition: The condition to wait for.
 @MainActor
-func yieldUntil(_ condition: () -> Bool) async {
-    var remaining = maxYieldCount
-    while remaining > 0, !condition() {
-        remaining -= 1
-        await Task.yield()
+func waitFor(_ condition: @escaping @MainActor () -> Bool) async {
+    await waitForObservation {
+        _ = TestChangeSignal.shared.generation
+        return condition()
     }
 }

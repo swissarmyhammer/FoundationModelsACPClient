@@ -24,11 +24,9 @@ private let thoughtMessageId = MessageId(rawValue: "thought-1")
 private let mixedChunks = ["Hé", "llo,  ", "\n\t", "👋🏽 ", "cafe\u{301}", "  ", "end."]
 
 /// The coalescing tests, in one suite so that `swift test --filter
-/// SessionModelCoalescingTests` selects them. A tap test that waits for an
-/// update the model never yields would suspend forever, so the suite has a
-/// time limit.
+/// SessionModelCoalescingTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelCoalescingTests {
     // MARK: - Cadence
 
@@ -44,9 +42,9 @@ struct SessionModelCoalescingTests {
         model.apply(agentChunk(text: "two"))
         #expect(model.transcript.isEmpty)
 
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
         clock.advance(by: SessionModelFixtures.bufferedCadence)
-        await yieldUntil { !model.transcript.isEmpty }
+        await waitFor { !model.transcript.isEmpty }
 
         let entry = try #require(model.transcript.first?.agentMessage)
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(agentMessageId))])

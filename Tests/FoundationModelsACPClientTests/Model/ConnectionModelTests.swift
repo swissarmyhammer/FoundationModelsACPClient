@@ -166,10 +166,9 @@ private struct AllowingClient: Client {
 }
 
 /// The connection model tests, in one suite so that `swift test --filter
-/// ConnectionModelTests` selects them. A wait for a close that never comes
-/// would suspend for ever, so the suite has a time limit.
+/// ConnectionModelTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelTests {
     /// The working directory of the session that a test opens over the wire.
     private let workingDirectory = AbsolutePath(rawValue: "/")
@@ -219,7 +218,7 @@ struct ConnectionModelTests {
 
         agentEnd.close()
 
-        #expect(await eventually { model.state == .disconnected })
+        await waitFor { model.state == .disconnected }
     }
 
     @Test func aCloseByTheHostDisconnects() async {
@@ -229,7 +228,7 @@ struct ConnectionModelTests {
 
         await connection.close()
 
-        #expect(await eventually { model.state == .disconnected })
+        await waitFor { model.state == .disconnected }
     }
 
     @Test func aFailedByteStreamFailsWithItsError() async {
@@ -239,7 +238,7 @@ struct ConnectionModelTests {
 
         transport.fail(with: ByteStreamFailure())
 
-        #expect(await eventually { model.state == .failed(ByteStreamFailure()) })
+        await waitFor { model.state == .failed(ByteStreamFailure()) }
         #expect(model.state.failure is ByteStreamFailure)
     }
 
@@ -357,7 +356,7 @@ struct ConnectionModelTests {
 
         let response = await permission.value
         #expect(response.outcome == .cancelled)
-        #expect(await eventually { model.state == .disconnected })
+        await waitFor { model.state == .disconnected }
         #expect(session.isClosed)
         #expect(session.pendingPermissions.isEmpty)
         #expect(model.openSessions.isEmpty)
@@ -378,7 +377,7 @@ struct ConnectionModelTests {
 
         agentEnd.close()
 
-        #expect(await eventually { model.state == .disconnected })
+        await waitFor { model.state == .disconnected }
         #expect(try #require(first.transcript.first?.agentMessage).content.joinedText == "left open")
         #expect(try #require(second.transcript.first?.agentMessage).content.joinedText == "also open")
     }
@@ -408,7 +407,7 @@ struct ConnectionModelTests {
 
         transport.fail(with: ByteStreamFailure())
 
-        #expect(await eventually { model.state == .failed(ByteStreamFailure()) })
+        await waitFor { model.state == .failed(ByteStreamFailure()) }
         #expect(session.isClosed)
         #expect(model.openSessions.isEmpty)
     }
@@ -462,8 +461,7 @@ struct ConnectionModelTests {
         await model.disconnect()
 
         // The stop of the client read ends the byte stream of the agent end.
-        // Without that end, this wait never ends, and the suite time limit
-        // records a time-out.
+        // Without that end, this wait never ends.
         #expect(await agentConnection.closed.isEndOfInput)
     }
 
@@ -511,7 +509,7 @@ struct ConnectionModelTests {
         let session = model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
         session.apply(agentChunk(text: "one"))
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
         clock.advance(by: SessionModelFixtures.bufferedCadence - clockStep)
 
         // The flush waits on the manual clock for the whole given cadence.
@@ -519,7 +517,7 @@ struct ConnectionModelTests {
         #expect(session.transcript.isEmpty)
 
         clock.advance(by: clockStep)
-        await yieldUntil { !session.transcript.isEmpty }
+        await waitFor { !session.transcript.isEmpty }
         #expect(session.transcript.count == 1)
     }
 }

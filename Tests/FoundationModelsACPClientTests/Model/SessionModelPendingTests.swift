@@ -42,7 +42,7 @@ private func sessionFormRequest(toolCallId: ToolCallId? = nil) -> CreateElicitat
 /// The pending-request tests, in one suite so that `swift test --filter
 /// SessionModelPendingTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelPendingTests {
     /// Starts one elicitation and waits until it is pending.
     ///
@@ -95,7 +95,7 @@ struct SessionModelPendingTests {
 
         // Task cancellation is how the connection delivers the agent's
         // withdrawal. The await returns only when the continuation resumed, so
-        // a leaked continuation makes the test time out.
+        // a leaked continuation makes the test wait for ever.
         task.cancel()
 
         let response = await task.value
@@ -339,7 +339,7 @@ struct SessionModelPendingTests {
         try await model.cancel()
 
         // The require stops the test before the awaits below, which would
-        // suspend until the time limit when a permission stays pending.
+        // suspend for ever when a permission stays pending.
         try #require(model.pendingPermissions.isEmpty)
         let firstResponse = await firstTask.value
         #expect(firstResponse.outcome == .cancelled)

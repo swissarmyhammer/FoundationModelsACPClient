@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z93G32SEN4MBR0W4NZVPP2
-position_column: todo
-position_ordinal: '8380'
+position_column: done
+position_ordinal: fb80
 title: 'T3: Remove the .timeLimit traits and each sleep, clock wait and poll in the tests'
 ---
 Mail step 6, part T3 (mailbox.md section 8, row 6).

@@ -115,10 +115,9 @@ extension SessionModel {
 }
 
 /// The stream tests, in one suite so that `swift test --filter
-/// SessionModelStreamTests` selects them. A wait for an update that never
-/// lands would suspend forever, so the suite has a time limit.
+/// SessionModelStreamTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelStreamTests {
     // MARK: - Attachment
 
@@ -627,5 +626,6 @@ private final class TerminationProbe: Sendable {
     func record(_ reason: AsyncStream<SessionStreamEvent>.Continuation.Termination) {
         guard case .cancelled = reason else { return }
         cancelled.withLock { $0 = true }
+        TestChangeSignal.post()
     }
 }

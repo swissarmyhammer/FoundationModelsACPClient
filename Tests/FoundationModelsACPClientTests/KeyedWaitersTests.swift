@@ -1,3 +1,4 @@
+import Observation
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -15,8 +16,9 @@ private let firstKey = "first"
 /// A second key, whose waiters a resume of `firstKey` must not touch.
 private let secondKey = "second"
 
-/// Records what the waiters did with the callers of one test.
-@MainActor
+/// Records what the waiters did with the callers of one test. It is
+/// observable, so a test waits for a step of the waiters with no poll.
+@MainActor @Observable
 private final class WaiterLog {
     /// The names of the callers that are in the queue, in the order they
     /// went in.
@@ -59,7 +61,7 @@ private func startWaiter(
     }
 }
 
-@MainActor @Test(.timeLimit(.minutes(1)))
+@MainActor @Test
 func keyedWaitersResumeTheWaitersOfOneKeyInCallOrder() async throws {
     let waiters = makeWaiters()
     let log = WaiterLog()
@@ -76,7 +78,7 @@ func keyedWaitersResumeTheWaitersOfOneKeyInCallOrder() async throws {
     #expect(!waiters.resumeFirst(of: firstKey, with: "three"))
 }
 
-@MainActor @Test(.timeLimit(.minutes(1)))
+@MainActor @Test
 func keyedWaitersResumeOnlyTheWaitersOfTheNamedKey() async throws {
     let waiters = makeWaiters()
     let log = WaiterLog()
@@ -89,7 +91,7 @@ func keyedWaitersResumeOnlyTheWaitersOfTheNamedKey() async throws {
     #expect(await other.value == "two")
 }
 
-@MainActor @Test(.timeLimit(.minutes(1)))
+@MainActor @Test
 func aCancelledWaiterGetsTheCancelledValueAndLeavesTheQueue() async throws {
     let waiters = makeWaiters()
     let log = WaiterLog()
@@ -103,7 +105,7 @@ func aCancelledWaiterGetsTheCancelledValueAndLeavesTheQueue() async throws {
     #expect(!waiters.resumeFirst(of: firstKey, with: "one"))
 }
 
-@MainActor @Test(.timeLimit(.minutes(1)))
+@MainActor @Test
 func aWaiterWhoseTaskWasCancelledBeforeTheCallDoesNotWait() async {
     let waiters = makeWaiters()
     let log = WaiterLog()

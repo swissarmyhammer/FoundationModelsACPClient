@@ -95,7 +95,8 @@ private struct LoginHarness {
     ///   - requestId: The wire id of the request that the elicitation names.
     ///   - makeRequest: Builds the elicitation from its request scope.
     /// - Returns: The task of the agent's call.
-    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    /// - Throws: Nothing today. The signature keeps `throws` because
+    ///   ``waitUntil(_:)`` throws.
     func startElicitation(
         naming requestId: RequestId,
         _ makeRequest: (ElicitationRequestScope) -> CreateElicitationRequest = { scope in
@@ -120,10 +121,8 @@ private struct LoginHarness {
 
 /// The request-scoped elicitation tests of the connection model, in one suite
 /// so that `swift test --filter ConnectionModelElicitationTests` selects them.
-/// A wait for an answer that never comes would suspend for ever, so the suite
-/// has a time limit.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelElicitationTests {
     /// The form values that the user gives to an accepted form elicitation.
     private let formContent: JSONValue = .object(["name": .string("orion")])

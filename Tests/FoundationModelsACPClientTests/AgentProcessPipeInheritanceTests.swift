@@ -19,10 +19,7 @@ import Testing
 // no pid of this test.
 
 /// The scenario in which two agents live at the same time.
-///
-/// A test that waits for an end of file that never comes fails its time
-/// limit rather than hanging the whole run.
-@Suite("AgentProcess pipe inheritance", .timeLimit(.minutes(1)))
+@Suite("AgentProcess pipe inheritance")
 struct AgentProcessPipeInheritanceTests {
     /// The first agent reads its stdin until end of file. A close of that
     /// stdin must reach it as end of file while a second agent, spawned
@@ -40,15 +37,16 @@ struct AgentProcessPipeInheritanceTests {
 
         reader.closeStandardInput()
 
-        let bytes = reader.transport.bytes
-        let endedAtEndOfFile = await outcome {
-            do {
-                for try await _ in bytes {}
-                return true
-            } catch {
-                return false
-            }
-        } ?? false
+        // The read ends only at the end of file. A child that kept a copy of
+        // the write end holds the read open, and a `sample` of the test
+        // process shows the wait.
+        var endedAtEndOfFile: Bool
+        do {
+            for try await _ in reader.transport.bytes {}
+            endedAtEndOfFile = true
+        } catch {
+            endedAtEndOfFile = false
+        }
 
         #expect(endedAtEndOfFile)
         #expect(reader.processIdentifier == nil)
@@ -89,8 +87,7 @@ struct AgentProcessPipeInheritanceTests {
 ///
 /// - Parameter descriptor: The descriptor of this process to look for in the
 ///   agent.
-/// - Returns: The whole stdout of the agent, or `nil` when the read failed or
-///   did not end in time.
+/// - Returns: The whole stdout of the agent, or `nil` when the read failed.
 /// - Throws: The errors of
 ///   ``AgentProcess/init(command:arguments:environment:currentDirectory:registry:)``.
 private func descriptorProbeAnswer(for descriptor: Int32) async throws -> String? {

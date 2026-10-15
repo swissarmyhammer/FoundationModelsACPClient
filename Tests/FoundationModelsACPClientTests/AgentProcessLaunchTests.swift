@@ -15,10 +15,7 @@ import Testing
 // no pid of this test.
 
 /// The launch settings of a child and the exit status of a child.
-///
-/// A test that waits for an end that never comes fails its time limit rather
-/// than hanging the whole run.
-@Suite("AgentProcess launch settings and exit status", .timeLimit(.minutes(1)))
+@Suite("AgentProcess launch settings and exit status")
 struct AgentProcessLaunchTests {
     /// The name of the one variable the environment tests give the child.
     private static let variableName = "AGENT_PROCESS_PROBE"
@@ -88,7 +85,7 @@ struct AgentProcessLaunchTests {
         )
         defer { child.shutdown() }
 
-        let status = await outcome { try? await child.waitForExit() } ?? nil
+        let status = try? await child.waitForExit()
 
         #expect(status == .exited(code: Self.nonzeroExitStatus))
         #expect(child.exitStatus == .exited(code: Self.nonzeroExitStatus))

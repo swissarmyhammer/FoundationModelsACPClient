@@ -90,8 +90,7 @@ private struct RecordedSession {
     /// session holds it as pending.
     ///
     /// - Returns: The task of the agent's call, and the pending request.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     func startPermission() async throws -> (Task<RequestPermissionResponse, any Error>, PendingPermissionRequest) {
         let request = SessionModelFixtures.permissionRequest()
         let call = Task { [agentConnection] in
@@ -189,14 +188,14 @@ private final class HeldSignals {
     /// - Parameter signal: The signal that a decision registered.
     func keep(_ signal: @escaping @Sendable () -> Void) {
         signals.append(signal)
+        TestChangeSignal.post()
     }
 }
 
 /// The order tests, in one suite so that `swift test --filter
-/// PermissionReplyOrderTests` selects them. A wait that never ends would
-/// suspend for ever, so the suite has a time limit.
+/// PermissionReplyOrderTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct PermissionReplyOrderTests {
     /// The number of permission rounds that each order test runs.
     private static let roundCount = 100
@@ -249,8 +248,8 @@ struct PermissionReplyOrderTests {
         }
         try await waitUntil { !session.pendingPermissions.isEmpty }
         let pending = try #require(session.pendingPermissions.first)
-        // A child task, so the time limit of the suite cancels a select that
-        // never returns.
+        // A child task, so the test can close the session while the select
+        // waits.
         async let selected: Void = session.selectPermission(pending.id, option: allowOptionId)
         // The decision registered its signal and never gives it, so the
         // select waits.
@@ -278,8 +277,7 @@ struct PermissionReplyOrderTests {
     /// of each round on the wire before the prompt of that round.
     ///
     /// - Parameter resolve: Resolves one pending request of the session.
-    /// - Throws: The error of a request, or `CancellationError` when the test
-    ///   time limit cancels a wait.
+    /// - Throws: The error of a request, or the error of `#require`.
     private func expectEachResponseBeforeTheNextPrompt(
         resolve: (SessionModel, PendingPermissionRequest.ID) async -> Void
     ) async throws {

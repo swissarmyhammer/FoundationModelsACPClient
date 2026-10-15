@@ -33,11 +33,9 @@ private let promptText = "Hello agent"
 private let promptedResponse = PromptResponse(messageId: MessageId(rawValue: "prompted-user-1"))
 
 /// The timing tests, in one suite so that `swift test --filter
-/// TranscriptEntryTimingTests` selects them. A test that waits for a prompt
-/// the fake never receives would suspend forever, so the suite has a time
-/// limit.
+/// TranscriptEntryTimingTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct TranscriptEntryTimingTests {
     /// The wall clock that gives each time.
     let wallClock = ManualWallClock()

@@ -217,11 +217,9 @@ enum ModelRequest: CaseIterable, Sendable, CustomTestStringConvertible {
 }
 
 /// The telemetry tests of the requests of the models, in one suite so that
-/// `swift test --filter ModelRequestSpanTests` selects them. A wait for an
-/// update that never comes would suspend for ever, so the suite has a time
-/// limit.
+/// `swift test --filter ModelRequestSpanTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ModelRequestSpanTests {
     /// Each request of the models gives exactly one finished span of kind
     /// `.client`, with the request span name and the method attribute.

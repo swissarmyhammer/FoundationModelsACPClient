@@ -44,8 +44,7 @@ enum ElicitationAnswer: CaseIterable, Sendable {
     /// answer to the first one.
     ///
     /// - Parameter session: The session model that holds the elicitation.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     @MainActor
     func give(in session: SessionModel) async throws {
         let pending = try await UserAnswers.firstPendingElicitation(of: session)
@@ -66,8 +65,7 @@ enum UserAnswers {
     ///
     /// - Parameter session: The session model of the turn.
     /// - Returns: The first pending permission request.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     static func firstPendingPermission(of session: SessionModel) async throws -> PendingPermissionRequest {
         try await waitUntil { !session.pendingPermissions.isEmpty }
         return try #require(session.pendingPermissions.first)
@@ -78,8 +76,7 @@ enum UserAnswers {
     ///
     /// - Parameter session: The session model of the turn.
     /// - Returns: The first pending elicitation.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     static func firstPendingElicitation(of session: SessionModel) async throws -> PendingElicitation {
         try await waitUntil { !session.pendingElicitations.isEmpty }
         return try #require(session.pendingElicitations.first)
@@ -91,8 +88,7 @@ enum UserAnswers {
     /// - Parameters:
     ///   - option: The id of the option that the user selects.
     ///   - session: The session model of the turn.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     static func selectPermission(_ option: PermissionOptionId, in session: SessionModel) async throws {
         let pending = try await firstPendingPermission(of: session)
         await session.selectPermission(pending.id, option: option)
@@ -102,8 +98,7 @@ enum UserAnswers {
     /// cancels it.
     ///
     /// - Parameter session: The session model of the turn.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     static func cancelPermission(in session: SessionModel) async throws {
         let pending = try await firstPendingPermission(of: session)
         await session.cancelPermission(pending.id)

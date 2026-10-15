@@ -53,7 +53,7 @@ private let requestMethodsWithSessionID = [
 struct ClientRequestSpanTests {
     /// Each request of one whole session gives exactly one finished span of
     /// kind `.client`, with the request span name and the method attribute.
-    @MainActor @Test("each request of a session gives one finished client span", .timeLimit(.minutes(1)))
+    @MainActor @Test("each request of a session gives one finished client span")
     func eachRequestGivesOneClientSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
@@ -69,7 +69,7 @@ struct ClientRequestSpanTests {
     }
 
     /// A request that names a session puts the session id on its span.
-    @MainActor @Test("a request that names a session puts the session id on its span", .timeLimit(.minutes(1)))
+    @MainActor @Test("a request that names a session puts the session id on its span")
     func aRequestThatNamesASessionPutsItOnTheSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
@@ -89,7 +89,7 @@ struct ClientRequestSpanTests {
     /// The `_meta` that the agent gets holds a `traceparent` with the trace id
     /// and the span id of the matching client span. This is what lets the
     /// spans of the agent join the trace of the client.
-    @MainActor @Test("the agent gets the traceparent of each client span", .timeLimit(.minutes(1)))
+    @MainActor @Test("the agent gets the traceparent of each client span")
     func theAgentGetsTheTraceparentOfEachClientSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
@@ -108,7 +108,7 @@ struct ClientRequestSpanTests {
 
     /// Each request writes one "enter" log record when it starts (rule 8), so
     /// that a request that hangs is visible before its span ends.
-    @MainActor @Test("each request writes one enter log record", .timeLimit(.minutes(1)))
+    @MainActor @Test("each request writes one enter log record")
     func eachRequestWritesOneEnterRecord() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
@@ -129,7 +129,7 @@ struct ClientRequestSpanTests {
     /// and the JSON-RPC error code. The span records no error object, because
     /// a tracing backend writes the message text of a recorded error, and
     /// rule 4 keeps that text out of telemetry.
-    @MainActor @Test("a refused request gives an error span with the error code", .timeLimit(.minutes(1)))
+    @MainActor @Test("a refused request gives an error span with the error code")
     func aRefusedRequestGivesAnErrorSpanWithItsCode() async throws {
         let refusal = RequestError.invalidParams
         try await TelemetryCapture.run(forbidding: [refusal.message]) { context in
@@ -149,7 +149,7 @@ struct ClientRequestSpanTests {
 
     /// A request that the agent answers gives a span with no error status and
     /// no error code.
-    @MainActor @Test("an answered request gives a span with no error", .timeLimit(.minutes(1)))
+    @MainActor @Test("an answered request gives a span with no error")
     func anAnsweredRequestGivesASpanWithNoError() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
@@ -164,7 +164,7 @@ struct ClientRequestSpanTests {
 
     /// The helper adds the trace context to the `_meta` that the caller gave,
     /// and keeps each other member of it.
-    @MainActor @Test("the helper keeps each other member of the given meta", .timeLimit(.minutes(1)))
+    @MainActor @Test("the helper keeps each other member of the given meta")
     func theHelperKeepsEachOtherMetaMember() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let given = JSONValue.object([vendorMemberName: .string(vendorMemberValue)])

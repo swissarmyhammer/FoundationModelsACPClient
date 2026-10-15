@@ -479,11 +479,9 @@ private enum SessionFactoryFixtures {
 }
 
 /// The session factory tests of the connection model, in one suite so that
-/// `swift test --filter ConnectionModelSessionTests` selects them. A wait for
-/// an update that never comes would suspend for ever, so the suite has a time
-/// limit.
+/// `swift test --filter ConnectionModelSessionTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelSessionTests {
     // MARK: - newSession
 
@@ -1127,8 +1125,7 @@ struct ConnectionModelSessionTests {
         try await session.cancel()
 
         // A notification has no answer, so the test waits for the record of
-        // the agent. The suite time limit stops a wait for a cancel that never
-        // arrives.
+        // the agent.
         try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.cancelSession) }
     }
 

@@ -96,18 +96,16 @@ enum StdioChild {
 
     /// Reads the stdout of a child until it ends, and decodes it as UTF-8.
     ///
+    /// The read ends when the stdout of the child ends, with no time limit.
+    ///
     /// - Parameter child: The spawned child to read.
-    /// - Returns: The whole stdout of the child, or `nil` when the read failed
-    ///   or did not end in time.
+    /// - Returns: The whole stdout of the child, or `nil` when the read failed.
     static func wholeStandardOutput(of child: AgentProcess) async -> String? {
-        let bytes = child.transport.bytes
-        return await outcome { () async -> String? in
-            do {
-                let answer = try await bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }
-                return String(decoding: answer, as: UTF8.self)
-            } catch {
-                return nil
-            }
-        } ?? nil
+        do {
+            let answer = try await child.transport.bytes.reduce(into: Data()) { data, chunk in data.append(chunk) }
+            return String(decoding: answer, as: UTF8.self)
+        } catch {
+            return nil
+        }
     }
 }

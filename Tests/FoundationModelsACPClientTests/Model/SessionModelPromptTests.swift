@@ -36,10 +36,9 @@ private let sentTracestate = "vendor=prompt"
 private let vendorMeta: JSONValue = .object(["vendor": .string("kept")])
 
 /// The request tests, in one suite so that `swift test --filter
-/// SessionModelPromptTests` selects them. A test that waits for a prompt the
-/// fake never receives would suspend forever, so the suite has a time limit.
+/// SessionModelPromptTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelPromptTests {
     /// The fake sender of the model under test.
     let sender = FakeSessionRequestSender()

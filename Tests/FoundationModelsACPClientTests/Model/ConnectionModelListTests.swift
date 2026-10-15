@@ -146,11 +146,9 @@ private enum SessionListFixtures {
 }
 
 /// The session list tests of the connection model, in one suite so that
-/// `swift test --filter ConnectionModelListTests` selects them. A wait for a
-/// request that never comes would suspend for ever, so the suite has a time
-/// limit.
+/// `swift test --filter ConnectionModelListTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelListTests {
     // MARK: - refreshSessions and loadMoreSessions
 

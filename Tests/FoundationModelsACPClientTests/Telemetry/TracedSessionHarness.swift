@@ -68,8 +68,7 @@ struct RunningTurn {
 
     /// Waits until the agent answers the prompt and reports `idle`.
     ///
-    /// - Throws: Whatever the prompt threw, or `CancellationError` when the
-    ///   test time limit cancels the wait.
+    /// - Throws: Whatever the prompt threw.
     func finish() async throws {
         try await prompt.value
         try await waitUntil {
@@ -195,8 +194,7 @@ struct TracedSessionHarness {
     /// Runs one turn: opens a session, sends the prompt, and waits until the
     /// agent reports `idle`.
     ///
-    /// - Throws: Whatever `session/new` or the prompt threw, or
-    ///   `CancellationError` when the test time limit cancels the wait.
+    /// - Throws: Whatever `session/new` or the prompt threw.
     func runTurn() async throws {
         try await startTurn().finish()
     }

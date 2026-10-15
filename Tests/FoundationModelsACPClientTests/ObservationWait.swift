@@ -26,3 +26,35 @@ func waitForObservation(until condition: @escaping @MainActor () -> Bool) async 
         }
     }
 }
+
+/// The change signal of the test stores that are not observable.
+///
+/// A test store that a task or a thread changes, for example
+/// ``ThreadSafeBuffer``, calls ``post()`` after each change. ``waitUntil(_:)``
+/// tracks ``generation``, so each change of such a store makes the wait read
+/// its condition again. The signal carries no value: a wait that wakes for the
+/// change of another store reads its condition, finds it false, and waits
+/// again.
+@MainActor @Observable
+final class TestChangeSignal {
+    /// The one signal of the test process.
+    static let shared = TestChangeSignal()
+
+    /// The count of the changes that ``post()`` gave. Only its change has a
+    /// meaning.
+    private(set) var generation = 0
+
+    /// Makes the signal.
+    private init() {}
+
+    /// Tells each wait that a test store changed.
+    ///
+    /// The call can come from any task or thread. The count changes on the
+    /// main actor after the change of the store, so a wait that wakes reads
+    /// the changed store.
+    nonisolated static func post() {
+        Task { @MainActor in
+            shared.generation += 1
+        }
+    }
+}

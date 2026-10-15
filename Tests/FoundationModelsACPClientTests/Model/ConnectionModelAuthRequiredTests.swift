@@ -169,7 +169,7 @@ private enum AuthRequiredFixtures {
 /// The auth-required tests of the connection model, in one suite so that
 /// `swift test --filter ConnectionModelAuthRequiredTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelAuthRequiredTests {
     // MARK: - Each request
 

@@ -7,8 +7,8 @@ import Testing
 // This test drives the connection model and the session model over the real
 // ACP wire. A stub agent runs behind `InMemoryTransport.pair()` and sends one
 // update for every `SessionUpdate` case during one prompt turn. The test waits
-// for the idle update on the update tap of the session model; the model applies
-// each update before the tap gives it, so the assertions run against the final
+// with an observation of the session model until the model applied the idle
+// update, which the agent sends last, so the assertions run against the final
 // state.
 
 /// The context-window size that the scripted usage update reports.
@@ -72,17 +72,16 @@ private func fullScript() -> [SessionUpdate] {
     ]
 }
 
-@MainActor @Test(.timeLimit(.minutes(1)))
+@MainActor @Test
 func everySessionUpdateCaseLandsInObservableStateOverTheWire() async throws {
     let connected = await ConnectedModel(model: ConnectionModel(coalescingCadence: .zero)) { agentSide in
         ScriptedStubAgent(connection: agentSide, session: testSession, script: fullScript())
     }
     try await connected.initialize()
     let session = try await connected.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-    let updates = session.updateTap()
 
     _ = try await session.prompt([textBlock("go")])
-    #expect(await waitForIdle(in: updates))
+    await waitForIdle(of: session)
 
     // The wire entries hold one stable entry for each identity. The local user
     // message of the prompt is not a wire entry. The model holds the echo of a

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Observation
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -22,8 +23,9 @@ private enum OwnerCall: Equatable {
     case applyUpdate(SessionUpdate)
 }
 
-/// The owner side of a coalescer: it records each call, in order.
-@MainActor
+/// The owner side of a coalescer: it records each call, in order. It is
+/// observable, so a test waits for a call with no poll.
+@MainActor @Observable
 private final class RecordingOwner {
     /// The calls that the coalescer made, in order.
     private(set) var calls: [OwnerCall] = []
@@ -47,7 +49,7 @@ private final class RecordingOwner {
 /// The coalescer tests, in one suite so that `swift test --filter
 /// ChunkCoalescerTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ChunkCoalescerTests {
     // MARK: - Cadence
 
@@ -62,9 +64,9 @@ struct ChunkCoalescerTests {
         coalescer.receive(second)
         #expect(owner.calls.isEmpty)
 
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
         clock.advance(by: testCadence)
-        await yieldUntil { !owner.calls.isEmpty }
+        await waitFor { !owner.calls.isEmpty }
 
         #expect(owner.calls == [.foldChunks([first, second])])
     }
@@ -113,14 +115,16 @@ struct ChunkCoalescerTests {
         let coalescer = owner.makeCoalescer(cadence: testCadence, clock: clock)
         let chunk = agentChunk(text: "now")
         coalescer.receive(chunk)
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
 
         coalescer.flush()
         #expect(owner.calls == [.foldChunks([chunk])])
 
-        await yieldUntil { clock.sleeperCount == 0 }
+        // The cancel removes the sleeper of the scheduled flush, and a
+        // cancelled flush task returns before it folds. With no sleeper, the
+        // advance resumes nothing, so no second fold can come.
+        await waitFor { clock.sleeperCount == 0 }
         clock.advance(by: testCadence)
-        await yieldUntil { owner.calls.count > 1 }
         #expect(owner.calls == [.foldChunks([chunk])])
     }
 
@@ -143,9 +147,9 @@ struct ChunkCoalescerTests {
         coalescer.flush()
 
         coalescer.receive(second)
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
         clock.advance(by: testCadence)
-        await yieldUntil { owner.calls.count > 1 }
+        await waitFor { owner.calls.count > 1 }
 
         #expect(owner.calls == [.foldChunks([first]), .foldChunks([second])])
     }
@@ -155,12 +159,13 @@ struct ChunkCoalescerTests {
         let owner = RecordingOwner()
         var coalescer: ChunkCoalescer? = owner.makeCoalescer(cadence: testCadence, clock: clock)
         coalescer?.receive(agentChunk(text: "lost"))
-        await yieldUntil { clock.sleeperCount > 0 }
+        await waitFor { clock.sleeperCount > 0 }
 
+        // The release cancels the scheduled flush, and the cancel removes its
+        // sleeper. With no sleeper, the advance resumes nothing.
         coalescer = nil
-        await yieldUntil { clock.sleeperCount == 0 }
+        await waitFor { clock.sleeperCount == 0 }
         clock.advance(by: testCadence)
-        await yieldUntil { !owner.calls.isEmpty }
 
         #expect(owner.calls.isEmpty)
         #expect(clock.sleeperCount == 0)

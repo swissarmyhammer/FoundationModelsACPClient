@@ -61,7 +61,8 @@ private struct RoutedModel {
     ///   - request: The elicitation to send.
     ///   - session: The session model that must hold the elicitation.
     /// - Returns: The task of the agent's call.
-    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    /// - Throws: Nothing today. The signature keeps `throws` because
+    ///   ``waitUntil(_:)`` throws.
     func startElicitation(
         _ request: CreateElicitationRequest,
         on session: SessionModel
@@ -71,10 +72,9 @@ private struct RoutedModel {
 }
 
 /// The router tests, in one suite so that `swift test --filter
-/// ModelClientTests` selects them. A wait for an answer that never comes would
-/// suspend for ever, so the suite has a time limit.
+/// ModelClientTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ModelClientTests {
     /// The id of a session that no model holds.
     private let unknownSession = SessionId(rawValue: "session-unknown")
@@ -136,7 +136,7 @@ struct ModelClientTests {
         try await session.cancel()
 
         // The require stops the test before the await below, which would
-        // suspend until the time limit when the permission stays pending.
+        // suspend for ever when the permission stays pending.
         try #require(session.pendingPermissions.isEmpty)
         // The stub agent answers the prompt only after the permission request
         // returned, so the outcome is in the record when the turn ends.

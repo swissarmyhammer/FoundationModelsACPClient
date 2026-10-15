@@ -150,8 +150,8 @@ struct ConnectedModel {
     /// Closes the agent end of the pair, and waits until the model records
     /// the close. After the call, the model has no open connection.
     ///
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: Nothing today. The signature keeps `throws` because
+    ///   ``waitUntil(_:)`` throws.
     func closeAgentEnd() async throws {
         agentEnd.close()
         try await waitUntil { model.state == .disconnected }

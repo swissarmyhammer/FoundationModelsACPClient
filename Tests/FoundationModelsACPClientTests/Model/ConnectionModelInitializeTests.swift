@@ -171,7 +171,7 @@ extension CapabilityFlags {
 /// The initialize and auth tests of the connection model, in one suite so
 /// that `swift test --filter ConnectionModelInitializeTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelInitializeTests {
     // MARK: - Capability flags
 
@@ -563,8 +563,7 @@ struct ConnectionModelInitializeTests {
     /// - Parameter authMethods: The auth methods that the agent lists, or
     ///   `nil` to leave the member out.
     /// - Returns: The model, in the ``ConnectionState/disconnected`` state.
-    /// - Throws: The error of the initialize, or `CancellationError` when the
-    ///   test time limit cancels the wait.
+    /// - Throws: The error of the initialize.
     private func disconnectedModel(authMethods: [AuthMethod]? = nil) async throws -> ConnectedModel {
         let connected = await ConnectedModel(authMethods: authMethods)
         try await connected.initialize()
@@ -609,7 +608,8 @@ struct ConnectionModelInitializeTests {
     ///   - connected: The connected model.
     ///   - method: The ACP method of the request.
     ///   - send: Sends the request through the model.
-    /// - Throws: `CancellationError` when the test time limit cancels the wait.
+    /// - Throws: Nothing today. The signature keeps `throws` because
+    ///   ``waitUntil(_:)`` throws.
     private func closeTheConnection(
         of connected: ConnectedModel,
         during method: String,

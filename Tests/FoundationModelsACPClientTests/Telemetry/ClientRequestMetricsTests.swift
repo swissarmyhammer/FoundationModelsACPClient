@@ -60,7 +60,7 @@ private let classifiedFailures: [(any Error & Sendable, String)] = [
 struct ClientRequestMetricsTests {
     /// One successful `session/prompt` gives one request count and one
     /// duration sample with the method as the dimension, and no error count.
-    @MainActor @Test("a successful prompt gives one count and one duration, and no error", .timeLimit(.minutes(1)))
+    @MainActor @Test("a successful prompt gives one count and one duration, and no error")
     func aSuccessfulPromptGivesOneCountAndOneDuration() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let idleGate = UpdateGate()
@@ -77,13 +77,12 @@ struct ClientRequestMetricsTests {
             // The agent sends `idle` only after the gate opens, and the test
             // opens the gate only after the prompt answer reached the client,
             // which the request counter shows.
-            let answered = await eventually {
+            await context.wait { context in
                 context.metricsFactory.counters.contains { counter in
                     counter.label == ACPClientTelemetry.MetricName.requests
                         && counter.dimensions.contains { $0 == dimensions[0] }
                 }
             }
-            #expect(answered, "The prompt answer never reached the client.")
             idleGate.open()
             _ = try await turn.value
             await harness.teardown()
@@ -98,7 +97,7 @@ struct ClientRequestMetricsTests {
 
     /// A `session/close` that the agent refuses gives one error count, with
     /// the method and the JSON-RPC error code as the dimensions.
-    @MainActor @Test("a refused session/close gives one error count with the method and the code", .timeLimit(.minutes(1)))
+    @MainActor @Test("a refused session/close gives one error count with the method and the code")
     func aRefusedCloseGivesOneErrorCount() async throws {
         let refusal = RequestError.invalidParams
         try await TelemetryCapture.run(forbidding: [refusal.message]) { context in
@@ -117,7 +116,7 @@ struct ClientRequestMetricsTests {
     /// No metric dimension of a whole session holds the session id, the
     /// prompt or the message of an error. Each dimension name is the method
     /// key or the error code key.
-    @MainActor @Test("no metric dimension holds a session id or content", .timeLimit(.minutes(1)))
+    @MainActor @Test("no metric dimension holds a session id or content")
     func noMetricDimensionHoldsASessionIDOrContent() async throws {
         let refusal = RequestError.invalidParams
         let forbidden = [testSession.rawValue, tracedPromptText, refusal.message]
@@ -145,7 +144,6 @@ struct ClientRequestMetricsTests {
     /// not to the task-local factory.
     @MainActor @Test(
         "a failed request gives the error code value of its error",
-        .timeLimit(.minutes(1)),
         arguments: classifiedFailures
     )
     func aFailedRequestGivesTheErrorCodeValue(failure: any Error & Sendable, errorCode: String) async throws {

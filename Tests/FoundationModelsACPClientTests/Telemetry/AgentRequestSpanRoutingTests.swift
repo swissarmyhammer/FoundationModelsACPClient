@@ -34,7 +34,7 @@ private let unknownSession = SessionId(rawValue: "session-not-open")
 private let unknownElicitationID = ElicitationId(rawValue: "elicit-unknown")
 
 @MainActor
-@Suite("agent request span routing", .timeLimit(.minutes(1)))
+@Suite("agent request span routing")
 struct AgentRequestSpanRoutingTests {
     // MARK: - Permission requests
 
@@ -303,12 +303,14 @@ struct AgentRequestSpanRoutingTests {
     /// and gives it. The agent gets no answer to a notification, so the test
     /// waits for the span itself.
     ///
+    /// The wait is the record wait of the capture: it ends when the capture
+    /// records the span, with no clock.
+    ///
     /// - Parameter context: The capture of the test.
     /// - Returns: The span of the notification.
-    /// - Throws: `CancellationError` when the test time limit cancels the
-    ///   wait.
+    /// - Throws: The error of `#require`.
     private static func completionSpan(in context: TelemetryCapture.Context) async throws -> FinishedInMemorySpan {
-        try await waitUntil { !context.agentRequestSpans(of: ClientRequestSpan.Method.completeElicitation).isEmpty }
+        await context.wait { !$0.agentRequestSpans(of: ClientRequestSpan.Method.completeElicitation).isEmpty }
         return try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.completeElicitation).first)
     }
 }

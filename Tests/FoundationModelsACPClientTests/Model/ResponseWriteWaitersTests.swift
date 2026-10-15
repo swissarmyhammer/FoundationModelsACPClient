@@ -4,10 +4,9 @@ import Testing
 @testable import FoundationModelsACPClient
 
 /// The tests of `ResponseWriteWaiters`: the "written" signal of an id ends the
-/// wait of its caller, also when the signal arrives before the wait. A wait
-/// that never ends would suspend for ever, so the suite has a time limit.
+/// wait of its caller, also when the signal arrives before the wait.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ResponseWriteWaitersTests {
     @Test func aSignalBeforeTheWaitEndsTheWaitAtOnce() async {
         let waiters = ResponseWriteWaiters()

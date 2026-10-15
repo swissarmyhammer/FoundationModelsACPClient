@@ -167,7 +167,7 @@ struct ContentSafetyTests {
     /// The router of the model gives the permission request and the
     /// elicitation to the session model, and the test answers each one through
     /// that model, so the server span of each request is in the capture.
-    @MainActor @Test("an answered turn puts no content into telemetry", .timeLimit(.minutes(1)))
+    @MainActor @Test("an answered turn puts no content into telemetry")
     func anAnsweredTurnPutsNoContentIntoTelemetry() async throws {
         try await TelemetryCapture.run(forbidding: Fixture.answeredTurnContent) { context in
             let harness = await TracedSessionHarness(
@@ -192,7 +192,7 @@ struct ContentSafetyTests {
 
     /// No span, log record or metric of a turn that the agent refuses holds
     /// the message text or the data of the error.
-    @MainActor @Test("a refused turn puts no error text into telemetry", .timeLimit(.minutes(1)))
+    @MainActor @Test("a refused turn puts no error text into telemetry")
     func aRefusedTurnPutsNoErrorTextIntoTelemetry() async throws {
         try await TelemetryCapture.run(forbidding: Fixture.refusedTurnContent) { context in
             let harness = await TracedSessionHarness(

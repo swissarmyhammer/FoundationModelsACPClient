@@ -22,6 +22,7 @@ final class ThreadSafeBuffer<Element: Sendable>: Sendable {
     ///   nothing removed.
     func append(_ element: Element) {
         storage.withLock { $0.append(element) }
+        TestChangeSignal.post()
     }
 
     /// Everything appended so far, in order.

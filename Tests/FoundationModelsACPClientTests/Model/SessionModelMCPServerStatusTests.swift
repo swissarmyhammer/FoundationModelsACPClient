@@ -147,10 +147,9 @@ private struct NameAndStatus: Equatable {
 }
 
 /// The MCP server status tests, in one suite so that `swift test --filter
-/// SessionModelMCPServerStatusTests` selects them. A tap that never yields
-/// would suspend forever, so the suite has a time limit.
+/// SessionModelMCPServerStatusTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct SessionModelMCPServerStatusTests {
     // MARK: - Apply
 

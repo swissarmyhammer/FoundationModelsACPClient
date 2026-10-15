@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z939HBTNVJ8F4X94C99WW9
-position_column: todo
-position_ordinal: '8880'
+position_column: done
+position_ordinal: fa80
 title: 'Gap G5: the live test polls for the answer for 30 s after the prompt response'
 ---
 Found in T0. `LiveAgentTurnTests.waitForAgentText(in:)` reads the transcript every 50 ms until it holds agent text, for 30 s at most, and the test has `.timeLimit(.minutes(30))`.

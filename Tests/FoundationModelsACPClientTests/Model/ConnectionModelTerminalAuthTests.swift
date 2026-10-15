@@ -135,6 +135,7 @@ private final class FakeTerminalAuthRunner: TerminalAuthRunner {
     /// - Throws: The error of the outcome.
     func runTerminalAuth(arguments: [String], environment: [String: String]) async throws -> Int32? {
         recorded.withLock { $0.append(Call(arguments: arguments, environment: environment)) }
+        TestChangeSignal.post()
         await gate?.wait()
         return try outcome.get()
     }
@@ -143,7 +144,7 @@ private final class FakeTerminalAuthRunner: TerminalAuthRunner {
 /// The terminal auth tests of the connection model, in one suite so that
 /// `swift test --filter ConnectionModelTerminalAuthTests` selects them.
 @MainActor
-@Suite(.timeLimit(.minutes(1)))
+@Suite
 struct ConnectionModelTerminalAuthTests {
     // MARK: - Success
 
