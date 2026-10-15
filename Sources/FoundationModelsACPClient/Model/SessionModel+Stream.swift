@@ -265,8 +265,9 @@ extension SessionModel {
     ///
     /// The model ends the running replay as a failure, folds the buffered
     /// chunks, stops the task of the subscription, ends each ``updateTap()``
-    /// stream, cancels each pending permission request and elicitation, and
-    /// clears ``notices``. After the close, ``apply(_:)`` changes nothing.
+    /// stream, cancels each pending permission request and elicitation,
+    /// clears ``frontRequestID``, and clears ``notices``. After the close,
+    /// ``apply(_:)`` changes nothing.
     func markClosed() {
         endRunningReplayAsFailure()
         flushPendingChunks()
@@ -274,6 +275,7 @@ extension SessionModel {
         streamTask = nil
         finishUpdateTaps()
         cancelAllPending()
+        frontRequestID = nil
         clearNotices()
         isClosed = true
     }

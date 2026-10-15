@@ -140,6 +140,15 @@ public final class SessionModel: Identifiable {
     /// a resume and the close clear the list.
     public private(set) var notices: [SessionNotice] = []
 
+    /// The id of the pending request that the user brought to the front, or
+    /// `nil` when the user did not select one.
+    ///
+    /// ``bringToFront(_:)`` and ``bringToFront(toolCall:)`` set it. It
+    /// becomes `nil` when its request resolves and when the session closes.
+    /// It is a pointer into ``pendingRequests``: it does not change the
+    /// order of that list. ``frontRequest`` gives the request to show.
+    public internal(set) var frontRequestID: PendingRequest.ID?
+
     /// The MCP servers of the session, each with its last status. The list
     /// holds one ``MCPServerOrigin/client`` item for each HTTP or stdio server
     /// of the `session/new` or `session/resume` request, in request order.
@@ -327,6 +336,11 @@ public final class SessionModel: Identifiable {
         self.elapsedTime = Self.makeElapsedTime(on: clock)
         self.timekeeper = TranscriptTimekeeper(now: now)
         self.logger = logger
+        let clearFront: @MainActor (UUID) -> Void = { [weak self] id in
+            self?.clearFrontRequest(ifItIs: id)
+        }
+        permissions.didRemove = clearFront
+        elicitations.didRemove = clearFront
     }
 
     /// Makes a function that gives the time on a clock from now to the call.

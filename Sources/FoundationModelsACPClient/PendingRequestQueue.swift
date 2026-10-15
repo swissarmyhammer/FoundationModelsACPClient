@@ -34,6 +34,10 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// suspends.
     @ObservationIgnored private var arrivals: [UUID: UInt64] = [:]
 
+    /// Gets the id of each item that leaves ``items``, for each resolution
+    /// and each cancellation, or `nil` to tell nobody.
+    @ObservationIgnored var didRemove: (@MainActor (UUID) -> Void)?
+
     /// The response for an item that the user did not decide.
     @ObservationIgnored private let cancelledResponse: Response
 
@@ -114,6 +118,9 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     @discardableResult
     private func removeItem(_ id: UUID) -> Item? {
         arrivals[id] = nil
-        return items.firstIndex { $0.id == id }.map { items.remove(at: $0) }
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+        let removed = items.remove(at: index)
+        didRemove?(id)
+        return removed
     }
 }
