@@ -119,10 +119,15 @@ public final class SessionModel: Identifiable {
     /// The last usage report, or `nil` when the agent did not report usage.
     public private(set) var usage: UsageUpdate?
 
-    /// The last state of the foreground work of the agent: running, idle with
-    /// its stop reason, or blocked on user action. `nil` means that the agent
-    /// did not report a state. A stop reason that this schema revision does
-    /// not know stays raw in `StopReason.unknown`.
+    /// The last state of the foreground work of the agent, as the agent sent
+    /// it. `nil` means that the agent did not report a state.
+    ///
+    /// The state follows the work of the agent, not a prompt. The agent can
+    /// send `running` and `idle` when no prompt is open, and one `idle` can
+    /// end the work of two open prompts. An `idle` can have no stop reason.
+    /// The model keeps the last state and adds no turn rule of its own. A
+    /// stop reason that this schema revision does not know stays raw in
+    /// `StopReason.unknown`.
     public private(set) var agentState: StateUpdate?
 
     /// The session information, folded as a patch. A field that no update

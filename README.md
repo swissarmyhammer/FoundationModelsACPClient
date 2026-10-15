@@ -33,10 +33,13 @@ _ = try await model.initialize(InitializeRequest(
 ))
 let session = try await model.newSession(
     NewSessionRequest(cwd: AbsolutePath(rawValue: "/Users/me/project")))
+// The prompt is mail: the answer comes when the agent accepts the message.
 _ = try await session.prompt([.text(TextContent(text: "Hello"))])
 
-// The streamed reply lands in observable state a view can bind to:
+// The reply comes later as session updates, into observable state that a
+// view can bind to:
 let transcript = session.transcript
+let state = session.agentState
 ```
 
 Each item of `transcript` is a `TranscriptEntry` with a stable `id`, so a
@@ -103,12 +106,20 @@ Add the package to the dependencies in your `Package.swift`:
   its file access, and gets the files of the client through MCP. This
   package shows the display terminals of the agent, and it never runs a
   command or touches a file.
+- **A prompt is mail, and the model adds no turn rule.** The agent answers
+  `session/prompt` when it accepts the message, and a second prompt while
+  one is open is also accepted. `running` and `idle` follow the work of the
+  agent, and an `idle` can have no stop reason. After `cancel(meta:)`, the
+  idle with the `cancelled` stop reason can come later. `agentState` keeps
+  the last state that the agent sent, and the transcript keeps each update.
 - **Token-rate chunks are coalesced.** A `SessionModel` applies the chunks
   at a display rate, so a SwiftUI view does not redraw for each token. A
   test measures this.
 - **The package that spawns an agent owns its process.** `AgentProcess`
   spawns the agent in its own process group, ends the group on shutdown,
-  and reaps it. It gives no guarantee under `SIGKILL`.
+  and reaps it. The reap waits for the exit event of the agent, up to a
+  time limit, so a teardown always returns. It gives no guarantee under
+  `SIGKILL`.
 
 The peer package for the ACP **Agent** role is
 [FoundationModelsACPAgent](https://github.com/swissarmyhammer/FoundationModelsACPAgent).

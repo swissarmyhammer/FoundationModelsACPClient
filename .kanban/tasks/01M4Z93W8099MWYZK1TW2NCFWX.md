@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z93NR2EGCQRYVA5YHJSKJ2
-position_column: todo
-position_ordinal: '8480'
+position_column: done
+position_ordinal: fc80
 title: 'T4: Docs agree with the new behavior; final run, live test, final report'
 ---
 Mail step 6, part T4 (mailbox.md section 8, row 6).

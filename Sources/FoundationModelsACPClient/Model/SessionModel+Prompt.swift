@@ -24,12 +24,17 @@ extension SessionModel {
     /// When the request goes out, the model records its W3C trace context in
     /// ``promptTraceMeta``, so a cancel of the turn can join its trace.
     ///
+    /// The prompt is mail: the agent answers when it accepts the message, and
+    /// not when its work ends. The work comes after the response, as session
+    /// updates. A second prompt while one is open is also accepted. To know
+    /// when the work for this prompt ended, wait for the first `idle`
+    /// ``agentState`` after the echo of the message id of the response.
+    ///
     /// - Parameters:
     ///   - content: The content of the user message.
     ///   - meta: The `_meta` field of the request, for example the trace
     ///     parent, or `nil`.
-    /// - Returns: The response, which names the inserted user message. The
-    ///   turn itself goes on after the response, as session updates.
+    /// - Returns: The response, which names the inserted user message.
     /// - Throws: The error of the sender: `RequestError` on a peer error,
     ///   `ConnectionError` on a disconnect or a timeout, or
     ///   `CancellationError` when the calling task is cancelled.
@@ -94,7 +99,9 @@ extension SessionModel {
     /// ``cancelAllPending()`` to answer them.
     ///
     /// The agent confirms the cancellation with an idle `state_update` that
-    /// has the `cancelled` stop reason, and not with this call.
+    /// has the `cancelled` stop reason, and not with this call. That idle can
+    /// come later than the answer to the prompt, and after other updates of
+    /// the work that the agent stops.
     ///
     /// When `meta` holds a W3C `traceparent`, for example the `_meta` that
     /// the `session/prompt` of the turn sent, the `session/cancel` span is a
