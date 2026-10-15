@@ -87,8 +87,14 @@ extension ConnectionModel {
     /// marker. Thus, when this call returns, the model holds the whole replay
     /// and ``SessionModel/isReplaying`` is `false`. A successful replay from
     /// the start clears ``SessionModel/hasMissedUpdates``. The commands and
-    /// the configuration options of the response then seed the model, and a
-    /// new model goes into ``openSessions``.
+    /// the configuration options of the response then seed the model.
+    ///
+    /// A new model goes into ``openSessions`` before the request goes out, so
+    /// it is open while its replay runs (``SessionModel/isReplaying`` is
+    /// `true` then). Thus a permission request or an elicitation that the
+    /// agent sends for the session during the resume, or at once after its
+    /// answer, is pending on that model, and the router does not answer it
+    /// with cancel.
     ///
     /// The request sends only the MCP servers whose transport the agent
     /// advertises, in the same way as ``newSession(_:)``. The servers that
@@ -105,10 +111,10 @@ extension ConnectionModel {
     /// On a failure, the replay ends as a failure and the call throws. An
     /// open model stays open, gets back the MCP servers that it had before
     /// the call, and keeps its `cwd` and its additional directories. A new
-    /// model is closed and does not go into
-    /// ``openSessions``. When the connection closes, or a new connection
-    /// takes its place, after the response arrives but before this call reads
-    /// it, a new model is closed too.
+    /// model goes out of ``openSessions`` and is closed. When the connection
+    /// closes, or a new connection takes its place, before this call returns,
+    /// a new model goes out of ``openSessions`` and is closed too, and the
+    /// call throws `ConnectionError.closed`.
     ///
     /// The resumes of one session run one after the other. A call for a
     /// session whose earlier resume still runs waits until that resume
@@ -149,15 +155,39 @@ extension ConnectionModel {
             try await replay(sent, into: open, over: connection)
             return open
         }
+        // The model goes into the open sessions BEFORE the request goes out.
+        // The agent can ask a question of the session during the resume, or
+        // at once after its answer, and the router then finds this model and
+        // holds the question as pending.
         let session = makeSubscribedSessionModel(sessionId: sent.sessionId, over: connection)
+        register(session)
         do {
             try await replay(sent, into: session, over: connection)
         } catch {
-            session.markClosed()
+            unregisterAndClose(session)
             throw error
         }
-        try register(session, openedOver: connection)
+        // The close of the connection closed and removed the model, or a new
+        // connection took the place of this one.
+        guard connection === self.connection, !session.isClosed else {
+            unregisterAndClose(session)
+            throw ConnectionError.closed
+        }
         return session
+    }
+
+    /// Removes a model from ``openSessions`` when the list holds that same
+    /// model, and closes it.
+    ///
+    /// The list can hold another model for the same session, for example the
+    /// model of a resume on a later connection, and that model stays.
+    ///
+    /// - Parameter session: The model to remove and close.
+    private func unregisterAndClose(_ session: SessionModel) {
+        if self.session(for: session.sessionId) === session {
+            unregister(session.sessionId)
+        }
+        session.markClosed()
     }
 
     /// Sends one `session/resume` request and runs its replay in a session
