@@ -15,7 +15,7 @@ extension SessionModel {
     /// request with ``selectPermission(_:option:)`` or with
     /// ``cancelPermission(_:)``.
     ///
-    /// A cancel of the turn with ``cancel(meta:)`` answers each request with
+    /// A cancel of the work with ``cancel(meta:)`` answers each request with
     /// the `cancelled` outcome and makes this list empty, as the ACP prompt
     /// lifecycle requires. Thus the UI does not need to remove the requests
     /// itself after a cancel.
@@ -28,7 +28,9 @@ extension SessionModel {
     ///
     /// More than one elicitation can be pending at the same time. Resolve one
     /// elicitation with ``acceptElicitation(_:content:)``,
-    /// ``declineElicitation(_:)``, or ``cancelElicitation(_:)``.
+    /// ``declineElicitation(_:)``, or ``cancelElicitation(_:)``. A cancel of
+    /// the work with ``cancel(meta:)`` answers each one with the `cancel`
+    /// action and makes this list empty.
     public var pendingElicitations: [PendingElicitation] {
         elicitations.items
     }
@@ -174,6 +176,8 @@ extension SessionModel {
     ///   elicitation with the accept action and no content.
     /// - ``cancelElicitation(_:)``, ``cancelAllPending()``, and cancellation
     ///   of the surrounding task answer with the cancel action.
+    /// - ``cancel(meta:)`` answers with the cancel action and the reason
+    ///   ``ACPClient/clientCancelledReason`` in `_meta`.
     ///
     /// An elicitation that names a tool call links to the entry of that tool
     /// call while it is pending. When the entry does not exist yet, the entry
@@ -237,6 +241,16 @@ extension SessionModel {
         guard let removed = elicitations.complete(elicitationId: elicitationId) else { return false }
         unlinkFromToolCall(removed)
         return true
+    }
+
+    /// Answers each pending elicitation with the `cancel` action and a reason
+    /// in `_meta`, and removes its tool-call link.
+    ///
+    /// - Parameter reason: Why the client cancelled without the user.
+    func cancelPendingElicitations(reason: String) {
+        for id in pendingElicitations.map(\.id) {
+            resolveElicitation(id, with: ElicitationResponseWire.cancelResponse(reason: reason))
+        }
     }
 
     // MARK: - Close

@@ -35,6 +35,9 @@ final class FakeSessionRequestSender: SessionRequestSender {
 
         /// The observer that each prompt request goes to at its arrival.
         var promptObserver: @Sendable @MainActor (PromptRequest) -> Void = { _ in }
+
+        /// The observer that each cancel notification goes to at its arrival.
+        var cancelObserver: @Sendable @MainActor (CancelSessionNotification) -> Void = { _ in }
     }
 
     /// The state of the fake.
@@ -112,13 +115,25 @@ final class FakeSessionRequestSender: SessionRequestSender {
         state.withLock { $0.cancelError = error }
     }
 
-    /// Records the cancel notification and its link.
+    /// Sets the observer that each cancel notification goes to at its
+    /// arrival, on the main actor, before the fake records it. A test reads
+    /// the state of the model at the moment that the cancel goes out.
+    ///
+    /// - Parameter observer: The observer.
+    func observeCancels(_ observer: @escaping @Sendable @MainActor (CancelSessionNotification) -> Void) {
+        state.withLock { $0.cancelObserver = observer }
+    }
+
+    /// Gives the cancel notification to the observer, and records it and its
+    /// link.
     ///
     /// - Parameters:
     ///   - notification: The cancel notification.
     ///   - link: The trace context that the cancel links to, or `nil`.
     /// - Throws: The error of ``failCancels(with:)``, when the test set one.
     func cancel(_ notification: CancelSessionNotification, linkingTo link: JSONValue?) async throws {
+        let observer = state.withLock { $0.cancelObserver }
+        await observer(notification)
         let error = state.withLock { state -> (any Error)? in
             state.cancelNotifications.append(notification)
             state.cancelLinks.append(link)

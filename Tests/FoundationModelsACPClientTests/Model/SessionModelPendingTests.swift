@@ -8,9 +8,9 @@ import Testing
 // session-scoped elicitations become observable pending state on the model. A
 // resolution from the UI, a cancellation of the agent's call, and
 // `cancelAllPending()` each remove the item and resume its continuation one
-// time. A cancel of the turn answers each permission request and keeps each
-// elicitation. An elicitation that names a tool call links to the entry of
-// that tool call while it is pending.
+// time. A cancel of the work answers each permission request and each
+// elicitation before the notification goes out. An elicitation that names a
+// tool call links to the entry of that tool call while it is pending.
 //
 // The wire round trips and the capability test of `PermissionRequestTests` and
 // `ElicitationTests` test the `Client` conformance, which the model does not
@@ -328,7 +328,7 @@ struct SessionModelPendingTests {
         #expect(urlResponse == cancel)
     }
 
-    // MARK: - Cancel of the turn
+    // MARK: - Cancel of the work
 
     @Test func cancelAnswersEachPendingPermissionWithCancelled() async throws {
         let sender = FakeSessionRequestSender()
@@ -348,34 +348,81 @@ struct SessionModelPendingTests {
         #expect(sender.cancelNotifications.count == 1)
     }
 
-    @Test func cancelKeepsPendingElicitations() async throws {
-        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
-        let request = sessionFormRequest()
-        let task = try await startElicitation(on: model, request)
+    /// Elicitation-plan task 29: a cancel of the work answers each pending
+    /// session elicitation with `cancel` and the reason of the client in
+    /// `_meta`, and both pending lists are empty when the notification goes
+    /// to the sender. Before task 29, this test asked that the cancel keep
+    /// the elicitations; the step owner changed that rule.
+    @Test func cancelAnswersEachPendingElicitationWithCancelAndTheClientReason() async throws {
+        let sender = FakeSessionRequestSender()
+        let model = SessionModel(sessionId: testSession, requestSender: sender)
+        model.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: linkedToolCallId, title: .value("Deploy"))))
+        let entry = try #require(model.transcript.first?.toolCall)
+        let permissionTask = SessionModelFixtures.startPermission(on: model)
+        let formTask = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
+        let urlTask = try await startElicitation(
+            on: model,
+            ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
+        )
+        let pendingAtCancel = ThreadSafeBuffer<Int>()
+        sender.observeCancels { _ in
+            pendingAtCancel.append(model.pendingPermissions.count + model.pendingElicitations.count)
+        }
 
         try await model.cancel()
 
-        // A session-scoped elicitation can belong to work that is not the
-        // turn, so the cancel of the turn does not answer it.
-        #expect(model.pendingElicitations.map(\.request) == [request])
-        model.cancelElicitation(try #require(model.pendingElicitations.first).id)
-        _ = await task.value
+        #expect(pendingAtCancel.elements == [0])
+        #expect(entry.linkedElicitationIDs.isEmpty)
+        let cancelled = ElicitationResponseWire.cancelResponse(reason: ACPClient.clientCancelledReason)
+        #expect(await formTask.value == cancelled)
+        #expect(await urlTask.value == cancelled)
+        #expect(await permissionTask.value.outcome == .cancelled)
+        #expect(sender.cancelNotifications.count == 1)
     }
 
-    @Test func aCancelThatFailsToSendStillCancelsThePermissions() async throws {
+    @Test func theReasonOfAClientCancelIsInTheMetaOfTheAnswer() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        let task = try await startElicitation(on: model)
+
+        try await model.cancel()
+
+        let answer = await task.value
+        #expect(
+            answer == .object([
+                "action": .string("cancel"),
+                "_meta": .object(["reason": .string("the client cancelled the work")]),
+            ])
+        )
+    }
+
+    @Test func aCancelWithNoPendingItemSendsOnlyTheNotification() async throws {
+        let sender = FakeSessionRequestSender()
+        let model = SessionModel(sessionId: testSession, requestSender: sender)
+
+        try await model.cancel()
+
+        #expect(sender.cancelNotifications.map(\.sessionId) == [testSession])
+        #expect(model.pendingPermissions.isEmpty)
+        #expect(model.pendingElicitations.isEmpty)
+    }
+
+    @Test func aCancelThatFailsToSendStillCancelsThePermissionsAndTheElicitations() async throws {
         let sender = FakeSessionRequestSender()
         sender.failCancels(with: ConnectionError.closed)
         let model = SessionModel(sessionId: testSession, requestSender: sender)
         let task = SessionModelFixtures.startPermission(on: model)
+        let elicitationTask = try await startElicitation(on: model)
 
         await #expect(throws: ConnectionError.closed) {
             try await model.cancel()
         }
 
-        // The user asked to stop the turn, so the permission does not wait
-        // for an agent that the notification did not reach.
+        // The user asked to stop the work, so no request waits for an agent
+        // that the notification did not reach.
         try #require(model.pendingPermissions.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
         #expect(response.outcome == .cancelled)
+        #expect(await elicitationTask.value == ElicitationResponseWire.cancelResponse(reason: ACPClient.clientCancelledReason))
     }
 }

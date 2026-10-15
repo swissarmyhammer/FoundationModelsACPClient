@@ -191,6 +191,25 @@ struct ConnectionModelElicitationTests {
         try await harness.finish(login)
     }
 
+    /// A cancel of the work of a session answers only the elicitations of
+    /// that session. A request-scoped elicitation belongs to a client request
+    /// (here `auth/login`), so it stays pending on the connection model.
+    @Test func aSessionCancelKeepsTheRequestScopedElicitations() async throws {
+        let harness = await LoginHarness()
+        let (login, requestId) = try await harness.startLogin()
+        let call = try await harness.startElicitation(naming: requestId)
+        let session = harness.model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        harness.model.register(session)
+
+        try await session.cancel()
+
+        let pending = try #require(harness.model.pendingElicitations.first)
+        #expect(pending.requestId == requestId)
+        harness.model.cancelElicitation(pending.id)
+        #expect(try await call.value == ElicitationResponseWire.cancelResponse)
+        try await harness.finish(login)
+    }
+
     // MARK: - Elicitation complete
 
     @Test func aUrlElicitationCompleteClosesTheMatchingRequestScopedElicitation() async throws {

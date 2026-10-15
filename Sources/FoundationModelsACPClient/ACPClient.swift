@@ -38,6 +38,10 @@ public enum ACPClient {
     /// it advertised the other mode.
     public static let unadvertisedElicitationModeReason = "the client did not advertise this elicitation mode"
 
+    /// The reason of the `cancel` that ``SessionModel/cancel(meta:)`` gives to
+    /// each pending session elicitation, before it sends `session/cancel`.
+    public static let clientCancelledReason = "the client cancelled the work"
+
     /// The key of the reason in the `_meta` object of an elicitation
     /// response.
     ///

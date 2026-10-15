@@ -84,19 +84,30 @@ extension SessionModel {
     }
 
     /// Cancels the work of the session: answers each pending permission
-    /// request with the `cancelled` outcome, and then sends the
+    /// request with the `cancelled` outcome, answers each pending
+    /// session-scoped elicitation with the `cancel` action, and then sends the
     /// `session/cancel` notification for this session.
     ///
     /// The ACP prompt lifecycle says that the client MUST respond to all
     /// pending `session/request_permission` requests with the `cancelled`
-    /// outcome when it cancels. Thus ``pendingPermissions`` is empty before
-    /// the notification goes out. The permissions are cancelled also when
-    /// the send fails, because the user asked to stop the work.
+    /// outcome when it cancels. Each pending elicitation gets the `cancel`
+    /// action with the reason ``ACPClient/clientCancelledReason`` in `_meta`,
+    /// under ``ACPClient/elicitationReasonMetaKey``. Thus
+    /// ``pendingPermissions`` and ``pendingElicitations`` are empty before the
+    /// notification goes out. Both are cancelled also when the send fails,
+    /// because the user asked to stop the work. The request-scoped
+    /// elicitations of the ``ConnectionModel`` belong to a client request,
+    /// not to the work of the session, so they stay pending.
     ///
-    /// The pending session-scoped elicitations stay pending. The spec gives
-    /// no such rule for elicitations, and an elicitation can belong to other
-    /// work of the session. Use ``cancelElicitation(_:)`` or
-    /// ``cancelAllPending()`` to answer them.
+    /// The model answers before it sends the notification, but the wire does
+    /// not guarantee that the answers go out before `session/cancel`. The
+    /// answers are correct in each order. An agent can also end a question
+    /// itself when it gets `session/cancel`, so a tool of the agent can get
+    /// either the reason "the client cancelled the work" or the reason of the
+    /// agent (for example "run cancelled"), whichever comes first. The other
+    /// message is safe: a `$/cancel_request` for a request that the client
+    /// already answered does nothing, and a late answer to a request that the
+    /// agent already ended is dropped.
     ///
     /// The agent confirms the cancellation with an idle `state_update` that
     /// has the `cancelled` stop reason, and not with this call. That idle can
@@ -122,6 +133,7 @@ extension SessionModel {
     ///   disconnect.
     public func cancel(meta: JSONValue? = nil) async throws {
         permissions.cancelAll()
+        cancelPendingElicitations(reason: ACPClient.clientCancelledReason)
         let link = TraceContextMeta.extract(from: meta) == nil ? promptTraceMeta : meta
         try await requestSender.cancel(CancelSessionNotification(sessionId: sessionId, meta: meta), linkingTo: link)
     }
