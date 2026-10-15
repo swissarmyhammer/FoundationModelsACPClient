@@ -20,9 +20,9 @@
 // The group kill can miss — `killpg` fails with `ESRCH` for a pid that is no
 // longer a group leader, and with `EPERM` for a group this process may not
 // signal — so the teardown never depends on it. It closes the agent's stdin
-// BEFORE it waits, which is the EOF an ACP agent exits on, and it polls the
-// reap with `WNOHANG` up to a time limit. A teardown therefore always
-// returns; a leak is the worst case, never a hang.
+// BEFORE it waits, which is the EOF an ACP agent exits on. The reap waits for
+// the kqueue exit event of the agent, up to a time limit. A teardown
+// therefore always returns; a leak is the worst case, never a hang.
 //
 // Spawning goes through raw `posix_spawn` rather than `Foundation.Process`,
 // for the sibling's own reason: `Process` gives no public way to put a child
@@ -690,7 +690,7 @@ final class AgentProcessState: Sendable {
     private static let defaultReapTimeLimitSeconds = 5
 
     /// The longest time a teardown waits for the reap of the agent, unless
-    /// ``init(registry:reapTimeLimit:)`` gets a different limit.
+    /// ``init(registry:reapTimeLimit:reapClock:)`` gets a different limit.
     ///
     /// `SIGKILL` ends a process at once, so a reap that needs more time than
     /// this is a process the signal did not reach. The teardown then returns
@@ -700,19 +700,30 @@ final class AgentProcessState: Sendable {
     /// The longest time ``terminateCurrent()`` waits for the reap.
     private let reapTimeLimit: Duration
 
+    /// Sleeps for a duration on the reap clock. It ends the wait of a reap
+    /// when the agent does not exit.
+    private let sleepOnReapClock: @Sendable (Duration) async throws -> Void
+
+    /// The queue of the exit sources of the reaps.
+    private static let reapQueue = DispatchQueue(label: "AgentProcessState.reap")
+
     /// Creates empty bookkeeping backed by `registry`.
     ///
     /// - Parameters:
     ///   - registry: The registry for the spawned pid.
     ///   - reapTimeLimit: The longest time ``terminateCurrent()`` waits for
-    ///     the reap. Tests give a short limit, so a teardown that must give
-    ///     up does so in a fraction of a second.
+    ///     the reap.
+    ///   - reapClock: The clock of the reap time limit. Tests give a manual
+    ///     clock, so a teardown that must give up does so when the test
+    ///     moves the clock, and no test reads the wall clock.
     init(
         registry: ProcessRegistry,
-        reapTimeLimit: Duration = AgentProcessState.defaultReapTimeLimit
+        reapTimeLimit: Duration = AgentProcessState.defaultReapTimeLimit,
+        reapClock: some Clock<Duration> = ContinuousClock()
     ) {
         self.registry = registry
         self.reapTimeLimit = reapTimeLimit
+        sleepOnReapClock = { duration in try await reapClock.sleep(for: duration) }
     }
 
     /// The live pid, or `nil` after teardown.
@@ -811,38 +822,77 @@ final class AgentProcessState: Sendable {
         exitLatch.record(status)
     }
 
-    /// The number of milliseconds in ``reapPollInterval``.
-    private static let reapPollIntervalMilliseconds = 10
+    /// The event that ends the wait of a reap.
+    private enum ReapEvent: Equatable {
+        /// The kernel reported the exit of the child.
+        case exited
 
-    /// The pause between two polls of the reap.
-    private static let reapPollInterval: Duration = .milliseconds(reapPollIntervalMilliseconds)
+        /// The reap time limit passed on the reap clock.
+        case limitPassed
+    }
 
-    /// Collects the exit status of `pid` without a blocking wait: a `WNOHANG`
-    /// poll, repeated at ``reapPollInterval`` until the child is collected or
-    /// the reap time limit ends.
+    /// Collects the exit status of `pid`. The wait ends on the first of two
+    /// events: the exit of the child, or the end of the reap time limit on
+    /// the reap clock. The wait has no poll.
     ///
-    /// `waitpid` answers `0` while the child still runs, the pid when it has
-    /// collected the child, and `-1` when there is nothing to collect: a pid
-    /// that is not a child of this process, or a child already collected.
-    /// Only the first answer is a reason to poll again.
+    /// The steps, in order:
+    /// 1. Arm a kqueue exit source for `pid`. The kernel reports an exit
+    ///    that comes after this step.
+    /// 2. Check one time with `WNOHANG`, for an exit that came before the
+    ///    arm. `waitpid` answers the pid when it collected the child, `-1`
+    ///    when there is nothing to collect (a pid that is not a child of this
+    ///    process, or a child already collected), and `0` when the child
+    ///    runs.
+    /// 3. While the child runs, wait for the exit event or the limit. After
+    ///    the exit event, one blocking `waitpid` collects the child, which
+    ///    already exited. After the limit, the reap gives up.
     ///
     /// - Parameter pid: The pid to collect.
     /// - Returns: How the child ended, decoded from the status `waitpid`
-    ///   wrote, or ``AgentExitStatus/notCollected`` when no answer collected
-    ///   the child.
+    ///   wrote, or ``AgentExitStatus/notCollected`` when the reap did not
+    ///   collect the child.
     private func reap(pid: pid_t) -> AgentExitStatus {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: reapTimeLimit)
-        var status: Int32 = 0
-        var answer = waitpid(pid, &status, WNOHANG)
-        while answer == 0, clock.now < deadline {
-            Thread.sleep(forTimeInterval: Self.reapPollInterval / .seconds(1))
-            answer = waitpid(pid, &status, WNOHANG)
+        let wake = DispatchSemaphore(value: 0)
+        let firstEvent = Mutex<ReapEvent?>(nil)
+        let record: @Sendable (ReapEvent) -> Void = { event in
+            let isFirst = firstEvent.withLock { current -> Bool in
+                guard current == nil else { return false }
+                current = event
+                return true
+            }
+            if isFirst {
+                wake.signal()
+            }
         }
-        guard answer == pid else {
+
+        let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: Self.reapQueue)
+        exitSource.setEventHandler { record(.exited) }
+        exitSource.activate()
+        defer { exitSource.cancel() }
+
+        var status: Int32 = 0
+        let earlyAnswer = waitpid(pid, &status, WNOHANG)
+        guard earlyAnswer == 0 else {
+            return earlyAnswer == pid ? AgentExitStatus(waitStatus: status) : .notCollected
+        }
+
+        let limit = Task { [sleepOnReapClock, reapTimeLimit] in
+            // A cancel ends the sleep early. The exit came first then, so
+            // this record changes nothing.
+            try? await sleepOnReapClock(reapTimeLimit)
+            record(.limitPassed)
+        }
+        defer { limit.cancel() }
+        wake.wait()
+
+        guard firstEvent.withLock({ $0 }) == .exited else {
             return .notCollected
         }
-        return AgentExitStatus(waitStatus: status)
+        var answer: pid_t
+        repeat {
+            answer = waitpid(pid, &status, 0)
+        } while answer == -1 && errno == EINTR
+        return answer == pid ? AgentExitStatus(waitStatus: status) : .notCollected
     }
 
     /// Owner teardown: once nothing retains this state, ARC runs the same
