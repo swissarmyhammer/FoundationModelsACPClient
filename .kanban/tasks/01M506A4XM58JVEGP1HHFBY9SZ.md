@@ -19,6 +19,15 @@ comments:
     - The step owner decided the fix: FoundationModelsACP gives ACPClient a synchronous hook on the reader, in frame order, when the response of newSession is decoded, with the new session id. ACPClient then marks "session X is opening". A routed request for X that misses waits until X is registered or its open failed. A request for each other unknown session gets cancel at once, as today.
     - No red test for new is in the suite yet. The order on the old code depends on timing, so a test of it fails only sometimes. A fixed-order red test needs the hook.
   timestamp: 2026-10-15T16:32:59.425128+00:00
+- actor: claude-code
+  id: 01m50741gngg3bmnfn81fsdccv
+  text: |-
+    ### Decision of the step owner
+    - d321543 (the resume fix) is accepted.
+    - Do not add an intermittent known-issue test for session/new. Such a test proves nothing.
+    - Next: when the FoundationModelsACP hook exists, write the deterministic red test for session/new, and then the fix.
+    - This card stays open until then.
+  timestamp: 2026-10-15T16:42:56.917862+00:00
 position_column: todo
 position_ordinal: '80'
 title: 'Defect: a request of the agent at once after session/resume or session/new gets cancel, because the model registers the session too late'
