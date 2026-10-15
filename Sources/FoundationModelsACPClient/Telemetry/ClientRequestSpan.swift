@@ -136,14 +136,14 @@ public enum ClientRequestSpan {
     /// `session/cancel` of a turn is a child of the `session/prompt` of the
     /// turn.
     public struct ParentContext: Sendable {
-        /// The service context that holds the span context.
-        let serviceContext: ServiceContext
+        /// The instrumentation context that holds the span context.
+        let instrumentationContext: InstrumentationContext
 
         /// The trace context of the running task.
         ///
         /// It is the top-level context when the task has no context.
         public static var current: ParentContext {
-            ParentContext(serviceContext: ServiceContext.current ?? .topLevel)
+            ParentContext(instrumentationContext: InstrumentationContext.current ?? .topLevel)
         }
     }
 
@@ -190,7 +190,7 @@ public enum ClientRequestSpan {
         let result: Result<Output, any Error> = try await withRequestSpan(
             named: ACPClientTelemetry.SpanName.request,
             ofKind: .client,
-            in: (parent ?? .current).serviceContext,
+            in: (parent ?? .current).instrumentationContext,
             tracer: activeTracer,
             logger: logger,
             method: method,
@@ -213,7 +213,7 @@ public enum ClientRequestSpan {
     /// hold the same attributes and write the same "enter" record. Only the
     /// name, the kind and the start context of the two spans are different.
     ///
-    /// The function sets `startContext` as the service context of the task,
+    /// The function sets `startContext` as the instrumentation context of the task,
     /// and then opens the span through `TracedCall` of FoundationModelsExtras.
     /// Thus the span is a child of the span in `startContext`, or a root span
     /// when `startContext` holds no span. The span holds the ACP method, and
@@ -223,7 +223,7 @@ public enum ClientRequestSpan {
     /// - Parameters:
     ///   - spanName: The name of the span.
     ///   - kind: The kind of the span.
-    ///   - startContext: The service context that the span starts in.
+    ///   - startContext: The instrumentation context that the span starts in.
     ///   - tracer: The tracer of the span.
     ///   - logger: The logger of the "enter" record, or `nil` for a new logger
     ///     with the label ``ACPClientTelemetry/logLabel``.
@@ -235,14 +235,14 @@ public enum ClientRequestSpan {
     nonisolated(nonsending) static func withRequestSpan<Output>(
         named spanName: String,
         ofKind kind: SpanKind,
-        in startContext: ServiceContext,
+        in startContext: InstrumentationContext,
         tracer: any Tracer,
         logger: Logger?,
         method: String,
         sessionId: SessionId?,
         _ body: nonisolated(nonsending) (any Span) async throws -> Output
     ) async throws -> Output {
-        try await ServiceContext.withValue(startContext) {
+        try await InstrumentationContext.withValue(startContext) {
             try await TracedCall.run(
                 spanName,
                 ofKind: kind,

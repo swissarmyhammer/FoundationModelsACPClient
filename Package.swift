@@ -49,10 +49,13 @@ let package = Package(
         // target (the OpenTelemetry design of 2026-09-28). API only: this
         // package links no backend and bootstraps none. The host application
         // bootstraps a backend. Until it does, each span, each logger and each
-        // metric of the library does nothing. The floors are the floors of
-        // `FoundationModelsExtras`, which already puts these three packages
-        // into the graph.
-        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.4.1"),
+        // metric of the library does nothing. `FoundationModelsExtras` already
+        // puts these three packages into the graph. The tracing floor is
+        // 1.6.0, the first version with `InstrumentationContext` (the name that
+        // replaces the deprecated `ServiceContext`), as in
+        // FoundationModelsACPAgent. The other floors are the floors of
+        // `FoundationModelsExtras`.
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.6.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.15.1"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.11.0"),
     ],

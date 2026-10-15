@@ -81,9 +81,9 @@ extension ClientRequestSpan.ParentContext {
         }
         var fields = [SpanIdentity.traceparentField: traceContext.traceparent]
         fields[SpanIdentity.tracestateField] = traceContext.tracestate
-        var context = ServiceContext.current ?? .topLevel
+        var context = InstrumentationContext.current ?? .topLevel
         tracer.extract(fields, into: &context, using: TraceFieldExtractor())
-        self.init(serviceContext: context)
+        self.init(instrumentationContext: context)
     }
 }
 

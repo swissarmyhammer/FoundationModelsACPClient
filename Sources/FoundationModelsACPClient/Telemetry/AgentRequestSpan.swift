@@ -98,7 +98,7 @@ enum AgentRequestSpan {
     /// - Returns: The context with the span context of the agent when `meta`
     ///   holds a valid W3C `traceparent`, or else the top-level context, so
     ///   that the span starts a new trace.
-    private static func startContext(of meta: JSONValue?, tracer: any Tracer) -> ServiceContext {
-        ClientRequestSpan.ParentContext(extractingFrom: meta, tracer: tracer)?.serviceContext ?? .topLevel
+    private static func startContext(of meta: JSONValue?, tracer: any Tracer) -> InstrumentationContext {
+        ClientRequestSpan.ParentContext(extractingFrom: meta, tracer: tracer)?.instrumentationContext ?? .topLevel
     }
 }
