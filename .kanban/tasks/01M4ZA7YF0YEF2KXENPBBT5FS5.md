@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z939HBTNVJ8F4X94C99WW9
-position_column: todo
-position_ordinal: '8680'
+position_column: done
+position_ordinal: f680
 title: 'Gap G3: no test for state updates with no prompt open, an idle with no stop reason, and two open prompts'
 ---
 Found in T0. The model code already accepts each case (it stores each `state_update` as is, at any time, and links each local prompt by its own `messageId`). No test proves it in the new ACPAgent order.

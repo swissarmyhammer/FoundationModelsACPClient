@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z939HBTNVJ8F4X94C99WW9
-position_column: todo
-position_ordinal: '8580'
+position_column: done
+position_ordinal: f580
 title: 'Gap G2: the stub agent sends its prompt script before the prompt response (old turn order)'
 ---
 #mail-step-6 Found in T0.

@@ -3,8 +3,8 @@ assignees:
 - claude-code
 depends_on:
 - 01M4Z939HBTNVJ8F4X94C99WW9
-position_column: todo
-position_ordinal: '8780'
+position_column: done
+position_ordinal: f780
 title: 'Gap G4: no test that an agent $/cancel_request of an elicitation/create removes the pending elicitation'
 ---
 Found in T0. When Router ends an open question (a run cancel, `cancelAll`, close), ACPAgent ends its `elicitation/create` request with `$/cancel_request`. FoundationModelsACP cancels the handler task of the request, and `PendingRequestQueue` removes the item on that cancel.
