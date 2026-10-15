@@ -2,10 +2,10 @@ import Foundation
 import FoundationModelsACP
 
 // The requests of a session: the prompt, with its local pending user message
-// and its error entry, the cancel of the turn, which also answers the pending
-// permission requests, and the set-config-option request. Each request goes
-// through the injected `SessionRequestSender`. A `_meta` parameter lets the
-// caller give the trace parent of the request.
+// and its error entry, the cancel of the work of the session, which also
+// answers the pending permission requests, and the set-config-option request.
+// Each request goes through the injected `SessionRequestSender`. A `_meta`
+// parameter lets the caller give members of the `_meta` of the request.
 
 extension SessionModel {
     /// Sends `session/prompt` with the content as the user message.
@@ -22,7 +22,7 @@ extension SessionModel {
     /// and data of the failure, and the call throws the error again.
     ///
     /// When the request goes out, the model records its W3C trace context in
-    /// ``promptTraceMeta``, so a cancel of the turn can join its trace.
+    /// ``promptTraceMeta``, so a later cancel can link to its span.
     ///
     /// The prompt is mail: the agent answers when it accepts the message, and
     /// not when its work ends. The work comes after the response, as session
@@ -83,19 +83,19 @@ extension SessionModel {
         appendError(code: failure.code, message: failure.message, data: failure.data)
     }
 
-    /// Cancels the turn: answers each pending permission request with the
-    /// `cancelled` outcome, and then sends the `session/cancel` notification
-    /// for this session.
+    /// Cancels the work of the session: answers each pending permission
+    /// request with the `cancelled` outcome, and then sends the
+    /// `session/cancel` notification for this session.
     ///
     /// The ACP prompt lifecycle says that the client MUST respond to all
     /// pending `session/request_permission` requests with the `cancelled`
-    /// outcome when it cancels a turn. Thus ``pendingPermissions`` is empty
-    /// before the notification goes out. The permissions are cancelled also
-    /// when the send fails, because the user asked to stop the turn.
+    /// outcome when it cancels. Thus ``pendingPermissions`` is empty before
+    /// the notification goes out. The permissions are cancelled also when
+    /// the send fails, because the user asked to stop the work.
     ///
     /// The pending session-scoped elicitations stay pending. The spec gives
-    /// no such rule for elicitations, and an elicitation can belong to work
-    /// that is not the turn. Use ``cancelElicitation(_:)`` or
+    /// no such rule for elicitations, and an elicitation can belong to other
+    /// work of the session. Use ``cancelElicitation(_:)`` or
     /// ``cancelAllPending()`` to answer them.
     ///
     /// The agent confirms the cancellation with an idle `state_update` that
@@ -103,18 +103,27 @@ extension SessionModel {
     /// come later than the answer to the prompt, and after other updates of
     /// the work that the agent stops.
     ///
-    /// When `meta` holds a W3C `traceparent`, for example the `_meta` that
-    /// the `session/prompt` of the turn sent, the `session/cancel` span is a
-    /// child of the span that the `traceparent` names, so the cancel joins
-    /// the trace of the turn.
+    /// The cancel acts on the work of the whole session, not on one prompt.
+    /// Thus the `session/cancel` span starts in the trace context of the
+    /// caller, as each other request does: it is a child of the span of the
+    /// caller, or a root span when the caller has no span. It is never a
+    /// child of a prompt span. The span links to one earlier span:
     ///
-    /// - Parameter meta: The `_meta` field of the notification, for example
-    ///   the trace parent, or `nil`.
+    /// - the span that the W3C `traceparent` in `meta` names, when `meta`
+    ///   holds one; or else
+    /// - the span of the last prompt of this model (``promptTraceMeta``),
+    ///   when there is one.
+    ///
+    /// The `_meta` of the notification keeps each member of `meta`, and the
+    /// trace context of the cancel span replaces its trace context members.
+    ///
+    /// - Parameter meta: The `_meta` field of the notification, or `nil`.
     /// - Throws: The error of the sender: `ConnectionError` after a
     ///   disconnect.
     public func cancel(meta: JSONValue? = nil) async throws {
         permissions.cancelAll()
-        try await requestSender.cancel(CancelSessionNotification(sessionId: sessionId, meta: meta))
+        let link = TraceContextMeta.extract(from: meta) == nil ? promptTraceMeta : meta
+        try await requestSender.cancel(CancelSessionNotification(sessionId: sessionId, meta: meta), linkingTo: link)
     }
 
     /// Sends `session/set_config_option` as the caller made it.

@@ -11,7 +11,7 @@ protocol SessionRequestSender: Sendable {
     /// The sender calls `willSend` one time, with the request exactly as it
     /// goes out, before the request goes out. The real sender gives the
     /// request the W3C trace context of its client span in `_meta`, so
-    /// `willSend` sees that trace context while the turn still runs.
+    /// `willSend` sees that trace context before the request goes out.
     ///
     /// - Parameters:
     ///   - request: The prompt request.
@@ -29,9 +29,12 @@ protocol SessionRequestSender: Sendable {
 
     /// Sends the `session/cancel` notification.
     ///
-    /// - Parameter notification: The cancel notification.
+    /// - Parameters:
+    ///   - notification: The cancel notification.
+    ///   - link: A `_meta` value whose W3C `traceparent` names the span that
+    ///     the cancel span links to, or `nil` for no link.
     /// - Throws: `ConnectionError` after a disconnect.
-    func cancel(_ notification: CancelSessionNotification) async throws
+    func cancel(_ notification: CancelSessionNotification, linkingTo link: JSONValue?) async throws
 
     /// Sends `session/set_config_option`.
     ///

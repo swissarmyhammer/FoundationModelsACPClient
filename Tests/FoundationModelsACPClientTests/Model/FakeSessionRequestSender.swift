@@ -23,6 +23,9 @@ final class FakeSessionRequestSender: SessionRequestSender {
         /// The cancel notifications, in arrival order.
         var cancelNotifications: [CancelSessionNotification] = []
 
+        /// The link of each cancel, in arrival order.
+        var cancelLinks: [JSONValue?] = []
+
         /// The error that each cancel throws after the fake records it, or
         /// `nil` to send each cancel.
         var cancelError: (any Error)?
@@ -56,6 +59,11 @@ final class FakeSessionRequestSender: SessionRequestSender {
     /// The cancel notifications, in arrival order.
     var cancelNotifications: [CancelSessionNotification] {
         state.withLock { $0.cancelNotifications }
+    }
+
+    /// The link of each cancel, in arrival order.
+    var cancelLinks: [JSONValue?] {
+        state.withLock { $0.cancelLinks }
     }
 
     /// The set-config-option requests, in arrival order.
@@ -104,13 +112,16 @@ final class FakeSessionRequestSender: SessionRequestSender {
         state.withLock { $0.cancelError = error }
     }
 
-    /// Records the cancel notification.
+    /// Records the cancel notification and its link.
     ///
-    /// - Parameter notification: The cancel notification.
+    /// - Parameters:
+    ///   - notification: The cancel notification.
+    ///   - link: The trace context that the cancel links to, or `nil`.
     /// - Throws: The error of ``failCancels(with:)``, when the test set one.
-    func cancel(_ notification: CancelSessionNotification) async throws {
+    func cancel(_ notification: CancelSessionNotification, linkingTo link: JSONValue?) async throws {
         let error = state.withLock { state -> (any Error)? in
             state.cancelNotifications.append(notification)
+            state.cancelLinks.append(link)
             return state.cancelError
         }
         if let error {

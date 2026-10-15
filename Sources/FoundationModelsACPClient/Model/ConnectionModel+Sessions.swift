@@ -11,7 +11,7 @@ import Tracing
 //
 // Each request goes out through `sendRecordingAuth(_:through:)`: the client
 // request span, the request metrics, and the W3C trace context in the `_meta`
-// of the request of `ClientRequestSpan.send(_:parent:through:)`, and a
+// of the request of `ClientRequestSpan.send(_:parent:link:through:)`, and a
 // `-32000` answer of the agent recorded in `authState`. Each resume also runs
 // in one internal replay span, and the client span of its request is a child
 // of that span.

@@ -6,11 +6,11 @@ import Tracing
 /// span.
 ///
 /// Each conforming type names its ACP wire method and the session that it
-/// names, and lets ``ClientRequestSpan/send(_:parent:through:)`` put the W3C
+/// names, and lets ``ClientRequestSpan/send(_:parent:link:through:)`` put the W3C
 /// trace context of the span into its `_meta`. The models send each request
 /// through that function, so each request of the models gets the span, the
 /// metrics and the trace context of
-/// ``ClientRequestSpan/run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
+/// ``ClientRequestSpan/run(method:sessionId:meta:parent:link:tracer:logger:metricsFactory:_:)``.
 protocol TracedClientMessage: Sendable {
     /// The ACP wire method of the message, for example
     /// ``ClientRequestSpan/Method/prompt``.
@@ -31,13 +31,15 @@ extension ClientRequestSpan {
     /// `message`, adds the W3C trace context of the span to it, and gives the
     /// message with that `_meta` to `send`. The span, the "enter" log record
     /// and the metrics are those of
-    /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``,
+    /// ``run(method:sessionId:meta:parent:link:tracer:logger:metricsFactory:_:)``,
     /// with the method and the session of the message.
     ///
     /// - Parameters:
     ///   - message: The message as the caller made it.
     ///   - parent: The trace context to start the span in, or `nil` for the
     ///     context of the running task.
+    ///   - link: The trace context of a span that the new span links to, with
+    ///     no parent relation, or `nil` for no link.
     ///   - send: Sends the message. It gets the message with the traced
     ///     `_meta`.
     /// - Returns: The value of `send`.
@@ -45,13 +47,15 @@ extension ClientRequestSpan {
     nonisolated(nonsending) static func send<Message: TracedClientMessage, Output>(
         _ message: Message,
         parent: ParentContext? = nil,
+        link: ParentContext? = nil,
         through send: nonisolated(nonsending) (Message) async throws -> Output
     ) async throws -> Output {
         try await run(
             method: Message.method,
             sessionId: message.tracedSessionId,
             meta: message.meta,
-            parent: parent
+            parent: parent,
+            link: link
         ) { meta in
             var traced = message
             traced.meta = meta
@@ -63,9 +67,9 @@ extension ClientRequestSpan {
 extension ClientRequestSpan.ParentContext {
     /// Reads the trace context that a `_meta` value names.
     ///
-    /// A caller gives the `_meta` of an earlier request, for example the
-    /// `_meta` of the `session/prompt` of a turn, so that a later request of
-    /// the same work joins its trace as a child of its span. The context keeps
+    /// A caller gives the `_meta` of an earlier message, for example the
+    /// `_meta` of a request of the agent, so that a later span joins its trace
+    /// as a child of its span, or links to its span. The context keeps
     /// the values of the context of the running task, and takes the span
     /// context that `tracer` extracts from the W3C `traceparent` and
     /// `tracestate` members.
@@ -180,7 +184,7 @@ extension CancelSessionNotification: TracedClientMessage {
     /// The `session/cancel` method.
     static let method = ClientRequestSpan.Method.cancelSession
 
-    /// The session whose turn to cancel.
+    /// The session whose work to cancel.
     var tracedSessionId: SessionId? { sessionId }
 }
 

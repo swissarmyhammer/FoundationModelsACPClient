@@ -73,7 +73,7 @@ import Tracing
 public enum ClientRequestSpan {
     /// The ACP wire method names that the models send, and the ACP wire method names that the agent sends to the
     /// client. A host can give each of these, or another ACP method name, as the `method` of
-    /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``.
+    /// ``run(method:sessionId:meta:parent:link:tracer:logger:metricsFactory:_:)``.
     public enum Method {
         /// The `initialize` request.
         public static let initialize = "initialize"
@@ -98,7 +98,7 @@ public enum ClientRequestSpan {
         /// The request that closes a session.
         public static let closeSession = "session/close"
 
-        /// The notification that cancels the turn of a session.
+        /// The notification that cancels the work of a session.
         public static let cancelSession = "session/cancel"
 
         /// The request that changes one configuration option of a session.
@@ -128,13 +128,19 @@ public enum ClientRequestSpan {
     /// opaque, so that a caller can keep and give a context without the
     /// tracing API. ``current`` gives the context of the running task. In the
     /// `send` closure of
-    /// ``run(method:sessionId:meta:parent:tracer:logger:metricsFactory:_:)``,
+    /// ``run(method:sessionId:meta:parent:link:tracer:logger:metricsFactory:_:)``,
     /// that is the context of the request span.
     ///
-    /// A request that belongs to an earlier request, but runs on another task,
-    /// uses this type to join the trace of that request. For example, the
-    /// `session/cancel` of a turn is a child of the `session/prompt` of the
-    /// turn.
+    /// A span that belongs to work that started in another task or in another
+    /// process uses this type to join the trace of that work. For example, the
+    /// server span of a request of the agent (``AgentRequestSpan``) is a child
+    /// of the agent span that the `traceparent` in the `_meta` of the request
+    /// names.
+    ///
+    /// A request span can also link to the span of a context, with no
+    /// parent relation. The `session/cancel` of a session model links to the
+    /// span of the last prompt: the cancel acts on the work of the whole
+    /// session, not on one prompt.
     public struct ParentContext: Sendable {
         /// The instrumentation context that holds the span context.
         let instrumentationContext: InstrumentationContext
@@ -165,6 +171,8 @@ public enum ClientRequestSpan {
     ///     each member, and sets the trace context members.
     ///   - parent: The trace context to start the span in, or `nil` for the
     ///     context of the running task.
+    ///   - link: The trace context of a span that the new span links to, with
+    ///     no parent relation, or `nil` for no link.
     ///   - tracer: The tracer of the span, or `nil` to use
     ///     `InstrumentationSystem.tracer` at call time.
     ///   - logger: The logger of the "enter" record, or `nil` for a new logger
@@ -181,6 +189,7 @@ public enum ClientRequestSpan {
         sessionId: SessionId?,
         meta: JSONValue? = nil,
         parent: ParentContext? = nil,
+        link: ParentContext? = nil,
         tracer: (any Tracer)? = nil,
         logger: Logger? = nil,
         metricsFactory: any MetricsFactory = MetricsSystem.factory,
@@ -196,7 +205,10 @@ public enum ClientRequestSpan {
             method: method,
             sessionId: sessionId
         ) { span in
-            await outcome(
+            if let link {
+                span.addLink(SpanLink(context: link.instrumentationContext, attributes: [:]))
+            }
+            return await outcome(
                 of: send,
                 meta: injected(into: meta, from: span, by: activeTracer),
                 in: span,

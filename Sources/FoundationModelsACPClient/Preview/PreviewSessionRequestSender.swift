@@ -67,8 +67,10 @@ public final class PreviewSessionRequestSender: SessionRequestSender {
 
     /// Sends nothing.
     ///
-    /// - Parameter notification: The cancel notification.
-    func cancel(_ notification: CancelSessionNotification) async throws {}
+    /// - Parameters:
+    ///   - notification: The cancel notification.
+    ///   - link: The trace context that the cancel links to; not used.
+    func cancel(_ notification: CancelSessionNotification, linkingTo link: JSONValue?) async throws {}
 
     /// Sends nothing.
     ///

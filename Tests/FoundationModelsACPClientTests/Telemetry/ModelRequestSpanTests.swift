@@ -10,7 +10,7 @@ import Testing
 // These tests cover the telemetry of each request that `ConnectionModel` and
 // `SessionModel` send: one client span, one request count and one duration
 // for each request, the W3C `traceparent` of that span in the `_meta` of the
-// request, the trace parent of `session/cancel`, and no content in the
+// request, the parent and the link of `session/cancel`, and no content in the
 // telemetry.
 //
 // Each test runs in a `TelemetryCapture`. The capture binds its tracer and its
@@ -91,6 +91,33 @@ private enum ModelRequestFixtures {
                 sessionListPages: emptySessionList
             )
         }
+    }
+
+    /// Gives the trace id and the span id of each span that a span links to,
+    /// in link order, as "trace id/span id".
+    ///
+    /// - Parameter span: The finished span.
+    /// - Returns: The identity of each linked span.
+    static func linkedSpans(of span: FinishedInMemorySpan) -> [String] {
+        span.links.compactMap { $0.context.inMemorySpanContext }.map { "\($0.traceID)/\($0.spanID)" }
+    }
+
+    /// Gives the trace id and the span id of a span as "trace id/span id".
+    ///
+    /// - Parameter span: The finished span.
+    /// - Returns: The identity of the span.
+    static func identity(of span: FinishedInMemorySpan) -> String {
+        "\(span.traceID)/\(span.spanID)"
+    }
+
+    /// Gives the span id that the W3C `traceparent` of a `_meta` value names.
+    ///
+    /// - Parameter meta: The `_meta` value.
+    /// - Returns: The span id, or `nil` when `meta` holds no valid
+    ///   `traceparent`.
+    static func spanID(in meta: JSONValue?) -> String? {
+        guard let meta, let identity = try? RequestTelemetry.traceparentIdentity(in: meta) else { return nil }
+        return identity.spanID
     }
 
     /// Sends `session/cancel` for a session, and waits until the agent
@@ -305,9 +332,15 @@ struct ModelRequestSpanTests {
     }
 
     /// A `session/cancel` whose `_meta` holds the `traceparent` of the
-    /// prompt span is a child of that prompt span, in the trace of the
-    /// prompt. The agent gets the `traceparent` of the cancel span.
-    @Test func aCancelWithThePromptTraceparentIsAChildOfThePromptSpan() async throws {
+    /// prompt span links to that prompt span, and is not its child: a cancel
+    /// acts on the work of the whole session, not on one prompt. With no
+    /// caller span, the cancel span is a root span of a new trace. The agent
+    /// gets the `traceparent` of the cancel span.
+    ///
+    /// Before task 32 (elicitation-plan), this test asked that the cancel span
+    /// be a child of the prompt span. That was the defect, so the test now
+    /// asks for the link.
+    @Test func aCancelLinksToThePromptSpanAndIsNotItsChild() async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
             try await connected.initialize()
@@ -321,14 +354,76 @@ struct ModelRequestSpanTests {
             let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
             let cancelMeta = try #require(connected.receivedMeta(of: ClientRequestSpan.Method.cancelSession).first)
             let identity = try RequestTelemetry.traceparentIdentity(in: cancelMeta)
-            #expect(cancelSpan.traceID == promptSpan.traceID)
-            #expect(cancelSpan.parentSpanID == promptSpan.spanID)
+            #expect(cancelSpan.parentSpanID == nil)
+            #expect(cancelSpan.traceID != promptSpan.traceID)
+            #expect(ModelRequestFixtures.linkedSpans(of: cancelSpan) == [ModelRequestFixtures.identity(of: promptSpan)])
             #expect(identity.spanID == cancelSpan.spanID)
         }
     }
 
+    /// A cancel with no trace context in its `_meta` links to the span of
+    /// the last prompt of the session model by itself.
+    @Test func aCancelWithNoMetaLinksToTheLastPromptSpan() async throws {
+        try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
+            let connected = await ModelRequestFixtures.connect()
+            try await connected.initialize()
+            let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
+            _ = try await session.prompt(ModelRequestFixtures.promptContent)
+            _ = try await session.prompt(ModelRequestFixtures.promptContent)
+
+            try await ModelRequestFixtures.cancelAndWaitForIdle(session)
+
+            let promptSpans = context.requestSpans(of: ClientRequestSpan.Method.prompt)
+            try #require(promptSpans.count == 2)
+            let lastPrompt = try #require(
+                promptSpans.first { $0.spanID == ModelRequestFixtures.spanID(in: session.promptTraceMeta) }
+            )
+            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
+            #expect(cancelSpan.parentSpanID == nil)
+            #expect(ModelRequestFixtures.linkedSpans(of: cancelSpan) == [ModelRequestFixtures.identity(of: lastPrompt)])
+        }
+    }
+
+    /// A cancel before the first prompt of the session model has no link.
+    @Test func aCancelBeforeAnyPromptHasNoLink() async throws {
+        try await TelemetryCapture.run(forbidding: []) { context in
+            let connected = await ModelRequestFixtures.connect()
+            try await connected.initialize()
+            let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
+
+            try await session.cancel()
+
+            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
+            #expect(cancelSpan.parentSpanID == nil)
+            #expect(cancelSpan.links.isEmpty)
+        }
+    }
+
+    /// A cancel inside a span of the caller, for example a UI action span, is
+    /// a child of that span, and it links to the last prompt span.
+    @Test func aCancelInsideACallerSpanIsItsChildAndLinksToThePrompt() async throws {
+        let callerSpanName = "caller.cancel-action"
+        try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
+            let connected = await ModelRequestFixtures.connect()
+            try await connected.initialize()
+            let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
+            _ = try await session.prompt(ModelRequestFixtures.promptContent)
+
+            try await context.tracer.withSpan(callerSpanName) { _ in
+                try await session.cancel()
+            }
+
+            let caller = try #require(context.spans.first { $0.operationName == callerSpanName })
+            let promptSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.prompt).first)
+            let cancelSpan = try #require(context.requestSpans(of: ClientRequestSpan.Method.cancelSession).first)
+            #expect(cancelSpan.parentSpanID == caller.spanID)
+            #expect(cancelSpan.traceID == caller.traceID)
+            #expect(ModelRequestFixtures.linkedSpans(of: cancelSpan) == [ModelRequestFixtures.identity(of: promptSpan)])
+        }
+    }
+
     /// No span, log record or metric of each request of the models holds the
-    /// prompt or the answer of the turn.
+    /// prompt or the answer of the agent.
     @Test func theModelRequestsPutNoContentIntoTelemetry() async throws {
         let content = [ModelRequestFixtures.promptText, ModelRequestFixtures.answerText]
         try await TelemetryCapture.run(forbidding: content) { context in

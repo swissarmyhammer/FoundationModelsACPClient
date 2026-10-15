@@ -175,7 +175,7 @@ public enum ACPClientTelemetry {
         public static let selected = "selected"
 
         /// The permission request was cancelled, for example because the
-        /// turn was cancelled.
+        /// work of the session was cancelled.
         public static let cancelled = "cancelled"
 
         /// The user accepted an elicitation.

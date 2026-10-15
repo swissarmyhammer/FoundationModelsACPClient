@@ -23,7 +23,7 @@ import FoundationModelsACP
 //   to `auth/login`. The client does not send a method of an unknown type.
 //
 // Each request goes out in a client request span, through
-// `ClientRequestSpan.send(_:parent:through:)`: the span, the request metrics,
+// `ClientRequestSpan.send(_:parent:link:through:)`: the span, the request metrics,
 // and the W3C trace context in the `_meta` of the request.
 
 extension ConnectionModel {

@@ -271,8 +271,10 @@ public final class SessionModel: Identifiable {
     /// the last prompt went out with no trace context.
     ///
     /// The model records it when the request goes out, before the agent
-    /// answers. Give it as the `meta` of ``cancel(meta:)``, so that the
-    /// `session/cancel` span of the turn is a child of the prompt span.
+    /// answers. A ``cancel(meta:)`` with no trace context in its `meta` links
+    /// its `session/cancel` span to the span of this prompt. The cancel span
+    /// is not a child of the prompt span: a cancel acts on the work of the
+    /// whole session, not on one prompt.
     @ObservationIgnored public internal(set) var promptTraceMeta: JSONValue?
 
     /// Receives the session id and the new ``sessionInfo`` each time a

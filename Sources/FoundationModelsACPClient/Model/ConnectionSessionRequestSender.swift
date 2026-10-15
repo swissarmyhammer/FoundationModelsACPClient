@@ -7,7 +7,7 @@ import FoundationModelsACP
 /// the agent over the connection that opened the session.
 ///
 /// Each request goes out in a client request span, through
-/// ``ClientRequestSpan/send(_:parent:through:)``: the span, the request
+/// ``ClientRequestSpan/send(_:parent:link:through:)``: the span, the request
 /// metrics, and the W3C trace context in the `_meta` of the request. The
 /// `_meta` that the caller gives stays, and the trace context is added to it.
 ///
@@ -49,17 +49,21 @@ struct ConnectionSessionRequestSender: SessionRequestSender {
 
     /// Sends the `session/cancel` notification in a client request span.
     ///
-    /// When the `_meta` of the notification holds a W3C `traceparent`, for
-    /// example the `_meta` of the `session/prompt` of the turn, the span is a
-    /// child of the span that the `traceparent` names. The cancel then joins
-    /// the trace of the turn, also when it runs on another task.
+    /// The cancel acts on the work of the whole session, not on one prompt.
+    /// Thus the span starts in the trace context of the running task, as each
+    /// other request does, and is never a child of a prompt span. When `link`
+    /// holds a W3C `traceparent`, for example the trace context of the last
+    /// prompt, the span links to the span that it names.
     ///
-    /// - Parameter notification: The cancel notification.
+    /// - Parameters:
+    ///   - notification: The cancel notification.
+    ///   - link: A `_meta` value whose W3C `traceparent` names the span that
+    ///     the cancel span links to, or `nil` for no link.
     /// - Throws: `ConnectionError` after a disconnect.
-    func cancel(_ notification: CancelSessionNotification) async throws {
+    func cancel(_ notification: CancelSessionNotification, linkingTo link: JSONValue?) async throws {
         try await ClientRequestSpan.send(
             notification,
-            parent: ClientRequestSpan.ParentContext(extractingFrom: notification.meta)
+            link: ClientRequestSpan.ParentContext(extractingFrom: link)
         ) { try await connection.sessionCancel($0) }
     }
 

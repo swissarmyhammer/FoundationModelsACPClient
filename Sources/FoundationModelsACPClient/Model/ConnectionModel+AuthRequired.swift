@@ -53,7 +53,7 @@ extension ConnectionModel {
     ///
     /// The span, the request metrics, and the W3C trace context in the
     /// `_meta` of the request are those of
-    /// `ClientRequestSpan.send(_:parent:through:)`.
+    /// `ClientRequestSpan.send(_:parent:link:through:)`.
     ///
     /// - Parameters:
     ///   - message: The request as the caller made it.
