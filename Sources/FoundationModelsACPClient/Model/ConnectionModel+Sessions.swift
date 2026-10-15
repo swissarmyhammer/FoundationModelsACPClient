@@ -56,7 +56,22 @@ extension ConnectionModel {
         try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.newSession)
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
-        let response = try await sendRecordingAuth(sent) { try await connection.newSession($0) }
+        // The hook of the wire marks the session as opening on the reader,
+        // before the next frame. Each exit of this call ends that open, so a
+        // request that waits for it gets the model, or cancel on a failure.
+        let ticket = OpeningTicket()
+        let opening = openingSessions
+        defer {
+            if let opened = ticket.recorded {
+                opening.finish(opened)
+            }
+        }
+        let response = try await sendRecordingAuth(sent) {
+            try await connection.newSession($0) { answer in
+                ticket.record(answer.sessionId)
+                opening.markOpening(answer.sessionId)
+            }
+        }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
         // The list goes in before the stream task of the model can fold an
         // update, so a status update that the agent sends after the response
@@ -64,8 +79,30 @@ extension ConnectionModel {
         session.setMCPServers(sent.mcpServers ?? [])
         session.setWorkspace(of: sent)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
+        if let beforeRegisteringNewSession {
+            await beforeRegisteringNewSession(response.sessionId)
+        }
         try register(session, openedOver: connection)
         return session
+    }
+
+    /// Gives the open model of a session, and waits first when the session
+    /// is opening.
+    ///
+    /// The router calls this for each request of the agent that names a
+    /// session. When the `session/new` answer of the session arrived and its
+    /// model is not registered yet, the call waits until the open ends, and
+    /// then reads the open sessions again. For each other session that is not
+    /// open, it returns `nil` at once.
+    ///
+    /// - Parameter sessionId: The id of the session.
+    /// - Returns: The model, or `nil` when the session is not open.
+    func openSession(waitingWhileOpening sessionId: SessionId) async -> SessionModel? {
+        if let open = session(for: sessionId) {
+            return open
+        }
+        await openingSessions.waitWhileOpening(sessionId)
+        return session(for: sessionId)
     }
 
     // MARK: - Resume session

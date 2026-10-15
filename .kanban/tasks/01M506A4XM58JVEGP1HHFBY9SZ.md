@@ -28,8 +28,23 @@ comments:
     - Next: when the FoundationModelsACP hook exists, write the deterministic red test for session/new, and then the fix.
     - This card stays open until then.
   timestamp: 2026-10-15T16:42:56.917862+00:00
-position_column: todo
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m50bjv118drq7js7txy38vbr
+  text: |-
+    ### session/new: fixed (option A of the step owner)
+    - FoundationModelsACP is at fb55b2f, which has the hook newSession(_:onResponse:).
+    - The hook marks the new session as opening in OpeningSessions, a Mutex store, on the reader in frame order. newSession ends the open in a defer: after the register, or after a failure.
+    - The router (permission and session elicitation) calls ConnectionModel.openSession(waitingWhileOpening:). On a miss for an opening session, it waits until the open ends and reads again. A request for each other unknown session gets cancel at once, as before.
+    - The internal test seam beforeRegisteringNewSession is nil outside the tests.
+    - Red, then green: aQuestionThatReachesTheRouterBeforeTheNewSessionRegisterWaitsForIt holds the register until the routed question waits.
+      - With the seam and no hold, it failed in a fixed order: cancel, nothing pending.
+      - With the hold, it passes.
+    - The one-write wire test is an end-to-end check. Its doc says that it does not prove the order. In one run with no hold, it failed too, which shows the race.
+    - Found on the way: ^tnf8rmm (session(for:) was not observed while a session is not open). That card is fixed and done.
+    - Full run: 542 tests in 43 suites pass. IntegrationTests builds.
+  timestamp: 2026-10-15T18:00:56.097398+00:00
+position_column: done
+position_ordinal: fe80
 title: 'Defect: a request of the agent at once after session/resume or session/new gets cancel, because the model registers the session too late'
 ---
 From AgentViewKit step 7 (^4tw540d), in ACPClient 838bbad.

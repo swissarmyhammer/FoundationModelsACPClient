@@ -12,6 +12,10 @@ import FoundationModelsACP
 ///   elicitation, or else to the request-scoped elicitations of the
 ///   ``ConnectionModel``.
 ///
+/// A request for a session whose `session/new` answer arrived, and whose
+/// model is not registered yet, waits until the open ends. The agent can send
+/// such a request in the frame directly after the answer.
+///
 /// The router answers at once when no model can take a request: a permission
 /// request gets the `cancelled` outcome, and an elicitation gets the `cancel`
 /// action. These are the answers of the spec for a request that nobody
@@ -164,7 +168,7 @@ struct ModelClient: Client {
     /// - Parameter params: The permission request.
     /// - Returns: The user's decision, or `nil` when the session is not open.
     private func routePermission(_ params: RequestPermissionRequest) async -> RequestPermissionResponse? {
-        guard let model, let session = await model.session(for: params.sessionId) else {
+        guard let model, let session = await model.openSession(waitingWhileOpening: params.sessionId) else {
             let warning = Self.closedSessionWarning(
                 answer: "cancelled",
                 request: "a permission request",
@@ -207,7 +211,7 @@ struct ModelClient: Client {
         _ request: CreateElicitationRequest,
         sessionId: SessionId
     ) async -> CreateElicitationResponse? {
-        guard let session = await model?.session(for: sessionId) else {
+        guard let session = await model?.openSession(waitingWhileOpening: sessionId) else {
             logger.log(Self.closedSessionWarning(answer: "cancel", request: "an elicitation", sessionId: sessionId))
             return nil
         }

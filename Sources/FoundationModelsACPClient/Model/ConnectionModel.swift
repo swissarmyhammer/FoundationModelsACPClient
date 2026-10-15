@@ -128,6 +128,17 @@ public final class ConnectionModel {
     /// overlap would share one replay state.
     @ObservationIgnored let resumeTurns = KeyedTurnQueue<SessionId>()
 
+    /// The sessions whose `session/new` answer arrived and whose model is not
+    /// registered yet. The router waits for such a session, so a request of
+    /// the agent directly after the answer is not answered with cancel.
+    @ObservationIgnored let openingSessions = OpeningSessions()
+
+    /// A test seam: it runs after the answer of a `session/new` request and
+    /// before ``newSession(_:)`` registers the model of the session. It is
+    /// `nil`, and does nothing, outside the tests. A test holds it to fix the
+    /// order of the register and a request of the agent.
+    @ObservationIgnored var beforeRegisteringNewSession: (@MainActor (SessionId) async -> Void)?
+
     /// The cadence between coalesced flushes of each session model that this
     /// connection makes.
     @ObservationIgnored private let coalescingCadence: Duration
@@ -346,11 +357,16 @@ public final class ConnectionModel {
 
     /// Gives the model of an open session.
     ///
+    /// The call always reads ``openSessions``, also when the session is not
+    /// open. Thus an observer of the call sees the register of the session
+    /// later, for example a SwiftUI view that waits for a session to open.
+    ///
     /// - Parameter sessionId: The id of the session.
     /// - Returns: The model, or `nil` when the session is not open.
     public func session(for sessionId: SessionId) -> SessionModel? {
+        let sessions = openSessions
         guard let position = openSessionPositions[sessionId] else { return nil }
-        return openSessions[position]
+        return sessions[position]
     }
 
     /// Makes the model of a session, with the coalescing cadence, the clock,
