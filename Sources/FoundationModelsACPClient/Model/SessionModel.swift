@@ -156,9 +156,11 @@ public final class SessionModel: Identifiable {
     /// ``acceptElicitation(_:content:)`` of a url-mode elicitation answers the
     /// agent and moves the item from ``pendingElicitations`` to this list,
     /// with the same id. The `elicitation/complete` of the agent, a call of
-    /// ``stopWaiting(_:)``, ``cancel(meta:)``, ``cancelAllPending()`` and the
-    /// close remove it. None of them sends a message to the agent, because
-    /// the agent already has the answer.
+    /// ``stopWaiting(_:)``, ``cancel(meta:)``, ``cancelAllPending()``, the
+    /// start of a resume and the close remove it. None of them sends a
+    /// message to the agent, because the agent already has the answer. A
+    /// resume ends the live events of the earlier attachment, so no
+    /// `elicitation/complete` can come for these items.
     public internal(set) var awaitingURLCompletions: [PendingElicitation] = []
 
     /// The pending requests that the agent withdrew with `$/cancel_request`,
@@ -256,9 +258,9 @@ public final class SessionModel: Identifiable {
 
     /// The pending permission requests and the continuation of each one.
     /// The queue is observable, so a read of ``pendingPermissions`` tracks it.
-    @ObservationIgnored let permissions = PendingRequestQueue<PendingPermissionRequest, RequestPermissionResponse>(
-        cancelledResponse: PendingPermissionRequest.cancelledResponse
-    )
+    /// It shares one arrival space with ``elicitations``, so
+    /// ``pendingRequests`` can merge the two queues in arrival order.
+    @ObservationIgnored let permissions: PendingRequestQueue<PendingPermissionRequest, RequestPermissionResponse>
 
     /// The callers of ``selectPermission(_:option:)`` and
     /// ``cancelPermission(_:)`` that wait until the connection wrote the
@@ -268,9 +270,7 @@ public final class SessionModel: Identifiable {
     /// The pending session-scoped elicitations and the continuation of each
     /// one. The queue is observable, so a read of ``pendingElicitations``
     /// tracks it.
-    @ObservationIgnored let elicitations = PendingRequestQueue<PendingElicitation, CreateElicitationResponse>(
-        cancelledResponse: ElicitationResponseWire.cancelResponse
-    )
+    @ObservationIgnored let elicitations: PendingRequestQueue<PendingElicitation, CreateElicitationResponse>
 
     /// The ids of the pending elicitations that name a tool call with no
     /// transcript entry yet, keyed by that tool call. The entry takes the ids
@@ -376,6 +376,9 @@ public final class SessionModel: Identifiable {
         self.elapsedTime = Self.makeElapsedTime(on: clock)
         self.timekeeper = TranscriptTimekeeper(now: now)
         self.logger = logger
+        let arrivals = PendingArrivalSpace()
+        permissions = PendingRequestQueue(cancelledResponse: PendingPermissionRequest.cancelledResponse, arrivals: arrivals)
+        elicitations = PendingRequestQueue(cancelledResponse: ElicitationResponseWire.cancelResponse, arrivals: arrivals)
         let clearFront: @MainActor (UUID) -> Void = { [weak self] id in
             self?.clearFrontRequest(ifItIs: id)
         }

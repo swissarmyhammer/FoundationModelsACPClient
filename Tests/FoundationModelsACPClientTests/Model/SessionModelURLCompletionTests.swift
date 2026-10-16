@@ -6,8 +6,9 @@ import Testing
 
 // The tests of `SessionModel.awaitingURLCompletions`: an accepted url-mode
 // elicitation waits there for the `elicitation/complete` of the agent. The
-// completion, `stopWaiting(_:)`, `cancel(meta:)`, `cancelAllPending()` and
-// the close remove it, and none of them sends a message to the agent.
+// completion, `stopWaiting(_:)`, `cancel(meta:)`, `cancelAllPending()`, the
+// start of a resume and the close remove it, and none of them sends a message
+// to the agent.
 
 /// The URL completion tests of the session model, in one suite so that
 /// `swift test --filter SessionModelURLCompletionTests` selects them.
@@ -154,6 +155,19 @@ struct SessionModelURLCompletionTests {
         model.cancelAllPending()
 
         #expect(model.awaitingURLCompletions.isEmpty)
+    }
+
+    /// An agent that ends the session at a resume sends no
+    /// `elicitation/complete` for an item that waits, so the start of the
+    /// resume removes it. The old code keeps the item, and it waits for ever.
+    @Test func theStartOfAResumeRemovesEachAwaitingItem() async throws {
+        let model = makeModel()
+        _ = try await acceptURLElicitation(on: model)
+
+        model.beginReplay(replayFrom: nil)
+
+        #expect(model.awaitingURLCompletions.isEmpty)
+        #expect(sender.cancelNotifications.isEmpty)
     }
 
     @Test func theCloseRemovesEachAwaitingItem() async throws {

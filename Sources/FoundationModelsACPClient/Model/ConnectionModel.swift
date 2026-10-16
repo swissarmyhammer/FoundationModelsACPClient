@@ -117,6 +117,12 @@ public final class ConnectionModel {
     /// that comes from an earlier connection changes nothing.
     @ObservationIgnored private(set) var connection: ClientSideConnection?
 
+    /// The generation of the connection: each connect and each recorded
+    /// close add 1 to it. A request-scoped elicitation reads it before and
+    /// after its wait, so a record of a withdrawal on an earlier connection
+    /// never comes into ``withdrawnRequests`` of a later one.
+    @ObservationIgnored private(set) var connectionGeneration = 0
+
     /// The pending request-scoped elicitations and the continuation of each
     /// one. The queue is observable, so a read of ``pendingElicitations``
     /// tracks it.
@@ -183,6 +189,12 @@ public final class ConnectionModel {
     /// `nil`, and does nothing, outside the tests. A test holds it to fix the
     /// order of the register and a request of the agent.
     @ObservationIgnored var beforeRegisteringNewSession: (@MainActor (SessionId) async -> Void)?
+
+    /// A test seam: it runs after the wait of a request-scoped elicitation
+    /// ends and before the model decides on its record in
+    /// ``withdrawnRequests``. It is `nil`, and does nothing, outside the
+    /// tests. A test holds it to make a new connection in that window.
+    @ObservationIgnored var afterRequestScopedElicitationWait: (@MainActor () async -> Void)?
 
     /// The cadence between coalesced flushes of each session model that this
     /// connection makes.
@@ -288,11 +300,15 @@ public final class ConnectionModel {
         client wrap: @escaping @Sendable @MainActor (any Client) -> any Client = { $0 }
     ) async -> ClientSideConnection {
         state = .connecting
+        connectionGeneration += 1
         initializeResponse = nil
         authState = .unknown
         hasAdvertisedTerminalAuth = false
         advertisedElicitation = nil
         stopWatchingRequests()
+        // The wire numbers of the new connection start at 0 again. The stop
+        // above cancelled each pending elicitation, so the queue is empty.
+        elicitations.arrivalSpace.reset()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger
         // The factory of the connection is not main-actor isolated, so the
@@ -357,6 +373,7 @@ public final class ConnectionModel {
     private func connectionDidClose(_ closed: ClientSideConnection, because reason: ConnectionCloseReason) {
         guard closed === connection else { return }
         connection = nil
+        connectionGeneration += 1
         state = ConnectionState(closedBecause: reason)
         stopWatchingRequests()
         closeOpenSessions()

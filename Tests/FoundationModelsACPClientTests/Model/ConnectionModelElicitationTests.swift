@@ -121,6 +121,14 @@ private struct LoginHarness {
     }
 }
 
+/// Records that a test seam ran. A wait reads ``ran``, so the set of it ends
+/// the wait.
+@MainActor @Observable
+private final class SeamProbe {
+    /// Whether the seam ran.
+    var ran = false
+}
+
 /// The request-scoped elicitation tests of the connection model, in one suite
 /// so that `swift test --filter ConnectionModelElicitationTests` selects them.
 @MainActor
@@ -207,6 +215,39 @@ struct ConnectionModelElicitationTests {
         #expect(harness.model.withdrawnRequests.isEmpty)
         _ = try? await call.value
         try await harness.finish(login)
+    }
+
+    /// The agent withdraws a request-scoped elicitation, and the host makes a
+    /// new connection before the task of the elicitation resumes. The record
+    /// belongs to the old connection, so it must not come into the list of
+    /// the new one. The seam fixes the order: the new connection comes after
+    /// the wait ended and before the model decides on the record. The old
+    /// code checks only that some connection is open, and makes the record.
+    @Test func aWithdrawalOfAnOldConnectionGivesNoRecordOnTheNewConnection() async throws {
+        let harness = await LoginHarness()
+        let (login, requestId) = try await harness.startLogin()
+        let call = try await harness.startElicitation(naming: requestId)
+        let (newClientEnd, newAgentEnd) = InMemoryTransport.pair()
+        let probe = SeamProbe()
+        harness.model.afterRequestScopedElicitationWait = { [model = harness.model] in
+            _ = await model.connect(over: newClientEnd)
+            probe.ran = true
+        }
+
+        call.cancel()
+        // The seam sets the state to connecting, so only a close is the
+        // failure event of this wait.
+        try await waitUntil {
+            probe.ran || ![ConnectionState.connected, .connecting].contains(harness.model.state)
+        }
+
+        try #require(probe.ran)
+        #expect(harness.model.withdrawnRequests.isEmpty)
+        _ = try? await call.value
+        harness.loginGate.open()
+        _ = try? await login.value
+        await harness.model.disconnect()
+        newAgentEnd.close()
     }
 
     // MARK: - Front

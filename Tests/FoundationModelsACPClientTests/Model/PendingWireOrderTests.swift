@@ -63,6 +63,30 @@ struct PendingWireOrderTests {
         _ = await (first.value, second.value, elicitation.value)
     }
 
+    /// A request with no wire number and a request with a wire number get
+    /// numbers of one space. A request with no wire number goes after each
+    /// wire request that came before it, so a later wire request goes after
+    /// it. The old code takes a process-wide number for a request with no wire
+    /// number, and the wire numbers of a connection start at 0, so it puts
+    /// "wire" in front of "first" or of "second".
+    @Test func aRequestWithNoWireNumberAndAWireRequestKeepTheirArrivalOrder() async throws {
+        let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+
+        let first = Task { await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "first")) }
+        try await waitUntil { model.pendingRequests.count == 1 }
+        let second = Task { await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "second")) }
+        try await waitUntil { model.pendingRequests.count == 2 }
+        let wire = Task {
+            await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "wire"), arrival: 0)
+        }
+        try await waitUntil { model.pendingRequests.count == 3 }
+
+        #expect(model.pendingRequests.map(label(of:)) == ["first", "second", "wire"])
+
+        model.cancelAllPending()
+        _ = await (first.value, second.value, wire.value)
+    }
+
     /// Two permission requests and one elicitation in one transport write are
     /// pending on the session model in wire order.
     @Test func requestsInOneWriteArePendingInWireOrder() async throws {

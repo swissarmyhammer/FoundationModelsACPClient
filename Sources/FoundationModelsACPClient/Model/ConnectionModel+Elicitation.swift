@@ -101,10 +101,14 @@ extension ConnectionModel {
     ) async -> CreateElicitationResponse? {
         guard let method = connection?.inFlightMethod(for: requestId) else { return nil }
         let pending = PendingElicitation(id: UUID(), request: request, requestMethod: method)
+        let generation = connectionGeneration
         let (response, cancelledByTask) = await elicitations.awaitResponse(to: pending, arrival: arrival)
-        // A record needs the agent's `$/cancel_request`, not a close, and an
-        // open connection.
-        if cancelledByTask, connection != nil, WithdrawnRequest.currentTaskWasWithdrawnByPeer {
+        await afterRequestScopedElicitationWait?()
+        // A record needs the agent's `$/cancel_request`, not a close, and the
+        // same open connection as the elicitation: after a close or a new
+        // connection, the record would belong to a connection that is gone.
+        let isSameConnection = generation == connectionGeneration && connection != nil
+        if cancelledByTask, isSameConnection, WithdrawnRequest.currentTaskWasWithdrawnByPeer {
             let record = WithdrawnRequest(request: .elicitation(pending), cancelMeta: ClientSideConnection.cancelRequestMeta)
             withdrawnRequests.append(record)
         }

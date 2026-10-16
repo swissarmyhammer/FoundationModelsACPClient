@@ -173,7 +173,10 @@ extension SessionModel {
     ///
     /// Call this before the request goes out, with the `replayFrom` cursor of
     /// the request. The model clears ``notices``, because a notice is a live
-    /// event of the earlier attachment and no replay gives it again. When the
+    /// event of the earlier attachment and no replay gives it again. It also
+    /// empties ``awaitingURLCompletions``: a resume ends the live events of
+    /// the earlier attachment, so no `elicitation/complete` can come for
+    /// these items. When the
     /// request asks for a replay and the model already has a transcript, the
     /// model also clears its transcript and its last-value state, because a
     /// replayed chunk appends again and would double the text. The count of
@@ -183,6 +186,10 @@ extension SessionModel {
     ///   client sends, or `nil` for no replay.
     func beginReplay(replayFrom: ReplayFrom?) {
         clearNotices()
+        // A resume ends the live events of the earlier attachment, so no
+        // `elicitation/complete` can come for these items. The agent already
+        // has each answer, so nothing goes to the agent.
+        awaitingURLCompletions.removeAll()
         if replayFrom != nil, !transcript.isEmpty {
             flushPendingChunks()
             resetTranscript()

@@ -14,8 +14,9 @@ import Foundation
 ///   response.
 /// - Cancellation of the task that awaits the call resumes it with the
 ///   cancelled response. The connection cancels that task when the agent
-///   withdraws the request, when the turn gets cancelled, or when the
-///   transport closes.
+///   withdraws the request with `$/cancel_request`, or when the transport
+///   closes. A `session/cancel` that the client sends does not cancel that
+///   task: ``SessionModel/cancel(meta:)`` answers each pending item itself.
 ///
 /// This is the concurrency policy: more than one item can be pending at the
 /// same time. Each item keeps its position until it resolves, and each item
@@ -23,17 +24,20 @@ import Foundation
 @MainActor @Observable
 final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendable> where Item.ID == UUID {
     /// The items that wait for the user's answer, in arrival order: the
-    /// order of their arrival numbers.
+    /// order of their arrival positions.
     private(set) var items: [Item] = []
 
     /// The suspended call of each unresolved item, keyed by the item id. The
     /// storage is not observable; the UI binds to ``items`` instead.
     @ObservationIgnored private let calls: KeyedWaiters<UUID, Response>
 
-    /// The arrival number of each item in ``items``, keyed by the item id.
-    /// The number is the one that the caller gave, or else a number from
-    /// ``PendingArrivalCounter`` when the call suspends.
-    @ObservationIgnored private var arrivals: [UUID: UInt64] = [:]
+    /// The arrival position of each item in ``items``, keyed by the item id.
+    /// ``arrivalSpace`` gives it when the call suspends.
+    @ObservationIgnored private var arrivals: [UUID: PendingArrival] = [:]
+
+    /// The number space of the arrival positions. The queues of one model
+    /// share one space, so their positions are comparable.
+    @ObservationIgnored let arrivalSpace: PendingArrivalSpace
 
     /// The id of each item that the cancel of its own task removed, until its
     /// call returns. ``awaitResponse(to:arrival:)`` reads and removes the id.
@@ -48,28 +52,32 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
 
     /// Makes an empty queue.
     ///
-    /// - Parameter cancelledResponse: The response for an item that the user
-    ///   did not decide.
-    init(cancelledResponse: Response) {
+    /// - Parameters:
+    ///   - cancelledResponse: The response for an item that the user did not
+    ///     decide.
+    ///   - arrivals: The arrival space of the model. Give each queue of one
+    ///     model the same space.
+    init(cancelledResponse: Response, arrivals: PendingArrivalSpace = PendingArrivalSpace()) {
         self.cancelledResponse = cancelledResponse
+        arrivalSpace = arrivals
         calls = KeyedWaiters(cancelledValue: cancelledResponse)
     }
 
     /// Suspends until a resolution of the item arrives.
     ///
     /// The item goes into ``items`` before the first item with a larger
-    /// arrival number. The connection handles each request of the agent in
+    /// arrival position. The connection handles each request of the agent in
     /// its own task, so a request can get here after a request that was later
     /// on the wire. With the wire number as `arrival`, ``items`` is still in
-    /// wire order.
+    /// wire order. ``arrivalSpace`` gives the position of each item in one
+    /// number space, also for an item with no wire number.
     ///
     /// - Parameters:
     ///   - item: The pending item. Its id names it in the resolution calls.
-    ///   - arrival: The arrival number of the item, for example
-    ///     `ClientSideConnection.currentRequestArrival`, or `nil` to take the
-    ///     next number of ``PendingArrivalCounter`` when the call suspends.
-    ///     Give the numbers of one queue from one source: the numbers of the
-    ///     connection and of the counter are not comparable.
+    ///   - arrival: The wire arrival number of the item, for example
+    ///     `ClientSideConnection.currentRequestArrival`, or `nil` when the
+    ///     item has none. An item with no wire number goes after each item
+    ///     that is pending when its call suspends.
     /// - Returns: The response of the resolution, or the cancelled response,
     ///   and whether the cancel of the task of the call removed the item.
     ///   That flag is `false` for each resolution of the user or of the
@@ -83,9 +91,9 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
         let response = await calls.wait(
             for: id,
             onSuspend: {
-                let number = arrival ?? PendingArrivalCounter.next()
-                arrivals[id] = number
-                let index = items.firstIndex { (arrivals[$0.id] ?? 0) > number } ?? items.endIndex
+                let position = arrivalSpace.arrival(wireNumber: arrival)
+                arrivals[id] = position
+                let index = items.firstIndex { arrivals[$0.id].map { $0 > position } ?? false } ?? items.endIndex
                 items.insert(item, at: index)
             },
             onCancel: { [weak self] in
@@ -100,11 +108,11 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     }
 
     /// Gives each item of ``items`` as a ``PendingRequest``, with its
-    /// arrival number. A read of it tracks ``items``.
+    /// arrival position. A read of it tracks ``items``.
     ///
     /// - Parameter wrap: Makes the request of one item.
-    /// - Returns: The requests, in arrival order, each with its number.
-    func requestsWithArrival(_ wrap: (Item) -> PendingRequest) -> [(arrival: UInt64, request: PendingRequest)] {
+    /// - Returns: The requests, in arrival order, each with its position.
+    func requestsWithArrival(_ wrap: (Item) -> PendingRequest) -> [(arrival: PendingArrival, request: PendingRequest)] {
         items.compactMap { item in
             arrivals[item.id].map { (arrival: $0, request: wrap(item)) }
         }
