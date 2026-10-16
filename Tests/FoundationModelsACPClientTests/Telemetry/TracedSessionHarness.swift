@@ -66,15 +66,35 @@ struct RunningTurn {
     /// The task that sends the prompt and waits for the answer of the agent.
     let prompt: Task<Void, any Error>
 
-    /// Waits until the agent answers the prompt and reports `idle`.
+    /// Tells when the task of the prompt ended, as observable state.
+    let promptEnd: TaskEnd
+
+    /// Makes the turn, and starts to watch the end of its prompt.
     ///
-    /// - Throws: Whatever the prompt threw.
+    /// - Parameters:
+    ///   - session: The model of the session of the turn.
+    ///   - prompt: The task that sends the prompt.
+    init(session: SessionModel, prompt: Task<Void, any Error>) {
+        self.session = session
+        self.prompt = prompt
+        promptEnd = TaskEnd(of: prompt)
+    }
+
+    /// Whether the turn can make no more requests: the prompt ended, or the
+    /// session closed. A wait for a request of the agent in this turn uses
+    /// it as its failure event. It reads only observable state.
+    var hasEnded: Bool {
+        promptEnd.hasEnded || session.isClosed
+    }
+
+    /// Waits until the agent answers the prompt and reports `idle`. The close
+    /// of the session is the failure event of the wait for `idle`.
+    ///
+    /// - Throws: Whatever the prompt threw, or ``WaitEndedOnFailure`` when the
+    ///   session closed before it reported `idle`.
     func finish() async throws {
         try await prompt.value
-        try await waitUntil {
-            guard case .idle = session.agentState else { return false }
-            return true
-        }
+        try await waitForIdle(of: session)
     }
 }
 
@@ -239,6 +259,10 @@ struct TracedSessionHarness {
     }
 
     /// Closes the connection.
+    ///
+    /// The first close of a connection sets its close reason, and a second
+    /// close changes nothing. So a test can close in a `defer`, also when the
+    /// body throws, and also close in its body before it reads the telemetry.
     func teardown() async {
         await model.connection?.close()
         withExtendedLifetime(agentConnection) {}

@@ -7,6 +7,10 @@ import Testing
 // `AgentRequestSpanRoutingTests` answer the permission requests and the
 // elicitations of the agent through the `SessionModel` of the turn, as a user
 // does. The two suites use these helpers, so the answer flow has one copy.
+//
+// Each wait for a pending request ends also on the end of the turn: when the
+// prompt ended or the session closed, the agent asks for nothing more, so the
+// request never comes (rule T1).
 
 /// One answer that the user gives to an elicitation, and the outcome that the
 /// span of the elicitation records for it.
@@ -40,14 +44,17 @@ enum ElicitationAnswer: CaseIterable, Sendable {
         }
     }
 
-    /// Waits until the session holds a pending elicitation, and gives this
-    /// answer to the first one.
+    /// Waits until the session of the turn holds a pending elicitation, and
+    /// gives this answer to the first one.
     ///
-    /// - Parameter session: The session model that holds the elicitation.
-    /// - Throws: The error of `#require`.
+    /// - Parameter turn: The running turn whose session holds the
+    ///   elicitation.
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure`` when the
+    ///   turn ended before the elicitation came.
     @MainActor
-    func give(in session: SessionModel) async throws {
-        let pending = try await UserAnswers.firstPendingElicitation(of: session)
+    func give(in turn: RunningTurn) async throws {
+        let session = turn.session
+        let pending = try await UserAnswers.firstPendingElicitation(of: turn)
         switch self {
         case .accept: session.acceptElicitation(pending.id, content: Self.formContent)
         case .decline: session.declineElicitation(pending.id)
@@ -60,47 +67,53 @@ enum ElicitationAnswer: CaseIterable, Sendable {
 /// session, and the waits for the pending requests.
 @MainActor
 enum UserAnswers {
-    /// Waits until the session holds a pending permission request, and gives
-    /// the first one.
+    /// Waits until the session of the turn holds a pending permission
+    /// request, and gives the first one.
     ///
-    /// - Parameter session: The session model of the turn.
+    /// - Parameter turn: The running turn.
     /// - Returns: The first pending permission request.
-    /// - Throws: The error of `#require`.
-    static func firstPendingPermission(of session: SessionModel) async throws -> PendingPermissionRequest {
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure`` when the
+    ///   turn ended before the request came.
+    static func firstPendingPermission(of turn: RunningTurn) async throws -> PendingPermissionRequest {
+        let session = turn.session
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: { turn.hasEnded }
         return try #require(session.pendingPermissions.first)
     }
 
-    /// Waits until the session holds a pending elicitation, and gives the
-    /// first one.
+    /// Waits until the session of the turn holds a pending elicitation, and
+    /// gives the first one.
     ///
-    /// - Parameter session: The session model of the turn.
+    /// - Parameter turn: The running turn.
     /// - Returns: The first pending elicitation.
-    /// - Throws: The error of `#require`.
-    static func firstPendingElicitation(of session: SessionModel) async throws -> PendingElicitation {
-        try await waitUntil { !session.pendingElicitations.isEmpty }
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure`` when the
+    ///   turn ended before the elicitation came.
+    static func firstPendingElicitation(of turn: RunningTurn) async throws -> PendingElicitation {
+        let session = turn.session
+        try await waitUntil { !session.pendingElicitations.isEmpty } orFailWhen: { turn.hasEnded }
         return try #require(session.pendingElicitations.first)
     }
 
-    /// Waits until the session holds a pending permission request, and
-    /// selects one option of it.
+    /// Waits until the session of the turn holds a pending permission
+    /// request, and selects one option of it.
     ///
     /// - Parameters:
     ///   - option: The id of the option that the user selects.
-    ///   - session: The session model of the turn.
-    /// - Throws: The error of `#require`.
-    static func selectPermission(_ option: PermissionOptionId, in session: SessionModel) async throws {
-        let pending = try await firstPendingPermission(of: session)
-        await session.selectPermission(pending.id, option: option)
+    ///   - turn: The running turn.
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure`` when the
+    ///   turn ended before the request came.
+    static func selectPermission(_ option: PermissionOptionId, in turn: RunningTurn) async throws {
+        let pending = try await firstPendingPermission(of: turn)
+        await turn.session.selectPermission(pending.id, option: option)
     }
 
-    /// Waits until the session holds a pending permission request, and
-    /// cancels it.
+    /// Waits until the session of the turn holds a pending permission
+    /// request, and cancels it.
     ///
-    /// - Parameter session: The session model of the turn.
-    /// - Throws: The error of `#require`.
-    static func cancelPermission(in session: SessionModel) async throws {
-        let pending = try await firstPendingPermission(of: session)
-        await session.cancelPermission(pending.id)
+    /// - Parameter turn: The running turn.
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure`` when the
+    ///   turn ended before the request came.
+    static func cancelPermission(in turn: RunningTurn) async throws {
+        let pending = try await firstPendingPermission(of: turn)
+        await turn.session.cancelPermission(pending.id)
     }
 }

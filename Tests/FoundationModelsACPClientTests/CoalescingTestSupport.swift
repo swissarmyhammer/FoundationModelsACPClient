@@ -216,19 +216,3 @@ final class MutationCounter: Sendable {
         count.withLock { $0 += 1 }
     }
 }
-
-/// Waits until the condition is true, with no clock, no poll and no time
-/// limit.
-///
-/// The wait reads `condition` again after each change of the observable state
-/// that it reads, and after each ``TestChangeSignal/post()`` of a test store
-/// that is not observable, for example the sleepers of ``ManualClock``.
-///
-/// - Parameter condition: The condition to wait for.
-@MainActor
-func waitFor(_ condition: @escaping @MainActor () -> Bool) async {
-    await waitForObservation {
-        _ = TestChangeSignal.shared.generation
-        return condition()
-    }
-}

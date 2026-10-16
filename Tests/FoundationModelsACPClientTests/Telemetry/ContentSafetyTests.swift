@@ -178,10 +178,13 @@ struct ContentSafetyTests {
                 permissionRoute: .model,
                 elicitation: Self.elicitation
             )
+            // The close in the body comes before the check of the signals.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.initialize()
             let turn = try await harness.startTurn()
-            try await UserAnswers.selectPermission(Self.permissionOption.optionId, in: turn.session)
-            try await ElicitationAnswer.accept.give(in: turn.session)
+            try await UserAnswers.selectPermission(Self.permissionOption.optionId, in: turn)
+            try await ElicitationAnswer.accept.give(in: turn)
             try await turn.finish()
             try await harness.closeTheTurnSession()
             await harness.teardown()
@@ -200,6 +203,9 @@ struct ContentSafetyTests {
                 cwd: Fixture.workingDirectory,
                 promptError: Self.refusal
             )
+            // The close in the body comes before the check of the signals.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.initialize()
             await #expect(throws: Self.refusal) {
                 try await harness.runTurn()

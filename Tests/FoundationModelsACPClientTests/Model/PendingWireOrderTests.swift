@@ -44,16 +44,21 @@ struct PendingWireOrderTests {
     @Test func aRequestWithASmallerArrivalGoesInFrontOfTheRequestsThatCameFirst() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
+        // The model has no connection. Each wait ends also on the end of the
+        // task that must add the request: a task that ended did not add it.
         let second = Task {
             await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "second"), arrival: 2)
         }
-        try await waitUntil { model.pendingRequests.count == 1 }
+        let secondEnd = TaskEnd(of: second)
+        try await waitUntil { model.pendingRequests.count == 1 } orFailWhen: { secondEnd.hasEnded }
         let elicitation = Task { await model.awaitElicitation(sessionElicitation, arrival: 3) }
-        try await waitUntil { model.pendingRequests.count == 2 }
+        let elicitationEnd = TaskEnd(of: elicitation)
+        try await waitUntil { model.pendingRequests.count == 2 } orFailWhen: { elicitationEnd.hasEnded }
         let first = Task {
             await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "first"), arrival: 1)
         }
-        try await waitUntil { model.pendingRequests.count == 3 }
+        let firstEnd = TaskEnd(of: first)
+        try await waitUntil { model.pendingRequests.count == 3 } orFailWhen: { firstEnd.hasEnded }
 
         #expect(model.pendingRequests.map(label(of:)) == ["first", "second", "elicitation"])
         #expect(model.pendingPermissions.map(\.request.title) == ["first", "second"])
@@ -72,14 +77,19 @@ struct PendingWireOrderTests {
     @Test func aRequestWithNoWireNumberAndAWireRequestKeepTheirArrivalOrder() async throws {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
+        // The model has no connection. Each wait ends also on the end of the
+        // task that must add the request: a task that ended did not add it.
         let first = Task { await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "first")) }
-        try await waitUntil { model.pendingRequests.count == 1 }
+        let firstEnd = TaskEnd(of: first)
+        try await waitUntil { model.pendingRequests.count == 1 } orFailWhen: { firstEnd.hasEnded }
         let second = Task { await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "second")) }
-        try await waitUntil { model.pendingRequests.count == 2 }
+        let secondEnd = TaskEnd(of: second)
+        try await waitUntil { model.pendingRequests.count == 2 } orFailWhen: { secondEnd.hasEnded }
         let wire = Task {
             await model.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest(title: "wire"), arrival: 0)
         }
-        try await waitUntil { model.pendingRequests.count == 3 }
+        let wireEnd = TaskEnd(of: wire)
+        try await waitUntil { model.pendingRequests.count == 3 } orFailWhen: { wireEnd.hasEnded }
 
         #expect(model.pendingRequests.map(label(of:)) == ["first", "second", "wire"])
 
@@ -103,12 +113,14 @@ struct PendingWireOrderTests {
                 params: SessionModelFixtures.permissionRequest(title: "second")
             )
         let (model, session, agentRun) = try await RawBurstAgent.connect(burst: burst)
-        defer { agentRun.cancel() }
+        defer {
+            await model.disconnect()
+            agentRun.cancel()
+        }
 
-        await waitFor { session.pendingRequests.count == wireOrder.count || session.isClosed }
+        try await waitUntil { session.pendingRequests.count == wireOrder.count } orFailWhen: { session.isClosed }
 
         #expect(session.pendingRequests.map(label(of:)) == wireOrder)
         #expect(session.pendingPermissions.map(\.request.title) == ["first", "second"])
-        await model.disconnect()
     }
 }

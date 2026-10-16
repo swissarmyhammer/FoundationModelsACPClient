@@ -154,6 +154,7 @@ struct ConnectionModelListTests {
 
     @Test func twoPagesLoadInOrderWithTheSameWorkingDirectory() async throws {
         let connected = try await SessionListFixtures.connect()
+        defer { await connected.model.disconnect() }
 
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         #expect(connected.model.hasMoreSessions)
@@ -169,6 +170,7 @@ struct ConnectionModelListTests {
 
     @Test func aRefreshStartsAgainAtTheFirstPageAndReplacesTheList() async throws {
         let connected = try await SessionListFixtures.connect()
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         try await connected.model.loadMoreSessions()
 
@@ -181,6 +183,7 @@ struct ConnectionModelListTests {
 
     @Test func loadMoreWithNoCursorSendsNothing() async throws {
         let connected = try await SessionListFixtures.connect()
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         try await connected.model.loadMoreSessions()
 
@@ -198,11 +201,19 @@ struct ConnectionModelListTests {
         let connected = try await SessionListFixtures.connect(
             gates: [SessionListFixtures.secondPageCursor: pageGate]
         )
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         let loading = Task { [model = connected.model] in
             try await model.loadMoreSessions()
         }
-        try await waitUntil { connected.listRequests.count == SessionListFixtures.refreshAndLoadMoreRequestCount }
+        // The task sends the request. The gate holds the answer, so when the
+        // task ends first, the request never comes.
+        let loadingEnd = TaskEnd(of: loading)
+        try await waitUntil {
+            connected.listRequests.count == SessionListFixtures.refreshAndLoadMoreRequestCount
+        } orFailWhen: {
+            loadingEnd.hasEnded
+        }
 
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         pageGate.open()
@@ -220,6 +231,7 @@ struct ConnectionModelListTests {
             pages: SessionListFixtures.pagesWithRepeat,
             logger: ACPLogger { messages.append($0) }
         )
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
 
         try await connected.model.loadMoreSessions()
@@ -234,6 +246,7 @@ struct ConnectionModelListTests {
             pages: SessionListFixtures.pageWithRepeat,
             logger: ACPLogger { messages.append($0) }
         )
+        defer { await connected.model.disconnect() }
 
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
 
@@ -244,6 +257,7 @@ struct ConnectionModelListTests {
     @Test func pagesWithNoRepeatLogNoWarning() async throws {
         let messages = ThreadSafeBuffer<String>()
         let connected = try await SessionListFixtures.connect(logger: ACPLogger { messages.append($0) })
+        defer { await connected.model.disconnect() }
 
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         try await connected.model.loadMoreSessions()
@@ -256,23 +270,29 @@ struct ConnectionModelListTests {
 
     @Test func aTitleChangeOfAnOpenSessionShowsInTheList() async throws {
         let connected = try await SessionListFixtures.connect(promptScript: [SessionListFixtures.titleChange])
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         let session = try await connected.model.newSession(SessionListFixtures.newSessionRequest)
 
         _ = try await session.prompt([textBlock("Rename")])
 
-        try await waitUntil { session.sessionInfo.title == .value(SessionListFixtures.changedTitle) }
+        try await waitUntil {
+            session.sessionInfo.title == .value(SessionListFixtures.changedTitle)
+        } orFailWhen: {
+            session.isClosed
+        }
         #expect(SessionListFixtures.titles(of: connected.model) == [SessionListFixtures.changedTitle])
     }
 
     @Test func aClearedTitleOfAnOpenSessionClearsTheListedTitle() async throws {
         let connected = try await SessionListFixtures.connect(promptScript: [SessionListFixtures.titleClear])
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         let session = try await connected.model.newSession(SessionListFixtures.newSessionRequest)
 
         _ = try await session.prompt([textBlock("Clear the title")])
 
-        try await waitUntil { session.sessionInfo.title == .cleared }
+        try await waitUntil { session.sessionInfo.title == .cleared } orFailWhen: { session.isClosed }
         #expect(SessionListFixtures.titles(of: connected.model) == [nil])
     }
 
@@ -280,6 +300,7 @@ struct ConnectionModelListTests {
 
     @Test func deleteOfAnOpenSessionSendsCloseThenDeleteAndRemovesTheItem() async throws {
         let connected = try await SessionListFixtures.connect()
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         let session = try await connected.model.newSession(SessionListFixtures.newSessionRequest)
 
@@ -295,6 +316,7 @@ struct ConnectionModelListTests {
 
     @Test func deleteOfASessionThatIsNotOpenSendsOnlyDelete() async throws {
         let connected = try await SessionListFixtures.connect()
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
 
         try await connected.model.deleteSession(testSession)
@@ -308,6 +330,7 @@ struct ConnectionModelListTests {
 
     @Test func refreshWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = try await SessionListFixtures.connect(capabilities: AgentCapabilities())
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: SessionListFixtures.listUnsupported) {
             try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
@@ -321,6 +344,7 @@ struct ConnectionModelListTests {
 
     @Test func loadMoreWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = try await SessionListFixtures.connect(capabilities: AgentCapabilities())
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: SessionListFixtures.listUnsupported) {
             try await connected.model.loadMoreSessions()
@@ -332,6 +356,7 @@ struct ConnectionModelListTests {
 
     @Test func deleteWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = try await SessionListFixtures.connect(capabilities: InitializeFixtures.baselineCapabilities)
+        defer { await connected.model.disconnect() }
         try await connected.model.refreshSessions(cwd: SessionListFixtures.workingDirectory)
         let session = try await connected.model.newSession(SessionListFixtures.newSessionRequest)
 

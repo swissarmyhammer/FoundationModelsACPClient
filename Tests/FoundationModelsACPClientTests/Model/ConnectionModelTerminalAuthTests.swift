@@ -150,6 +150,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func aZeroExitRequiresAReconnect() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
 
         try await connected.model.loginWithTerminal(InitializeFixtures.terminalMethodId, runner: runner)
@@ -164,10 +165,12 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func theNextInitializeAfterAReconnectGivesAuthenticated() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
         try await connected.model.loginWithTerminal(InitializeFixtures.terminalMethodId, runner: runner)
 
         let reconnected = await connect(connected.model)
+        defer { await reconnected.model.disconnect() }
         _ = try await reconnected.model.initialize(TerminalAuthFixtures.terminalInitializeRequest())
 
         #expect(reconnected.model.authState == .authenticated(InitializeFixtures.terminalMethodId))
@@ -175,6 +178,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func theRunnerGetsTheArgsAndTheEnvOfTheMethod() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
 
         try await connected.model.loginWithTerminal(InitializeFixtures.terminalMethodId, runner: runner)
@@ -188,6 +192,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func aTerminalLoginWithNoOpenConnectionRunsTheMethod() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         try await connected.closeAgentEnd()
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
 
@@ -201,6 +206,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func aNonZeroExitGivesFailedAndThrows() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let exitStatus = TerminalAuthFixtures.failureExitStatus
         let runner = FakeTerminalAuthRunner(outcome: .success(exitStatus))
 
@@ -214,6 +220,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func anEndWithNoExitStatusGivesFailed() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(nil))
 
         await #expect(throws: ConnectionModelError.terminalAuthFailed(exitStatus: nil)) {
@@ -225,6 +232,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func aRunnerErrorGivesFailedAndThrowsTheError() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .failure(.notStarted))
 
         await #expect(throws: FakeRunnerError.notStarted) {
@@ -240,13 +248,17 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func aCancelGivesFailed() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let gate = UpdateGate()
         let runner = FakeTerminalAuthRunner(outcome: .success(0), gate: gate)
         let model = connected.model
         let login = Task {
             try await model.loginWithTerminal(InitializeFixtures.terminalMethodId, runner: runner)
         }
-        try await waitUntil { !runner.calls.isEmpty }
+        // The login task calls the runner. When the task ends first, the
+        // call never comes.
+        let loginEnd = TaskEnd(of: login)
+        try await waitUntil { !runner.calls.isEmpty } orFailWhen: { loginEnd.hasEnded }
 
         login.cancel()
         gate.open()
@@ -265,6 +277,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func noTerminalCapabilityDoesNotCallTheRunner() async throws {
         let connected = await connect()
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
 
@@ -279,6 +292,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func anAgentMethodIdIsNotRunInATerminal() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
 
         await #expect(throws: ConnectionModelError.unsupported(method: ConnectionModelError.terminalAuthOperation)) {
@@ -292,6 +306,7 @@ struct ConnectionModelTerminalAuthTests {
 
     @Test func anUnsupportedTerminalLoginRecordsTheFailure() async throws {
         let connected = try await initializedModel()
+        defer { await connected.model.disconnect() }
         let runner = FakeTerminalAuthRunner(outcome: .success(0))
         let unlistedMethodId = AuthMethodId(rawValue: "unlisted")
 

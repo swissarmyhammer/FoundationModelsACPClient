@@ -68,6 +68,9 @@ struct ClientRequestMetricsTests {
                 script: [],
                 deferredScript: [GatedUpdates(gate: idleGate, updates: [idleState(stopReason: .endTurn)])]
             )
+            // The close in the body comes before the read of the metrics.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.initialize()
             let turn = Task { @MainActor in
                 try await harness.runTurn()
@@ -102,6 +105,9 @@ struct ClientRequestMetricsTests {
         let refusal = RequestError.invalidParams
         try await TelemetryCapture.run(forbidding: [refusal.message]) { context in
             let harness = await TracedSessionHarness(closeSessionError: refusal)
+            // The close in the body comes before the read of the metrics.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.openAndCloseOneSession()
             await harness.teardown()
 
@@ -122,6 +128,9 @@ struct ClientRequestMetricsTests {
         let forbidden = [testSession.rawValue, tracedPromptText, refusal.message]
         try await TelemetryCapture.run(forbidding: [tracedPromptText, refusal.message]) { context in
             let harness = await TracedSessionHarness(closeSessionError: refusal)
+            // The close in the body comes before the read of the metrics.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.runWholeSession()
             await harness.teardown()
 

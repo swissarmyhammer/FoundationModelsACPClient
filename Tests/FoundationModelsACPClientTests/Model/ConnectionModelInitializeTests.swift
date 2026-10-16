@@ -190,6 +190,7 @@ struct ConnectionModelInitializeTests {
             capabilities: InitializeFixtures.fullCapabilities,
             authMethods: [InitializeFixtures.agentMethod]
         )
+        defer { await connected.model.disconnect() }
 
         let response = try await connected.initialize()
 
@@ -201,6 +202,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anEmptyCapabilitySetLeavesEachFlagFalse() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -210,6 +212,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func theSessionBaselineWithoutDeleteCannotDelete() async throws {
         let connected = await ConnectedModel(capabilities: InitializeFixtures.baselineCapabilities)
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -226,7 +229,9 @@ struct ConnectionModelInitializeTests {
 
     @Test func canUseAdditionalDirectoriesFollowsTheCapability() async throws {
         let baseline = await ConnectedModel(capabilities: InitializeFixtures.baselineCapabilities)
+        defer { await baseline.model.disconnect() }
         let advertising = await ConnectedModel(capabilities: InitializeFixtures.additionalDirectoriesCapabilities)
+        defer { await advertising.model.disconnect() }
         #expect(!advertising.model.canUseAdditionalDirectories)
 
         try await baseline.initialize()
@@ -238,6 +243,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func aTerminalOnlyAgentCanLogOutButNotLogIn() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.terminalMethod])
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -248,6 +254,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anAgentMethodAllowsLoginAndLogout() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -268,6 +275,7 @@ struct ConnectionModelInitializeTests {
                 authMethods: [InitializeFixtures.agentMethod, InitializeFixtures.terminalMethod, renamedAgentMethod]
             )
         }
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -279,6 +287,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func noAuthMethodsAllowsNeither() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -291,6 +300,7 @@ struct ConnectionModelInitializeTests {
             capabilities: InitializeFixtures.fullCapabilities,
             authMethods: [InitializeFixtures.agentMethod]
         )
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         let (clientEnd, _) = InMemoryTransport.pair()
 
@@ -329,6 +339,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func noAuthMethodMeansNoAuthIsRequired() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -337,6 +348,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func listedAuthMethodsRequireAuth() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        defer { await connected.model.disconnect() }
 
         try await connected.initialize()
 
@@ -345,6 +357,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func aSuccessfulLoginAuthenticatesWithItsMethod() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         try await connected.model.login(InitializeFixtures.login)
@@ -358,6 +371,7 @@ struct ConnectionModelInitializeTests {
             authMethods: [InitializeFixtures.agentMethod],
             loginError: InitializeFixtures.loginRefusal
         )
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: InitializeFixtures.loginRefusal) {
@@ -369,7 +383,11 @@ struct ConnectionModelInitializeTests {
 
     @Test func aLoginThatTheConnectionCloseEndsRecordsAFailure() async throws {
         let loginGate = UpdateGate()
+        // The gate opens also when the body throws, so the agent does not
+        // hold the login.
+        defer { loginGate.open() }
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod], loginGate: loginGate)
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         try await closeTheConnection(of: connected, during: ClientRequestSpan.Method.login) { model in
@@ -378,7 +396,6 @@ struct ConnectionModelInitializeTests {
 
         let expected = InitializeFixtures.closedFailure(of: .login(InitializeFixtures.agentMethodId))
         #expect(connected.model.authState == .failed(expected))
-        loginGate.open()
     }
 
     @Test func aRefusedLogoutRecordsTheLogoutOperation() async throws {
@@ -386,6 +403,7 @@ struct ConnectionModelInitializeTests {
             authMethods: [InitializeFixtures.agentMethod],
             logoutError: InitializeFixtures.logoutRefusal
         )
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: InitializeFixtures.logoutRefusal) {
@@ -397,7 +415,11 @@ struct ConnectionModelInitializeTests {
 
     @Test func aLogoutThatTheConnectionCloseEndsRecordsAFailure() async throws {
         let logoutGate = UpdateGate()
+        // The gate opens also when the body throws, so the agent does not
+        // hold the logout.
+        defer { logoutGate.open() }
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod], logoutGate: logoutGate)
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         try await closeTheConnection(of: connected, during: ClientRequestSpan.Method.logout) { model in
@@ -405,7 +427,6 @@ struct ConnectionModelInitializeTests {
         }
 
         #expect(connected.model.authState == .failed(InitializeFixtures.closedFailure(of: .logout)))
-        logoutGate.open()
     }
 
     @Test func aSuccessfulLoginAfterARefusedLogoutAuthenticates() async throws {
@@ -413,6 +434,7 @@ struct ConnectionModelInitializeTests {
             authMethods: [InitializeFixtures.agentMethod],
             logoutError: InitializeFixtures.logoutRefusal
         )
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         await #expect(throws: InitializeFixtures.logoutRefusal) {
             try await connected.model.logout(LogoutAuthRequest())
@@ -429,6 +451,7 @@ struct ConnectionModelInitializeTests {
             authMethods: [InitializeFixtures.agentMethod],
             loginError: InitializeFixtures.loginRefusal
         )
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         await #expect(throws: InitializeFixtures.loginRefusal) {
             try await connected.model.login(InitializeFixtures.login)
@@ -442,6 +465,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func aLoginWithNoOpenConnectionKeepsTheAuthState() async throws {
         let connected = try await disconnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: ConnectionError.closed) {
             try await connected.model.login(InitializeFixtures.login)
@@ -452,6 +476,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anUnsupportedLoginWithNoOpenConnectionKeepsTheAuthState() async throws {
         let connected = try await disconnectedModel()
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: ConnectionError.closed) {
             try await connected.model.login(InitializeFixtures.login)
@@ -462,6 +487,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anUnsupportedLogoutWithNoOpenConnectionKeepsTheAuthState() async throws {
         let connected = try await disconnectedModel()
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: ConnectionError.closed) {
             try await connected.model.logout(LogoutAuthRequest())
@@ -472,6 +498,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anUnsupportedLoginRecordsTheFailure() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.login)) {
@@ -484,6 +511,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func anUnsupportedLogoutRecordsTheFailure() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
@@ -531,6 +559,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func aLogoutRequiresAuthAgain() async throws {
         let connected = await ConnectedModel(authMethods: [InitializeFixtures.agentMethod])
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         try await connected.model.login(InitializeFixtures.login)
 
@@ -542,6 +571,7 @@ struct ConnectionModelInitializeTests {
 
     @Test func aLogoutWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = await ConnectedModel()
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.logout)) {
@@ -585,6 +615,7 @@ struct ConnectionModelInitializeTests {
     /// - Throws: The error of an initialize.
     private func expectRefusedLogin(of request: LoginAuthRequest, by methods: [AuthMethod]) async throws {
         let connected = await ConnectedModel(authMethods: methods)
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
 
         await #expect(throws: ConnectionModelError.unsupported(method: ClientRequestSpan.Method.login)) {
@@ -608,8 +639,8 @@ struct ConnectionModelInitializeTests {
     ///   - connected: The connected model.
     ///   - method: The ACP method of the request.
     ///   - send: Sends the request through the model.
-    /// - Throws: Nothing today. The signature keeps `throws` because
-    ///   ``waitUntil(_:)`` throws.
+    /// - Throws: ``WaitEndedOnFailure`` when the request task ended or the
+    ///   connection closed before the agent got the request.
     private func closeTheConnection(
         of connected: ConnectedModel,
         during method: String,
@@ -617,7 +648,12 @@ struct ConnectionModelInitializeTests {
     ) async throws {
         let model = connected.model
         let request = Task { try await send(model) }
-        try await waitUntil { connected.receivedMethods.contains(method) }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends or the connection closes first, the request never comes.
+        let requestEnd = TaskEnd(of: request)
+        try await waitUntil { connected.receivedMethods.contains(method) } orFailWhen: {
+            requestEnd.hasEnded || connected.isConnectionClosed
+        }
 
         connected.agentEnd.close()
 

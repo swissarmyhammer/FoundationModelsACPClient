@@ -57,6 +57,9 @@ struct ClientRequestSpanTests {
     func eachRequestGivesOneClientSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
+            // The close in the body comes before the read of the spans. This
+            // one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.runWholeSession()
             await harness.teardown()
 
@@ -73,6 +76,9 @@ struct ClientRequestSpanTests {
     func aRequestThatNamesASessionPutsItOnTheSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
+            // The close in the body comes before the read of the spans. This
+            // one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.runWholeSession()
             await harness.teardown()
 
@@ -93,6 +99,9 @@ struct ClientRequestSpanTests {
     func theAgentGetsTheTraceparentOfEachClientSpan() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
+            // The close in the body comes before the read of the spans. This
+            // one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.runWholeSession()
             await harness.teardown()
 
@@ -112,6 +121,9 @@ struct ClientRequestSpanTests {
     func eachRequestWritesOneEnterRecord() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
+            // The close in the body comes before the read of the records.
+            // This one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.runWholeSession()
             await harness.teardown()
 
@@ -134,6 +146,9 @@ struct ClientRequestSpanTests {
         let refusal = RequestError.invalidParams
         try await TelemetryCapture.run(forbidding: [refusal.message]) { context in
             let harness = await TracedSessionHarness(closeSessionError: refusal)
+            // The close in the body comes before the read of the span. This
+            // one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.openAndCloseOneSession()
             await harness.teardown()
 
@@ -153,6 +168,9 @@ struct ClientRequestSpanTests {
     func anAnsweredRequestGivesASpanWithNoError() async throws {
         try await TelemetryCapture.run(forbidding: [tracedPromptText]) { context in
             let harness = await TracedSessionHarness()
+            // The close in the body comes before the read of the span. This
+            // one closes the connection also when the body throws first.
+            defer { await harness.teardown() }
             try await harness.initialize()
             await harness.teardown()
 

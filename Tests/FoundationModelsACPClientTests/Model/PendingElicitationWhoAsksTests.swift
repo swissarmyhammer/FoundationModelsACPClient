@@ -62,9 +62,12 @@ struct PendingElicitationWhoAsksTests {
         let burst = try elicitationFrame(id: "e-1", meta: ["agentPath": ["planner", "coder"], "source": "shell"])
             + elicitationFrame(id: "e-2", meta: nil)
         let (model, session, agentRun) = try await RawBurstAgent.connect(burst: burst)
-        defer { agentRun.cancel() }
+        defer {
+            await model.disconnect()
+            agentRun.cancel()
+        }
 
-        await waitFor { session.pendingElicitations.count == 2 || session.isClosed }
+        try await waitUntil { session.pendingElicitations.count == 2 } orFailWhen: { session.isClosed }
 
         let elicitations = session.pendingElicitations
         try #require(elicitations.count == 2)
@@ -72,7 +75,6 @@ struct PendingElicitationWhoAsksTests {
         #expect(elicitations[0].source == "shell")
         #expect(elicitations[1].agentPath.isEmpty)
         #expect(elicitations[1].source == nil)
-        await model.disconnect()
     }
 
     @Test func aMetaWithOtherMembersOnlyGivesAnEmptyPathAndNoSource() throws {

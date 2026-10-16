@@ -254,6 +254,7 @@ struct ModelRequestSpanTests {
     func eachModelRequestGivesOneClientSpan(request: ModelRequest) async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await request.send(over: connected)
 
             let spans = context.requestSpans(of: request.method)
@@ -268,6 +269,7 @@ struct ModelRequestSpanTests {
     func eachModelRequestRecordsOneCountAndOneDuration(request: ModelRequest) async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await request.send(over: connected)
 
             let dimensions = [RequestTelemetry.methodDimension(request.method)]
@@ -285,6 +287,7 @@ struct ModelRequestSpanTests {
     func theAgentGetsTheTraceparentOfEachModelRequestSpan(request: ModelRequest) async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await request.send(over: connected)
 
             let span = try #require(context.requestSpans(of: request.method).first)
@@ -300,6 +303,7 @@ struct ModelRequestSpanTests {
     @Test func aModelRequestKeepsTheMetaOfTheCallerAndAddsTheTraceContext() async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
             _ = try await session.prompt(ModelRequestFixtures.promptContent, meta: ModelRequestFixtures.vendorMeta)
@@ -322,6 +326,7 @@ struct ModelRequestSpanTests {
     @Test func aPromptRecordsTheTraceContextThatTheAgentGot() async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { _ in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
             _ = try await session.prompt(ModelRequestFixtures.promptContent)
@@ -343,6 +348,7 @@ struct ModelRequestSpanTests {
     @Test func aCancelLinksToThePromptSpanAndIsNotItsChild() async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
             _ = try await session.prompt(ModelRequestFixtures.promptContent)
@@ -366,6 +372,7 @@ struct ModelRequestSpanTests {
     @Test func aCancelWithNoMetaLinksToTheLastPromptSpan() async throws {
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
             _ = try await session.prompt(ModelRequestFixtures.promptContent)
@@ -388,6 +395,7 @@ struct ModelRequestSpanTests {
     @Test func aCancelBeforeAnyPromptHasNoLink() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
 
@@ -405,6 +413,7 @@ struct ModelRequestSpanTests {
         let callerSpanName = "caller.cancel-action"
         try await TelemetryCapture.run(forbidding: [ModelRequestFixtures.promptText]) { context in
             let connected = await ModelRequestFixtures.connect()
+            defer { await connected.model.disconnect() }
             try await connected.initialize()
             let session = try await connected.model.newSession(ModelRequestFixtures.newSessionRequest)
             _ = try await session.prompt(ModelRequestFixtures.promptContent)
@@ -429,6 +438,7 @@ struct ModelRequestSpanTests {
         try await TelemetryCapture.run(forbidding: content) { context in
             for request in ModelRequest.allCases {
                 let connected = await ModelRequestFixtures.connect()
+                defer { await connected.model.disconnect() }
                 try await request.send(over: connected)
             }
 

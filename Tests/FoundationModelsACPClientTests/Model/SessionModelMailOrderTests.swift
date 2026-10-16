@@ -92,6 +92,7 @@ struct SessionModelMailOrderTests {
     /// answer, and the echo adds no second entry.
     @Test func aPromptLinksByTheMessageIdOfItsAnswerAndItsEchoAfterTheAnswerAddsNoEntry() async throws {
         let connected = try await MailOrderSession(messageIds: [firstMessageId])
+        defer { await connected.model.disconnect() }
 
         let response = try await connected.session.prompt([textBlock("go")])
         #expect(response.messageId == firstMessageId)
@@ -105,7 +106,11 @@ struct SessionModelMailOrderTests {
             agentChunk(text: "hello"),
             idleState(stopReason: .endTurn),
         ])
-        await waitForObservation { connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)) }
+        try await waitForObservation {
+            connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn))
+        } orFailWhen: {
+            connected.session.isClosed
+        }
 
         #expect(connected.userMessages.count == 1)
         #expect(connected.userMessages.first === local)
@@ -118,6 +123,7 @@ struct SessionModelMailOrderTests {
     /// reason reach the model.
     @Test func workWithNoPromptOpenReachesTheModelAndItsIdleHasNoStopReason() async throws {
         let connected = try await MailOrderSession(messageIds: [firstMessageId])
+        defer { await connected.model.disconnect() }
         _ = try await connected.session.prompt([textBlock("go")])
         try await connected.agent.send([
             echo(firstMessageId, text: "go"),
@@ -125,10 +131,16 @@ struct SessionModelMailOrderTests {
             agentChunk(text: "hello"),
             idleState(stopReason: .endTurn),
         ])
-        await waitForObservation { connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)) }
+        try await waitForObservation {
+            connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn))
+        } orFailWhen: {
+            connected.session.isClosed
+        }
 
         try await connected.agent.send([running, SessionModelFixtures.compactionUpdate(.inProgress)])
-        await waitForObservation { connected.session.transcript.last?.compaction != nil }
+        try await waitForObservation { connected.session.transcript.last?.compaction != nil } orFailWhen: {
+            connected.session.isClosed
+        }
         #expect(connected.session.agentState == .running(RunningStateUpdate()))
         let compaction = try #require(connected.session.transcript.last?.compaction)
         #expect(compaction.status == .inProgress)
@@ -138,7 +150,11 @@ struct SessionModelMailOrderTests {
             SessionModelFixtures.compactionUpdate(.completed),
             idleState(stopReason: nil),
         ])
-        await waitForObservation { connected.session.agentState == .idle(IdleStateUpdate(stopReason: nil)) }
+        try await waitForObservation {
+            connected.session.agentState == .idle(IdleStateUpdate(stopReason: nil))
+        } orFailWhen: {
+            connected.session.isClosed
+        }
 
         #expect(compaction.status == .completed)
         #expect(compaction.timing.endedAt != nil)
@@ -151,6 +167,7 @@ struct SessionModelMailOrderTests {
     /// message links to its own echo.
     @Test func twoOpenPromptsEachLinkToTheirOwnEchoInEitherOrder() async throws {
         let connected = try await MailOrderSession(messageIds: [firstMessageId, secondMessageId])
+        defer { await connected.model.disconnect() }
 
         _ = try await connected.session.prompt([textBlock("first")])
         _ = try await connected.session.prompt([textBlock("second")])
@@ -164,7 +181,11 @@ struct SessionModelMailOrderTests {
             running,
             idleState(stopReason: .endTurn),
         ])
-        await waitForObservation { connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)) }
+        try await waitForObservation {
+            connected.session.agentState == .idle(IdleStateUpdate(stopReason: .endTurn))
+        } orFailWhen: {
+            connected.session.isClosed
+        }
 
         let linked = connected.userMessages
         #expect(linked.count == 2)
@@ -178,18 +199,26 @@ struct SessionModelMailOrderTests {
     /// `idle` with the `cancelled` stop reason, when its model work ends.
     @Test func theIdleOfACancelComesLaterThanTheCancelAndTheSessionRunsUntilThen() async throws {
         let connected = try await MailOrderSession(messageIds: [firstMessageId])
+        defer { await connected.model.disconnect() }
         _ = try await connected.session.prompt([textBlock("go")])
         try await connected.agent.send([echo(firstMessageId, text: "go"), running, agentChunk(text: "part")])
-        await waitForObservation { connected.agentText == "part" }
+        try await waitForObservation { connected.agentText == "part" } orFailWhen: { connected.session.isClosed }
 
         try await connected.session.cancel()
+        // This read has no failure event: `cancels` is a stream of the stub,
+        // and no close of the connection ends it. It hangs when the cancel
+        // does not reach the agent. This is a known limit of rule T1.
         var cancels = connected.agent.cancels.makeAsyncIterator()
         let cancel = try #require(await cancels.next())
         #expect(cancel.sessionId == testSession)
         #expect(connected.session.agentState == .running(RunningStateUpdate()))
 
         try await connected.agent.send(idleState(stopReason: .cancelled))
-        await waitForObservation { connected.session.agentState == .idle(IdleStateUpdate(stopReason: .cancelled)) }
+        try await waitForObservation {
+            connected.session.agentState == .idle(IdleStateUpdate(stopReason: .cancelled))
+        } orFailWhen: {
+            connected.session.isClosed
+        }
 
         #expect(connected.userMessages.count == 1)
         #expect(connected.agentText == "part")
@@ -200,14 +229,22 @@ struct SessionModelMailOrderTests {
     /// `$/cancel_request`, the session removes it.
     @Test func anElicitationThatTheAgentCancelsLeavesThePendingList() async throws {
         let connected = try await MailOrderSession(messageIds: [])
+        defer { await connected.model.disconnect() }
 
         let call = connected.agent.startElicitation(
             ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope)))
-        await waitForObservation { !connected.session.pendingElicitations.isEmpty }
+        // The call ends when the client refuses the elicitation. Then the
+        // request never becomes pending.
+        let callEnd = TaskEnd(of: call)
+        try await waitForObservation { !connected.session.pendingElicitations.isEmpty } orFailWhen: {
+            callEnd.hasEnded || connected.session.isClosed
+        }
         #expect(connected.session.pendingElicitations.map(\.request.message) == [ElicitationFixtures.formMessage])
 
         call.cancel()
-        await waitForObservation { connected.session.pendingElicitations.isEmpty }
+        try await waitForObservation { connected.session.pendingElicitations.isEmpty } orFailWhen: {
+            connected.session.isClosed
+        }
 
         await #expect(throws: (any Error).self) { try await call.value }
     }

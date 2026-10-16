@@ -19,12 +19,14 @@ private let frontToolCallId = ToolCallId(rawValue: "tool-front")
 @Suite
 struct SessionModelFrontTests {
     /// Starts one session-scoped form elicitation and waits until it is
-    /// pending.
+    /// pending. The end of the agent's call is the failure event: after it,
+    /// the elicitation never becomes pending.
     ///
     /// - Parameters:
     ///   - model: The model that holds the elicitation.
     ///   - toolCallId: The tool call that the elicitation names, or `nil`.
     /// - Returns: The task of the agent's call.
+    /// - Throws: ``WaitEndedOnFailure`` when the call ended first.
     private func startElicitation(
         on model: SessionModel,
         toolCallId: ToolCallId? = nil
@@ -34,7 +36,8 @@ struct SessionModelFrontTests {
         )
         let count = model.pendingElicitations.count
         let task = Task { await model.awaitElicitation(request) }
-        try await waitUntil { model.pendingElicitations.count == count + 1 }
+        let taskEnd = TaskEnd(of: task)
+        try await waitUntil { model.pendingElicitations.count == count + 1 } orFailWhen: { taskEnd.hasEnded }
         return task
     }
 
@@ -57,11 +60,16 @@ struct SessionModelFrontTests {
 
     /// Answers each pending request, and waits for each call of the agent.
     ///
+    /// A request that is still pending has no answer, so the test fails
+    /// before the wait and does not hang.
+    ///
     /// - Parameters:
     ///   - model: The model that holds the requests.
     ///   - tasks: The tasks of the calls.
-    private func finish(_ model: SessionModel, _ tasks: [Task<Void, Never>]) async {
+    /// - Throws: The error of `#require` when a request is still pending.
+    private func finish(_ model: SessionModel, _ tasks: [Task<Void, Never>]) async throws {
         model.cancelAllPending()
+        try #require(model.pendingRequests.isEmpty)
         for task in tasks { await task.value }
     }
 
@@ -74,7 +82,7 @@ struct SessionModelFrontTests {
 
         #expect(model.frontRequestID == nil)
         #expect(model.frontRequest == model.pendingRequests.first)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func bringingE2ToTheFrontKeepsTheOrderOfPendingRequests() async throws {
@@ -87,7 +95,7 @@ struct SessionModelFrontTests {
         #expect(model.frontRequestID == e2.id)
         #expect(model.frontRequest == e2)
         #expect(model.pendingRequests == order)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func aResolutionOfTheFrontRequestMovesTheFrontBackToTheOldest() async throws {
@@ -100,7 +108,7 @@ struct SessionModelFrontTests {
 
         #expect(model.frontRequestID == nil)
         #expect(model.frontRequest == e1)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func aResolutionOfAnotherRequestKeepsTheFront() async throws {
@@ -113,7 +121,7 @@ struct SessionModelFrontTests {
 
         #expect(model.frontRequestID == e2.id)
         #expect(model.frontRequest == e2)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func anUnknownIdChangesNothing() async throws {
@@ -125,7 +133,7 @@ struct SessionModelFrontTests {
 
         #expect(model.frontRequestID == e2.id)
         #expect(model.frontRequest == e2)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func theCloseClearsTheFront() async throws {
@@ -136,6 +144,9 @@ struct SessionModelFrontTests {
 
         #expect(model.frontRequestID == nil)
         #expect(model.frontRequest == nil)
+        // A request that is still pending is not cancelled, so the test
+        // fails here and does not wait for the calls.
+        try #require(model.pendingRequests.isEmpty)
         for task in tasks { await task.value }
     }
 
@@ -153,6 +164,9 @@ struct SessionModelFrontTests {
         #expect(model.frontRequestID == oldestLinked.id)
         #expect(model.frontRequest == .elicitation(oldestLinked))
         model.cancelAllPending()
+        // An elicitation that is still pending has no answer, so the test
+        // fails here and does not wait for the calls.
+        try #require(model.pendingElicitations.isEmpty)
         _ = await unlinked.value
         _ = await firstLinked.value
         _ = await secondLinked.value
@@ -166,7 +180,7 @@ struct SessionModelFrontTests {
         #expect(!model.bringToFront(toolCall: entry))
 
         #expect(model.frontRequestID == nil)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 
     @Test func bringingARequestToTheFrontFiresTheObservationOfTheFront() async throws {
@@ -178,6 +192,6 @@ struct SessionModelFrontTests {
         }
 
         #expect(fires)
-        await finish(model, tasks)
+        try await finish(model, tasks)
     }
 }

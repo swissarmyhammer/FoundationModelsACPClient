@@ -61,8 +61,8 @@ private struct RoutedModel {
     ///   - request: The elicitation to send.
     ///   - session: The session model that must hold the elicitation.
     /// - Returns: The task of the agent's call.
-    /// - Throws: Nothing today. The signature keeps `throws` because
-    ///   ``waitUntil(_:)`` throws.
+    /// - Throws: ``WaitEndedOnFailure`` when the call of the agent ended
+    ///   before the session held the elicitation.
     func startElicitation(
         _ request: CreateElicitationRequest,
         on session: SessionModel
@@ -89,17 +89,24 @@ struct ModelClientTests {
 
     @Test func aPermissionRequestForAnOpenSessionLandsInItsModelAndTheChoiceReachesTheAgent() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let session = routed.openTestSession()
         let request = SessionModelFixtures.permissionRequest()
 
         let call = Task { [agentConnection = routed.agentConnection] in
             try await agentConnection.requestPermission(request)
         }
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+        // A call that ended before the session held the request was not routed
+        // to the session, so its end is the failure event.
+        let callEnd = TaskEnd(of: call)
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: { callEnd.hasEnded }
         let pending = try #require(session.pendingPermissions.first)
         #expect(pending.request == request)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
 
+        // The require stops the test before the await below, which would
+        // suspend for ever when the permission stays pending.
+        try #require(session.pendingPermissions.isEmpty)
         let response = try await call.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId)))
         #expect(routed.loggedMessages.isEmpty)
@@ -107,6 +114,7 @@ struct ModelClientTests {
 
     @Test func aPermissionRequestForAnUnknownSessionAnswersCancelledWithOneWarning() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let request = RequestPermissionRequest(
             options: [SessionModelFixtures.allowOption],
             sessionId: unknownSession,
@@ -131,7 +139,12 @@ struct ModelClientTests {
         try await connected.initialize()
         let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
         let turn = Task { try await session.prompt([textBlock("Deploy the build.")]) }
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+        // A turn that ended, or a session that closed, before the request came
+        // never holds the request.
+        let turnEnd = TaskEnd(of: turn)
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: {
+            turnEnd.hasEnded || session.isClosed
+        }
 
         try await session.cancel()
 
@@ -148,6 +161,7 @@ struct ModelClientTests {
 
     @Test func aSessionElicitationForAnOpenSessionLandsInItsModelAndTheAnswerReachesTheAgent() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let session = routed.openTestSession()
         let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
 
@@ -156,6 +170,9 @@ struct ModelClientTests {
         #expect(pending.request == request)
         session.acceptElicitation(pending.id, content: formContent)
 
+        // The require stops the test before the await below, which would
+        // suspend for ever when the elicitation stays pending.
+        try #require(session.pendingElicitations.isEmpty)
         let response = try await call.value
         #expect(response == ElicitationResponseWire.acceptResponse(content: formContent))
         #expect(routed.loggedMessages.isEmpty)
@@ -163,6 +180,7 @@ struct ModelClientTests {
 
     @Test func aSessionElicitationForAnUnknownSessionAnswersCancelWithOneWarning() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let scope = ElicitationSessionScope(sessionId: unknownSession)
 
         let response = try await routed.agentConnection.createElicitation(
@@ -175,6 +193,7 @@ struct ModelClientTests {
 
     @Test func aRequestScopedElicitationForARequestNotInFlightAnswersCancelWithOneWarning() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let session = routed.openTestSession()
 
         let response = try await routed.agentConnection.createElicitation(
@@ -189,6 +208,7 @@ struct ModelClientTests {
 
     @Test func anElicitationOfAnUnknownModeAnswersCancelWithOneWarning() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         _ = routed.openTestSession()
         let request = CreateElicitationRequest(
             message: ElicitationFixtures.formMessage,
@@ -205,6 +225,7 @@ struct ModelClientTests {
 
     @Test func aUrlElicitationCompleteClosesTheMatchingPendingElicitation() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let session = routed.openTestSession()
         let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
         let call = try await routed.startElicitation(request, on: session)
@@ -220,6 +241,7 @@ struct ModelClientTests {
 
     @Test func anElicitationCompleteThatNoSessionHoldsLeavesEachPendingElicitation() async throws {
         let routed = await RoutedModel()
+        defer { await routed.model.disconnect() }
         let session = routed.openTestSession()
         let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
         let call = try await routed.startElicitation(request, on: session)
@@ -228,6 +250,9 @@ struct ModelClientTests {
 
         #expect(session.pendingElicitations.map(\.request) == [request])
         session.cancelAllPending()
+        // The require stops the test before the await below, which would
+        // suspend for ever when the elicitation stays pending.
+        try #require(session.pendingElicitations.isEmpty)
         #expect(try await call.value == ElicitationResponseWire.cancelResponse)
     }
 }

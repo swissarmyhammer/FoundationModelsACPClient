@@ -126,10 +126,13 @@ struct SessionModelStreamTests {
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
 
         model.attach(subscription)
+        // The stream task of the model applies each update. When it ended
+        // and the updates did not land, they never land.
+        let streamEnd = TaskEnd(of: try #require(model.streamTask))
         continuation.yield(.update(agentChunk(text: "first")))
         continuation.yield(.update(toolCallStatus(id: replayedToolCallId.rawValue, .pending)))
         continuation.yield(.update(idleState(stopReason: .endTurn)))
-        try await waitUntil { model.agentState != nil }
+        try await waitUntil { model.agentState != nil } orFailWhen: { streamEnd.hasEnded }
 
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(MessageId(rawValue: "agent-1"))), .wire(.toolCall(replayedToolCallId))])
         #expect(model.agentState == .idle(IdleStateUpdate(stopReason: .endTurn)))
@@ -276,12 +279,13 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
+        let streamEnd = TaskEnd(of: try #require(model.streamTask))
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         model.replayRequestDidStart(runningRequestId)
 
         continuation.yield(requestFinished(.failed))
         continuation.yield(.update(agentChunk(text: "after the marker")))
-        try await waitUntil { !model.transcript.isEmpty }
+        try await waitUntil { !model.transcript.isEmpty } orFailWhen: { streamEnd.hasEnded }
 
         #expect(model.isReplaying)
     }
@@ -290,10 +294,11 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
+        let streamEnd = TaskEnd(of: try #require(model.streamTask))
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
         continuation.yield(requestFinished(.succeeded))
         continuation.yield(.update(agentChunk(text: "after the marker")))
-        try await waitUntil { !model.transcript.isEmpty }
+        try await waitUntil { !model.transcript.isEmpty } orFailWhen: { streamEnd.hasEnded }
         try #require(model.isReplaying)
 
         model.replayRequestDidStart(markedRequestId)
@@ -306,11 +311,12 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
         model.attach(subscription)
+        let streamEnd = TaskEnd(of: try #require(model.streamTask))
         model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
 
         continuation.yield(requestFinished(.succeeded, method: ClientRequestSpan.Method.prompt))
         continuation.yield(.update(agentChunk(text: "after the marker")))
-        try await waitUntil { !model.transcript.isEmpty }
+        try await waitUntil { !model.transcript.isEmpty } orFailWhen: { streamEnd.hasEnded }
 
         #expect(model.isReplaying)
     }
@@ -490,6 +496,9 @@ struct SessionModelStreamTests {
         let pending = try #require(model.pendingPermissions.first)
         #expect(model.pendingPermissions.count == 1)
         await model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
+        // A request that is still pending has no answer, so the test fails
+        // here and does not wait for the call.
+        try #require(model.pendingPermissions.isEmpty)
         let response = await permission.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId)))
     }
@@ -511,7 +520,8 @@ struct SessionModelStreamTests {
             scope: .session(ElicitationSessionScope(sessionId: testSession, toolCallId: replayedToolCallId))
         )
         let task = Task { await model.awaitElicitation(request) }
-        try await waitUntil { !model.pendingElicitations.isEmpty }
+        let taskEnd = TaskEnd(of: task)
+        try await waitUntil { !model.pendingElicitations.isEmpty } orFailWhen: { taskEnd.hasEnded }
         let pending = try #require(model.pendingElicitations.first)
 
         replayFixture(into: model)
@@ -546,20 +556,26 @@ struct SessionModelStreamTests {
         let model = SessionModelFixtures.immediateModel()
         let request = SessionModelFixtures.permissionRequest()
         let task = Task { await model.awaitPermissionDecision(for: request) }
-        try await waitUntil { !model.pendingPermissions.isEmpty }
+        let taskEnd = TaskEnd(of: task)
+        try await waitUntil { !model.pendingPermissions.isEmpty } orFailWhen: { taskEnd.hasEnded }
 
         model.markClosed()
 
-        #expect(model.pendingPermissions.isEmpty)
+        // A request that is still pending is not cancelled, so the test
+        // fails here and does not wait for the task.
+        try #require(model.pendingPermissions.isEmpty)
         #expect(await task.value.outcome == .cancelled)
     }
 
-    @Test func closeEndsTheUpdateTap() async {
+    @Test func closeEndsTheUpdateTap() async throws {
         let model = SessionModelFixtures.immediateModel()
         var tap = model.updateTap().makeAsyncIterator()
 
         model.markClosed()
 
+        // A tap that the model still holds is not ended, so the test fails
+        // here and does not wait for the tap.
+        try #require(model.updateTaps.isEmpty)
         #expect(await tap.next() == nil)
     }
 
@@ -578,10 +594,15 @@ struct SessionModelStreamTests {
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
         model.attach(subscription)
+        // The cancel of the stream task terminates the stream before the
+        // task ends. A task that ended with no cancel of the stream fails the
+        // wait. A model that does not cancel the task gives no event, and
+        // the wait then hangs: a known limit of rule T1.
+        let streamEnd = TaskEnd(of: try #require(model.streamTask))
 
         model.markClosed()
 
-        try await waitUntil { termination.wasCancelled }
+        try await waitUntil { termination.wasCancelled } orFailWhen: { streamEnd.hasEnded }
     }
 
     @Test func releasingTheModelCancelsTheStreamTask() async throws {
@@ -590,10 +611,14 @@ struct SessionModelStreamTests {
         let termination = TerminationProbe()
         continuation.onTermination = { reason in termination.record(reason) }
         try #require(model).attach(subscription)
+        // The same failure event and the same limit as in
+        // `closeCancelsTheStreamTask`. The watch holds the task, not the
+        // model, so the release of the model still occurs.
+        let streamEnd = TaskEnd(of: try #require(model?.streamTask))
 
         model = nil
 
-        try await waitUntil { termination.wasCancelled }
+        try await waitUntil { termination.wasCancelled } orFailWhen: { streamEnd.hasEnded }
     }
 
     @Test func anUpdateAfterCloseChangesNothing() {

@@ -87,16 +87,21 @@ private struct RecordedSession {
     }
 
     /// Sends a permission request from the agent, and waits until the
-    /// session holds it as pending.
+    /// session holds it as pending. The end of the agent's call and the
+    /// close of the session are the failure events: after them, the request
+    /// never becomes pending.
     ///
     /// - Returns: The task of the agent's call, and the pending request.
-    /// - Throws: The error of `#require`.
+    /// - Throws: The error of `#require`, or ``WaitEndedOnFailure``.
     func startPermission() async throws -> (Task<RequestPermissionResponse, any Error>, PendingPermissionRequest) {
         let request = SessionModelFixtures.permissionRequest()
         let call = Task { [agentConnection] in
             try await agentConnection.requestPermission(request)
         }
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+        let callEnd = TaskEnd(of: call)
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: {
+            callEnd.hasEnded || session.isClosed
+        }
         return (call, try #require(session.pendingPermissions.first))
     }
 }
@@ -218,6 +223,7 @@ struct PermissionReplyOrderTests {
     @Test func selectPermissionReturnsWhenTheConnectionClosesFirst() async throws {
         let factory = ClosingClientFactory()
         let model = ConnectionModel()
+        defer { await model.disconnect() }
         factory.model = model
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
@@ -228,7 +234,10 @@ struct PermissionReplyOrderTests {
         model.register(session)
         let request = SessionModelFixtures.permissionRequest()
         let call = Task { try await agentConnection.requestPermission(request) }
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+        let callEnd = TaskEnd(of: call)
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: {
+            callEnd.hasEnded || session.isClosed
+        }
         let pending = try #require(session.pendingPermissions.first)
 
         await session.selectPermission(pending.id, option: allowOptionId)
@@ -246,29 +255,39 @@ struct PermissionReplyOrderTests {
         let decision = Task {
             await session.awaitPermissionDecision(for: SessionModelFixtures.permissionRequest()) { held.keep($0) }
         }
-        try await waitUntil { !session.pendingPermissions.isEmpty }
+        let decisionEnd = TaskEnd(of: decision)
+        try await waitUntil { !session.pendingPermissions.isEmpty } orFailWhen: { decisionEnd.hasEnded }
         let pending = try #require(session.pendingPermissions.first)
-        // A child task, so the test can close the session while the select
-        // waits.
-        async let selected: Void = session.selectPermission(pending.id, option: allowOptionId)
+        // A task of its own, so the test can close the session while the
+        // select waits, and so the end of the select is observable.
+        let selected = Task { await session.selectPermission(pending.id, option: allowOptionId) }
+        let selectedEnd = TaskEnd(of: selected)
         // The decision registered its signal and never gives it, so the
-        // select waits.
-        try await waitUntil { held.count == 1 }
+        // select waits. A select that ended before the close did not wait
+        // for the signal, so its end is the failure event.
+        try await waitUntil { held.count == 1 } orFailWhen: { selectedEnd.hasEnded }
 
         session.markClosed()
 
-        await selected
+        // This wait has no failure event: no observable state tells that
+        // the close does not end the select. It hangs when the close does
+        // not end it. This is a known limit of rule T1.
+        await selected.value
         #expect(await decision.value.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
     }
 
     @Test func selectPermissionWithAnUnknownIdReturnsAtOnce() async throws {
         let recorded = try await RecordedSession()
+        defer { await recorded.model.disconnect() }
         let (call, pending) = try await recorded.startPermission()
 
         await recorded.session.selectPermission(UUID(), option: allowOptionId)
 
         #expect(recorded.session.pendingPermissions.map(\.id) == [pending.id])
         await recorded.session.cancelPermission(pending.id)
+        // A request that is still pending has no answer, so the test fails
+        // here and does not wait for the call.
+        try #require(recorded.session.pendingPermissions.isEmpty)
         #expect(try await call.value.outcome == .cancelled)
     }
 
@@ -282,6 +301,7 @@ struct PermissionReplyOrderTests {
         resolve: (SessionModel, PendingPermissionRequest.ID) async -> Void
     ) async throws {
         let recorded = try await RecordedSession()
+        defer { await recorded.model.disconnect() }
         for _ in 0..<Self.roundCount {
             let (call, pending) = try await recorded.startPermission()
             await resolve(recorded.session, pending.id)

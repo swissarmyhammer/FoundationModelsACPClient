@@ -77,11 +77,12 @@ func everySessionUpdateCaseLandsInObservableStateOverTheWire() async throws {
     let connected = await ConnectedModel(model: ConnectionModel(coalescingCadence: .zero)) { agentSide in
         ScriptedStubAgent(connection: agentSide, session: testSession, script: fullScript())
     }
+    defer { await connected.model.disconnect() }
     try await connected.initialize()
     let session = try await connected.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
 
     _ = try await session.prompt([textBlock("go")])
-    await waitForIdle(of: session)
+    try await waitForIdle(of: session)
 
     // The wire entries hold one stable entry for each identity. The local user
     // message of the prompt is not a wire entry. The model holds the echo of a

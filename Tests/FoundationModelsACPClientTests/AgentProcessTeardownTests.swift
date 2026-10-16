@@ -179,10 +179,17 @@ struct AgentProcessTeardownTests {
         state.record(pid: child.pid, stdinWriteDescriptor: child.stdinWriteDescriptor)
 
         let teardown = Task.detached { await terminateOnAThreadOfItsOwn(state) }
-        try await waitUntil { clock.sleeperCount == 1 }
+        // A teardown that ended before it slept on the clock never sleeps, so
+        // its end is the failure event.
+        let teardownEnd = TaskEnd(of: teardown)
+        try await waitUntil { clock.sleeperCount == 1 } orFailWhen: { teardownEnd.hasEnded }
         #expect(state.exitStatus == nil, "The teardown ended before the reap limit passed.")
 
         clock.advance(by: reapTimeLimit)
+        // The advance resumes each sleeper whose deadline it reached. The
+        // require stops the test before the await below, which would suspend
+        // for ever when the sleeper of the teardown stays.
+        try #require(clock.sleeperCount == 0)
         await teardown.value
 
         #expect(state.pid == nil)

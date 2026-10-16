@@ -198,6 +198,7 @@ struct ConnectionModelTests {
             recorder.record(model.state)
             return router
         }
+        defer { await model.disconnect() }
 
         #expect(recorder.states == [.connecting])
     }
@@ -207,38 +208,45 @@ struct ConnectionModelTests {
         let (clientEnd, _) = InMemoryTransport.pair()
 
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
 
         #expect(model.state == .connected)
     }
 
-    @Test func theEndOfInputOfTheAgentDisconnects() async {
+    @Test func theEndOfInputOfTheAgentDisconnects() async throws {
         let model = ConnectionModel()
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
 
         agentEnd.close()
 
-        await waitFor { model.state == .disconnected }
+        // A failed state is the close with the wrong reason.
+        try await waitUntil { model.state == .disconnected } orFailWhen: { model.state.failure != nil }
     }
 
-    @Test func aCloseByTheHostDisconnects() async {
+    @Test func aCloseByTheHostDisconnects() async throws {
         let model = ConnectionModel()
         let (clientEnd, _) = InMemoryTransport.pair()
         let connection = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
 
         await connection.close()
 
-        await waitFor { model.state == .disconnected }
+        // A failed state is the close with the wrong reason.
+        try await waitUntil { model.state == .disconnected } orFailWhen: { model.state.failure != nil }
     }
 
-    @Test func aFailedByteStreamFailsWithItsError() async {
+    @Test func aFailedByteStreamFailsWithItsError() async throws {
         let model = ConnectionModel()
         let transport = FailingTransport()
         _ = await model.connect(over: transport)
+        defer { await model.disconnect() }
 
         transport.fail(with: ByteStreamFailure())
 
-        await waitFor { model.state == .failed(ByteStreamFailure()) }
+        // A disconnected state is the close with the wrong reason.
+        try await waitUntil { model.state == .failed(ByteStreamFailure()) } orFailWhen: { model.state == .disconnected }
         #expect(model.state.failure is ByteStreamFailure)
     }
 
@@ -256,6 +264,7 @@ struct ConnectionModelTests {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConnection = await makeAgentConnection(over: agentEnd)
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
 
         let response = try await agentConnection.requestPermission(SessionModelFixtures.permissionRequest())
 
@@ -267,6 +276,7 @@ struct ConnectionModelTests {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConnection = await makeAgentConnection(over: agentEnd)
         _ = await model.connect(over: clientEnd) { router in AllowingClient(inner: router) }
+        defer { await model.disconnect() }
 
         let response = try await agentConnection.requestPermission(SessionModelFixtures.permissionRequest())
 
@@ -348,24 +358,28 @@ struct ConnectionModelTests {
         let model = ConnectionModel()
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
         let session = SessionModelFixtures.immediateModel()
         model.register(session)
         let permission = SessionModelFixtures.startPermission(on: session)
 
         agentEnd.close()
 
+        try await waitUntil { model.state == .disconnected } orFailWhen: { model.state.failure != nil }
+        #expect(session.isClosed)
+        #expect(model.openSessions.isEmpty)
+        // A pending permission that stays is a request that is not cancelled,
+        // so the test fails here and does not wait for the task.
+        try #require(session.pendingPermissions.isEmpty)
         let response = await permission.value
         #expect(response.outcome == .cancelled)
-        await waitFor { model.state == .disconnected }
-        #expect(session.isClosed)
-        #expect(session.pendingPermissions.isEmpty)
-        #expect(model.openSessions.isEmpty)
     }
 
     @Test func aDisconnectFlushesTheBufferedChunksOfEachOpenSession() async throws {
         let model = ConnectionModel(coalescingCadence: SessionModelFixtures.bufferedCadence, clock: ManualClock())
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
         let first = model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let second = model.makeSessionModel(sessionId: otherTestSession, requestSender: FakeSessionRequestSender())
         model.register(first)
@@ -377,7 +391,7 @@ struct ConnectionModelTests {
 
         agentEnd.close()
 
-        await waitFor { model.state == .disconnected }
+        try await waitUntil { model.state == .disconnected } orFailWhen: { model.state.failure != nil }
         #expect(try #require(first.transcript.first?.agentMessage).content.joinedText == "left open")
         #expect(try #require(second.transcript.first?.agentMessage).content.joinedText == "also open")
     }
@@ -386,28 +400,37 @@ struct ConnectionModelTests {
         let model = ConnectionModel()
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         _ = await model.connect(over: clientEnd)
+        defer { await model.disconnect() }
         let session = SessionModelFixtures.immediateModel()
         model.register(session)
         let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
         let elicitation = Task { await session.awaitElicitation(request) }
-        try await waitUntil { !session.pendingElicitations.isEmpty }
+        // The task adds the elicitation. When the task ends first, the
+        // elicitation never comes.
+        let end = TaskEnd(of: elicitation)
+        try await waitUntil { !session.pendingElicitations.isEmpty } orFailWhen: { end.hasEnded }
 
         agentEnd.close()
 
+        try await waitUntil { model.state == .disconnected } orFailWhen: { model.state.failure != nil }
+        // A pending elicitation that stays is a request that is not
+        // cancelled, so the test fails here and does not wait for the task.
+        try #require(session.pendingElicitations.isEmpty)
         #expect(await elicitation.value == ElicitationResponseWire.cancelResponse)
-        #expect(session.pendingElicitations.isEmpty)
     }
 
-    @Test func aFailureClosesEachOpenSession() async {
+    @Test func aFailureClosesEachOpenSession() async throws {
         let model = ConnectionModel()
         let transport = FailingTransport()
         _ = await model.connect(over: transport)
+        defer { await model.disconnect() }
         let session = SessionModelFixtures.immediateModel()
         model.register(session)
 
         transport.fail(with: ByteStreamFailure())
 
-        await waitFor { model.state == .failed(ByteStreamFailure()) }
+        // A disconnected state is the close with the wrong reason.
+        try await waitUntil { model.state == .failed(ByteStreamFailure()) } orFailWhen: { model.state == .disconnected }
         #expect(session.isClosed)
         #expect(model.openSessions.isEmpty)
     }
@@ -416,6 +439,9 @@ struct ConnectionModelTests {
 
     @Test func disconnectSetsDisconnectedAndClosesOpenSessions() async throws {
         let connected = await ConnectedModel()
+        // The disconnect of the body is the behavior under test. This one
+        // closes the connection also when the body throws first.
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
 
@@ -429,13 +455,18 @@ struct ConnectionModelTests {
 
     @Test func disconnectCancelsPendingPermissions() async throws {
         let connected = await ConnectedModel()
+        // The disconnect of the body is the behavior under test. This one
+        // closes the connection also when the body throws first.
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         let session = try await connected.model.newSession(NewSessionRequest(cwd: workingDirectory))
         let permission = SessionModelFixtures.startPermission(on: session)
 
         await connected.model.disconnect()
 
-        #expect(session.pendingPermissions.isEmpty)
+        // A pending permission that stays is a request that is not cancelled,
+        // so the test fails here and does not wait for the task.
+        try #require(session.pendingPermissions.isEmpty)
         #expect(await permission.value.outcome == .cancelled)
     }
 
@@ -447,8 +478,10 @@ struct ConnectionModelTests {
         await model.disconnect()
 
         // The read of the bytes stops in a task of the connection, so the
-        // end can come a short time after the close.
-        try await waitUntil { transport.hasEnded }
+        // end can come a short time after the close. The model is already
+        // disconnected, and the test cannot see that read task, so no event
+        // tells that the end will never come.
+        try await waitUntil({ transport.hasEnded }, orFailWhen: noFailureEvent)
         #expect(model.state == .disconnected)
     }
 
@@ -470,6 +503,9 @@ struct ConnectionModelTests {
         let unconnectedSession = SessionModelFixtures.immediateModel()
         unconnected.register(unconnectedSession)
         let connected = await ConnectedModel()
+        // The disconnects of the body are the behavior under test. This one
+        // closes the connection also when the body throws first.
+        defer { await connected.model.disconnect() }
         await connected.model.disconnect()
         let laterSession = SessionModelFixtures.immediateModel()
         connected.model.register(laterSession)
@@ -487,6 +523,8 @@ struct ConnectionModelTests {
 
     @Test func connectAfterDisconnectWorks() async throws {
         let connected = await ConnectedModel()
+        // This closes the second connection, also when the body throws.
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         await connected.model.disconnect()
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -503,13 +541,16 @@ struct ConnectionModelTests {
 
     // MARK: - Session models
 
-    @Test func aSessionModelOfTheConnectionUsesItsCadenceAndClock() async {
+    @Test func aSessionModelOfTheConnectionUsesItsCadenceAndClock() async throws {
         let clock = ManualClock()
         let model = ConnectionModel(coalescingCadence: SessionModelFixtures.bufferedCadence, clock: clock)
         let session = model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
 
         session.apply(agentChunk(text: "one"))
-        await waitFor { clock.sleeperCount > 0 }
+        // The model has no connection, and the flush task of the session is
+        // not visible to the test. Thus no event tells that the flush will
+        // never sleep on the clock.
+        try await waitUntil({ clock.sleeperCount > 0 }, orFailWhen: noFailureEvent)
         clock.advance(by: SessionModelFixtures.bufferedCadence - clockStep)
 
         // The flush waits on the manual clock for the whole given cadence.
@@ -517,7 +558,9 @@ struct ConnectionModelTests {
         #expect(session.transcript.isEmpty)
 
         clock.advance(by: clockStep)
-        await waitFor { !session.transcript.isEmpty }
+        // The flush task is not visible to the test, so no event tells that
+        // the flush will never come after the advance of the clock.
+        try await waitUntil({ !session.transcript.isEmpty }, orFailWhen: noFailureEvent)
         #expect(session.transcript.count == 1)
     }
 }

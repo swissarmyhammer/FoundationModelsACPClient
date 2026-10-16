@@ -109,6 +109,7 @@ struct ElicitationUserPresenceTests {
     @Test func aHeadlessClientCancelsASessionElicitationAtOnceWithTheNoUserReason() async throws {
         let harness = PresenceHarness()
         let agent = await harness.connect()
+        defer { await harness.model.disconnect() }
         try await harness.initialize(ACPClient.capabilities(for: .headless))
         let session = harness.openTestSession()
 
@@ -126,6 +127,7 @@ struct ElicitationUserPresenceTests {
     @Test func aHeadlessClientCancelsARequestScopedElicitationAtOnceWithTheNoUserReason() async throws {
         let harness = PresenceHarness()
         let agent = await harness.connect()
+        defer { await harness.model.disconnect() }
         try await harness.initialize(ACPClient.capabilities(for: .headless))
 
         let response = try await agent.createElicitation(
@@ -143,6 +145,7 @@ struct ElicitationUserPresenceTests {
     @Test func aClientWithTheFormModeOnlyCancelsAUrlElicitationAndRoutesAFormElicitation() async throws {
         let harness = PresenceHarness()
         let agent = await harness.connect()
+        defer { await harness.model.disconnect() }
         try await harness.initialize(formOnly)
         let session = harness.openTestSession()
 
@@ -158,6 +161,9 @@ struct ElicitationUserPresenceTests {
             over: agent
         ) { !session.pendingElicitations.isEmpty }
         session.cancelAllPending()
+        // The require stops the test before the await below, which would
+        // suspend for ever when the elicitation stays pending.
+        try #require(session.pendingElicitations.isEmpty)
         let cancelled = try await routed.value
         #expect(cancelled == ElicitationResponseWire.cancelResponse)
         #expect(metaReason(of: cancelled) == nil)
@@ -169,6 +175,7 @@ struct ElicitationUserPresenceTests {
     @Test func anInteractiveClientRoutesTheElicitationToTheUser() async throws {
         let harness = PresenceHarness()
         let agent = await harness.connect()
+        defer { await harness.model.disconnect() }
         try await harness.initialize(ACPClient.capabilities(for: .interactive))
         let session = harness.openTestSession()
         let content: JSONValue = .object(["name": .string("orion")])
@@ -180,6 +187,9 @@ struct ElicitationUserPresenceTests {
         let pending = try #require(session.pendingElicitations.first)
         session.acceptElicitation(pending.id, content: content)
 
+        // The require stops the test before the await below, which would
+        // suspend for ever when the elicitation stays pending.
+        try #require(session.pendingElicitations.isEmpty)
         #expect(try await call.value == ElicitationResponseWire.acceptResponse(content: content))
         #expect(harness.loggedMessages.isEmpty)
     }
@@ -189,6 +199,7 @@ struct ElicitationUserPresenceTests {
     @Test func aNewConnectionForgetsTheHeadlessInitialize() async throws {
         let harness = PresenceHarness()
         _ = await harness.connect()
+        defer { await harness.model.disconnect() }
         try await harness.initialize(ACPClient.capabilities(for: .headless))
 
         // The second connection sends no `initialize`, so the model refuses
@@ -201,6 +212,9 @@ struct ElicitationUserPresenceTests {
         ) { !session.pendingElicitations.isEmpty }
         session.cancelAllPending()
 
+        // The require stops the test before the await below, which would
+        // suspend for ever when the elicitation stays pending.
+        try #require(session.pendingElicitations.isEmpty)
         #expect(try await call.value == ElicitationResponseWire.cancelResponse)
         #expect(harness.loggedMessages.isEmpty)
     }

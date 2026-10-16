@@ -42,9 +42,15 @@ struct LiveAgentTurnTests {
         let workspace = root.appendingPathComponent("workspace", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         let agentProcess = try await Self.startAgent(under: root, workspace: workspace)
+        // This stops the agent process also when the body throws first. After
+        // the reap at the end of the body, it does nothing.
+        defer { agentProcess.shutdown() }
 
         let model = ConnectionModel(coalescingCadence: .zero)
         _ = await model.connect(over: agentProcess.transport)
+        // The disconnect of the body is the behavior under test. This one
+        // closes the connection also when the body throws first.
+        defer { await model.disconnect() }
         _ = try await model.initialize(
             InitializeRequest(
                 info: Self.clientInfo,

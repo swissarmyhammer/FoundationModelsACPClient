@@ -17,6 +17,11 @@ import Testing
 // outgoing-request stream of the client. The test then sends the elicitation
 // through the agent-side connection while the login waits, so the answer
 // crosses the wire back to the agent.
+//
+// Each wait has a failure event (rule T1). A wait over the connection ends
+// also on the close of the connection. A wait for a change that a started
+// task must make ends also on the end of that task. Each test closes the
+// harness in a `defer`, so the close runs also when the test body throws.
 
 /// A model that is connected over an in-memory pair to a scripted stub agent
 /// whose `auth/login` waits for a gate.
@@ -62,6 +67,25 @@ private struct LoginHarness {
         requestEvents = connection.subscribeToOutgoingRequests()
     }
 
+    /// Whether the connection of the model closed. The failure event of a
+    /// wait over the connection.
+    ///
+    /// The state `connecting` counts as open, because a test that makes a
+    /// new connection goes through it.
+    var connectionIsClosed: Bool {
+        ![ConnectionState.connected, .connecting].contains(model.state)
+    }
+
+    /// Ends the work of the harness: opens the login gate, so no login of the
+    /// agent waits for ever, and closes the connection of the model.
+    ///
+    /// Each test calls it in a `defer`, so it runs also when the test body
+    /// throws. A second call changes nothing.
+    func close() async {
+        loginGate.open()
+        await model.disconnect()
+    }
+
     /// Initializes the model, starts a login through the model, and waits
     /// until the request is in flight.
     ///
@@ -69,12 +93,21 @@ private struct LoginHarness {
     /// lists, so the initialize comes first.
     ///
     /// - Returns: The task of the login, and the wire id of its request.
-    /// - Throws: The error of the initialize, or an error when the event
-    ///   stream ended before the login started.
+    /// - Throws: The error of the initialize, ``WaitEndedOnFailure`` when the
+    ///   login ended before it started, or an error when the event stream
+    ///   ended before the login started.
     func startLogin() async throws -> (login: Task<Void, any Error>, requestId: RequestId) {
         _ = try await model.initialize(makeInitializeRequest())
         let login = Task { [model] in try await model.login(InitializeFixtures.login) }
-        let requestId = try #require(await loginRequestId())
+        // The reader ends when the login starts, or when the event stream
+        // ends. The end of the login is the failure event: the gate holds a
+        // login that started, so a login that ended never started.
+        let reader = Task { await loginRequestId() }
+        defer { reader.cancel() }
+        let readerEnd = TaskEnd(of: reader)
+        let loginEnd = TaskEnd(of: login)
+        try await waitUntil { readerEnd.hasEnded } orFailWhen: { loginEnd.hasEnded }
+        let requestId = try #require(await reader.value)
         return (login, requestId)
     }
 
@@ -96,8 +129,8 @@ private struct LoginHarness {
     ///   - requestId: The wire id of the request that the elicitation names.
     ///   - makeRequest: Builds the elicitation from its request scope.
     /// - Returns: The task of the agent's call.
-    /// - Throws: Nothing today. The signature keeps `throws` because
-    ///   ``waitUntil(_:)`` throws.
+    /// - Throws: ``WaitEndedOnFailure`` when the call ended before the model
+    ///   held the elicitation.
     func startElicitation(
         naming requestId: RequestId,
         _ makeRequest: (ElicitationRequestScope) -> CreateElicitationRequest = { scope in
@@ -141,6 +174,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func anElicitationDuringLoginIsPendingWithItsRequestIdAndMethod() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
 
         let call = try await harness.startElicitation(naming: requestId)
@@ -157,6 +191,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func pendingRequestsGivesEachRequestScopedElicitationInArrivalOrder() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
 
@@ -174,15 +209,20 @@ struct ConnectionModelElicitationTests {
     /// code appends each elicitation, and gives the later one first.
     @Test func anElicitationWithASmallerArrivalGoesInFrontOfTheOneThatCameFirst() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let model = harness.model
         let request = ElicitationFixtures.formRequest(scope: .request(ElicitationRequestScope(requestId: requestId)))
 
+        // Each wait ends also on the end of the task that must add the
+        // elicitation: a task that ended did not add it.
         let later = Task { await model.awaitRequestScopedElicitation(request, requestId: requestId, arrival: 2) }
-        try await waitUntil { model.pendingElicitations.count == 1 }
+        let laterEnd = TaskEnd(of: later)
+        try await waitUntil { model.pendingElicitations.count == 1 } orFailWhen: { laterEnd.hasEnded }
         let laterId = try #require(model.pendingElicitations.first?.id)
         let earlier = Task { await model.awaitRequestScopedElicitation(request, requestId: requestId, arrival: 1) }
-        try await waitUntil { model.pendingElicitations.count == 2 }
+        let earlierEnd = TaskEnd(of: earlier)
+        try await waitUntil { model.pendingElicitations.count == 2 } orFailWhen: { earlierEnd.hasEnded }
         let earlierId = try #require(model.pendingElicitations.first { $0.id != laterId }?.id)
 
         #expect(model.pendingElicitations.map(\.id) == [earlierId, laterId])
@@ -201,12 +241,13 @@ struct ConnectionModelElicitationTests {
     /// because the agent sent no `_meta`.
     @Test func anElicitationThatTheAgentWithdrawsGivesARecordOnTheConnection() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let pending = try #require(harness.model.pendingRequests.first)
 
         call.cancel()
-        try await waitUntil { !harness.model.withdrawnRequests.isEmpty }
+        try await waitUntil { !harness.model.withdrawnRequests.isEmpty } orFailWhen: { harness.connectionIsClosed }
 
         #expect(harness.model.pendingRequests.isEmpty)
         #expect(harness.model.withdrawnRequests.map(\.id) == [pending.id])
@@ -225,9 +266,11 @@ struct ConnectionModelElicitationTests {
     /// code checks only that some connection is open, and makes the record.
     @Test func aWithdrawalOfAnOldConnectionGivesNoRecordOnTheNewConnection() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let (newClientEnd, newAgentEnd) = InMemoryTransport.pair()
+        defer { newAgentEnd.close() }
         let probe = SeamProbe()
         harness.model.afterRequestScopedElicitationWait = { [model = harness.model] in
             _ = await model.connect(over: newClientEnd)
@@ -237,17 +280,12 @@ struct ConnectionModelElicitationTests {
         call.cancel()
         // The seam sets the state to connecting, so only a close is the
         // failure event of this wait.
-        try await waitUntil {
-            probe.ran || ![ConnectionState.connected, .connecting].contains(harness.model.state)
-        }
+        try await waitUntil { probe.ran } orFailWhen: { harness.connectionIsClosed }
 
-        try #require(probe.ran)
         #expect(harness.model.withdrawnRequests.isEmpty)
         _ = try? await call.value
         harness.loginGate.open()
         _ = try? await login.value
-        await harness.model.disconnect()
-        newAgentEnd.close()
     }
 
     // MARK: - Front
@@ -291,6 +329,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func theFrontIsTheOldestRequestAndANewRequestGoesAtTheBack() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         #expect(harness.model.frontRequest == nil)
         let (login, requestId) = try await harness.startLogin()
         let first = try await harness.startElicitation(naming: requestId)
@@ -306,6 +345,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func bringingARequestToTheFrontKeepsTheOrder() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
 
         harness.model.bringToFront(requests[2].id)
@@ -318,6 +358,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func anUnknownIdChangesNothingOnTheConnection() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
         harness.model.bringToFront(requests[1].id)
 
@@ -329,6 +370,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func anAnsweredFrontMovesTheFrontToTheOldestRequestThatStays() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
         harness.model.bringToFront(requests[2].id)
 
@@ -341,6 +383,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aCancelledFrontMovesTheFrontToTheOldestRequestThatStays() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
         harness.model.bringToFront(requests[0].id)
 
@@ -353,6 +396,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func bringingARequestToTheFrontFiresTheObservationOfTheConnectionFront() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
 
         let fires = observationFires(reading: { _ = harness.model.frontRequest }) {
@@ -365,6 +409,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aNewConnectionClearsTheFront() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, calls, requests) = try await startThreeElicitations(on: harness)
         harness.model.bringToFront(requests[1].id)
         let (clientEnd, _) = InMemoryTransport.pair()
@@ -383,6 +428,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func acceptResumesTheAgentOneTimeWithTheContent() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let pending = try #require(harness.model.pendingElicitations.first)
@@ -399,6 +445,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func declineResumesTheAgentOneTimeWithTheDeclineAction() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let pending = try #require(harness.model.pendingElicitations.first)
@@ -413,6 +460,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func cancelResumesTheAgentOneTimeWithTheCancelAction() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let pending = try #require(harness.model.pendingElicitations.first)
@@ -430,6 +478,7 @@ struct ConnectionModelElicitationTests {
     /// (here `auth/login`), so it stays pending on the connection model.
     @Test func aSessionCancelKeepsTheRequestScopedElicitations() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let session = harness.model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
@@ -448,6 +497,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aUrlElicitationCompleteClosesTheMatchingRequestScopedElicitation() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId) { scope in
             ElicitationFixtures.urlRequest(scope: .request(scope))
@@ -484,6 +534,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func anAcceptedRequestScopedUrlElicitationWaitsForItsCompletion() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
 
         let (login, accepted) = try await acceptRequestScopedURLElicitation(on: harness)
 
@@ -494,18 +545,20 @@ struct ConnectionModelElicitationTests {
 
     @Test func theElicitationCompleteOfTheAgentRemovesTheAwaitingItem() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
 
         try await harness.agentConnection.elicitationComplete(
             CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
         )
 
-        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty }
+        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty } orFailWhen: { harness.connectionIsClosed }
         try await harness.finish(login)
     }
 
     @Test func stopWaitingRemovesTheRequestScopedAwaitingItem() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, accepted) = try await acceptRequestScopedURLElicitation(on: harness)
 
         harness.model.stopWaiting(accepted.id)
@@ -516,15 +569,17 @@ struct ConnectionModelElicitationTests {
 
     @Test func theFinishOfItsRequestRemovesTheAwaitingItem() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
 
         try await harness.finish(login)
 
-        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty }
+        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty } orFailWhen: { harness.connectionIsClosed }
     }
 
     @Test func aNewConnectionRemovesEachAwaitingItem() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
         let (clientEnd, _) = InMemoryTransport.pair()
 
@@ -535,8 +590,12 @@ struct ConnectionModelElicitationTests {
         _ = try? await login.value
     }
 
+    /// The disconnect is the behavior under test, so the body closes the
+    /// connection itself. The `defer` closes it only when the body throws
+    /// before the disconnect.
     @Test func aDisconnectRemovesEachAwaitingItem() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
 
         await harness.model.disconnect()
@@ -548,11 +607,15 @@ struct ConnectionModelElicitationTests {
 
     @Test func theConnectionRoutesACompleteToTheAwaitingItemOfASession() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let session = harness.model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         harness.model.register(session)
         let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
         let call = Task { await session.awaitElicitation(request) }
-        try await waitUntil { !session.pendingElicitations.isEmpty }
+        // The session has a fake sender, so the end of the task that must
+        // add the elicitation is the failure event.
+        let callEnd = TaskEnd(of: call)
+        try await waitUntil { !session.pendingElicitations.isEmpty } orFailWhen: { callEnd.hasEnded }
         session.acceptElicitation(try #require(session.pendingElicitations.first).id)
         _ = await call.value
 
@@ -566,6 +629,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aSuccessfulLoginRemovesItsElicitationAndTheAgentGetsCancel() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
 
@@ -577,6 +641,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aRefusedLoginRemovesItsElicitationAndTheAgentGetsCancel() async throws {
         let harness = await LoginHarness(loginError: InitializeFixtures.loginRefusal)
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
 
@@ -594,6 +659,9 @@ struct ConnectionModelElicitationTests {
     /// with `close`, and checks that the close cancels the elicitation and
     /// fails the login.
     ///
+    /// The close is the behavior under test. The `defer` closes the harness
+    /// only when the body throws before `close`.
+    ///
     /// - Parameter close: Closes the connection of the harness, and waits
     ///   until the model is disconnected.
     /// - Throws: Whatever the start of the login, the elicitation, or `close`
@@ -602,6 +670,7 @@ struct ConnectionModelElicitationTests {
         _ close: (LoginHarness) async throws -> Void
     ) async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
 
@@ -620,7 +689,12 @@ struct ConnectionModelElicitationTests {
     @Test func aDisconnectCancelsEachRequestScopedElicitation() async throws {
         try await expectACloseCancelsTheRequestScopedElicitation { harness in
             harness.agentEnd.close()
-            try await waitUntil { harness.model.state == .disconnected }
+            // A failed read is the failure event: it closes the connection
+            // with a different state.
+            try await waitUntil { harness.model.state == .disconnected } orFailWhen: {
+                guard case .failed = harness.model.state else { return false }
+                return true
+            }
         }
     }
 
@@ -634,6 +708,7 @@ struct ConnectionModelElicitationTests {
 
     @Test func aNewConnectionCancelsEachRequestScopedElicitationOfTheLastOne() async throws {
         let harness = await LoginHarness()
+        defer { await harness.close() }
         let (login, requestId) = try await harness.startLogin()
         let call = try await harness.startElicitation(naming: requestId)
         let (clientEnd, _) = InMemoryTransport.pair()

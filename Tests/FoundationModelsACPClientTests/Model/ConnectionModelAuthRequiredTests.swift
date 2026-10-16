@@ -177,6 +177,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             newSessionError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
             try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)
@@ -189,6 +190,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             resumeSessionError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
             try await connected.model.resumeSession(AuthRequiredFixtures.resumeRequest)
@@ -201,6 +203,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             listSessionsError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
             try await connected.model.refreshSessions()
@@ -213,6 +216,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             closeSessionError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
@@ -226,6 +230,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             deleteSessionError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
             try await connected.model.deleteSession(testSession)
@@ -240,6 +245,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             promptError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
@@ -257,6 +263,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             setConfigOptionError: AuthRequiredFixtures.authRequired
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)
 
         await #expect(throws: AuthRequiredFixtures.authRequired) {
@@ -270,6 +277,7 @@ struct ConnectionModelAuthRequiredTests {
         let connected = try await AuthRequiredFixtures.connectAfterARefusedLogin(
             promptError: AuthRequiredFixtures.otherError
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)
 
         await #expect(throws: AuthRequiredFixtures.otherError) {
@@ -281,8 +289,10 @@ struct ConnectionModelAuthRequiredTests {
 
     @Test func aSessionOfAnEarlierConnectionDoesNotChangeTheAuthState() async throws {
         let earlier = try await AuthRequiredFixtures.connect(promptError: AuthRequiredFixtures.authRequired)
+        defer { await earlier.model.disconnect() }
         let session = try await earlier.model.newSession(AuthRequiredFixtures.newSessionRequest)
         let current = try await AuthRequiredFixtures.connect(model: earlier.model)
+        defer { await current.model.disconnect() }
         try await current.model.login(InitializeFixtures.login)
         try #require(current.model.authState == AuthRequiredFixtures.authenticated)
 
@@ -298,6 +308,7 @@ struct ConnectionModelAuthRequiredTests {
 
     @Test func anAuthenticatedConnectionGoesBackToRequired() async throws {
         let connected = try await AuthRequiredFixtures.connect(newSessionError: AuthRequiredFixtures.authRequired)
+        defer { await connected.model.disconnect() }
         try await connected.model.login(InitializeFixtures.login)
         try #require(connected.model.authState == AuthRequiredFixtures.authenticated)
 
@@ -310,6 +321,7 @@ struct ConnectionModelAuthRequiredTests {
 
     @Test func anotherErrorKeepsTheAuthState() async throws {
         let connected = try await AuthRequiredFixtures.connect(newSessionError: AuthRequiredFixtures.otherError)
+        defer { await connected.model.disconnect() }
         try await connected.model.login(InitializeFixtures.login)
         try #require(connected.model.authState == AuthRequiredFixtures.authenticated)
 
@@ -324,6 +336,7 @@ struct ConnectionModelAuthRequiredTests {
 
     @Test func aLoginAfterRequiredGivesAuthenticated() async throws {
         let connected = try await AuthRequiredFixtures.connect(newSessionError: AuthRequiredFixtures.authRequired)
+        defer { await connected.model.disconnect() }
         try await connected.model.login(InitializeFixtures.login)
         await #expect(throws: AuthRequiredFixtures.authRequired) {
             try await connected.model.newSession(AuthRequiredFixtures.newSessionRequest)

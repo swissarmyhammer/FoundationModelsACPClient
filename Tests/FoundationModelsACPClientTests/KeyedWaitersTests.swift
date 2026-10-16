@@ -61,19 +61,26 @@ private func startWaiter(
     }
 }
 
+// A caller that ends before it goes into the queue never goes in, so the end
+// of its task is the failure event of a wait for its suspend. A test reads the
+// value of a caller only after a resume that found it, so the read does not
+// hang.
+
 @MainActor @Test
 func keyedWaitersResumeTheWaitersOfOneKeyInCallOrder() async throws {
     let waiters = makeWaiters()
     let log = WaiterLog()
 
     let first = startWaiter("first", for: firstKey, on: waiters, log: log)
-    try await waitUntil { log.suspended == ["first"] }
+    let firstEnd = TaskEnd(of: first)
+    try await waitUntil { log.suspended == ["first"] } orFailWhen: { firstEnd.hasEnded }
     let second = startWaiter("second", for: firstKey, on: waiters, log: log)
-    try await waitUntil { log.suspended == ["first", "second"] }
+    let secondEnd = TaskEnd(of: second)
+    try await waitUntil { log.suspended == ["first", "second"] } orFailWhen: { secondEnd.hasEnded }
 
-    #expect(waiters.resumeFirst(of: firstKey, with: "one"))
+    try #require(waiters.resumeFirst(of: firstKey, with: "one"))
     #expect(await first.value == "one")
-    #expect(waiters.resumeFirst(of: firstKey, with: "two"))
+    try #require(waiters.resumeFirst(of: firstKey, with: "two"))
     #expect(await second.value == "two")
     #expect(!waiters.resumeFirst(of: firstKey, with: "three"))
 }
@@ -84,10 +91,11 @@ func keyedWaitersResumeOnlyTheWaitersOfTheNamedKey() async throws {
     let log = WaiterLog()
 
     let other = startWaiter("other", for: secondKey, on: waiters, log: log)
-    try await waitUntil { log.suspended == ["other"] }
+    let otherEnd = TaskEnd(of: other)
+    try await waitUntil { log.suspended == ["other"] } orFailWhen: { otherEnd.hasEnded }
 
     #expect(!waiters.resumeFirst(of: firstKey, with: "one"))
-    #expect(waiters.resumeFirst(of: secondKey, with: "two"))
+    try #require(waiters.resumeFirst(of: secondKey, with: "two"))
     #expect(await other.value == "two")
 }
 
@@ -97,16 +105,20 @@ func aCancelledWaiterGetsTheCancelledValueAndLeavesTheQueue() async throws {
     let log = WaiterLog()
 
     let waiting = startWaiter("waiting", for: firstKey, on: waiters, log: log)
-    try await waitUntil { log.suspended == ["waiting"] }
+    let waitingEnd = TaskEnd(of: waiting)
+    try await waitUntil { log.suspended == ["waiting"] } orFailWhen: { waitingEnd.hasEnded }
     waiting.cancel()
 
+    // The cancel is the behavior under test. No other event tells that the
+    // cancel does not resume the caller, so this read is a known limit of
+    // rule T1.
     #expect(await waiting.value == cancelledValue)
     #expect(log.cancelled == ["waiting"])
     #expect(!waiters.resumeFirst(of: firstKey, with: "one"))
 }
 
 @MainActor @Test
-func aWaiterWhoseTaskWasCancelledBeforeTheCallDoesNotWait() async {
+func aWaiterWhoseTaskWasCancelledBeforeTheCallDoesNotWait() async throws {
     let waiters = makeWaiters()
     let log = WaiterLog()
 
@@ -118,7 +130,11 @@ func aWaiterWhoseTaskWasCancelledBeforeTheCallDoesNotWait() async {
             onCancel: { log.cancelled.append("waiting") }
         )
     }
+    let waitingEnd = TaskEnd(of: waiting)
 
+    // A caller that goes into the queue is the failure: it waits, and nothing
+    // resumes it.
+    try await waitUntil { waitingEnd.hasEnded } orFailWhen: { !log.suspended.isEmpty }
     #expect(await waiting.value == cancelledValue)
     #expect(log.suspended.isEmpty)
     #expect(!waiters.resumeFirst(of: firstKey, with: "one"))

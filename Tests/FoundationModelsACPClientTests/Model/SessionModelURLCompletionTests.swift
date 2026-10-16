@@ -24,19 +24,42 @@ struct SessionModelURLCompletionTests {
     }
 
     /// Starts one session-scoped elicitation and waits until it is pending.
+    /// The end of the agent's call is the failure event: after it, the
+    /// elicitation never becomes pending.
     ///
     /// - Parameters:
     ///   - model: The model that holds the elicitation.
     ///   - request: The request to start.
     /// - Returns: The task of the agent's call.
+    /// - Throws: ``WaitEndedOnFailure`` when the call ended first.
     private func startElicitation(
         on model: SessionModel,
         _ request: CreateElicitationRequest = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
     ) async throws -> Task<CreateElicitationResponse, Never> {
         let count = model.pendingElicitations.count
         let task = Task { await model.awaitElicitation(request) }
-        try await waitUntil { model.pendingElicitations.count == count + 1 }
+        let taskEnd = TaskEnd(of: task)
+        try await waitUntil { model.pendingElicitations.count == count + 1 } orFailWhen: { taskEnd.hasEnded }
         return task
+    }
+
+    /// Waits for the answer of the agent's call, after the test resolved its
+    /// one elicitation.
+    ///
+    /// An elicitation that is still pending has no answer, so the test fails
+    /// before the wait and does not hang.
+    ///
+    /// - Parameters:
+    ///   - task: The task of the agent's call.
+    ///   - model: The model that held the elicitation.
+    /// - Returns: The answer of the call.
+    /// - Throws: The error of `#require` when an elicitation is still pending.
+    private func answer(
+        of task: Task<CreateElicitationResponse, Never>,
+        on model: SessionModel
+    ) async throws -> CreateElicitationResponse {
+        try #require(model.pendingElicitations.isEmpty)
+        return await task.value
     }
 
     /// Starts one url-mode elicitation, accepts it, and waits for the answer
@@ -48,7 +71,7 @@ struct SessionModelURLCompletionTests {
         let task = try await startElicitation(on: model)
         let pending = try #require(model.pendingElicitations.first)
         model.acceptElicitation(pending.id)
-        #expect(await task.value == ElicitationResponseWire.acceptResponse(content: nil))
+        #expect(try await answer(of: task, on: model) == ElicitationResponseWire.acceptResponse(content: nil))
         return pending
     }
 
@@ -73,7 +96,7 @@ struct SessionModelURLCompletionTests {
 
         model.acceptElicitation(try #require(model.pendingElicitations.first).id, content: .object(["name": .string("orion")]))
 
-        _ = await task.value
+        _ = try await answer(of: task, on: model)
         #expect(model.awaitingURLCompletions.isEmpty)
     }
 
@@ -81,12 +104,12 @@ struct SessionModelURLCompletionTests {
         let model = makeModel()
         let declined = try await startElicitation(on: model)
         model.declineElicitation(try #require(model.pendingElicitations.first).id)
-        _ = await declined.value
+        _ = try await answer(of: declined, on: model)
         let cancelled = try await startElicitation(on: model)
 
         model.cancelElicitation(try #require(model.pendingElicitations.first).id)
 
-        _ = await cancelled.value
+        _ = try await answer(of: cancelled, on: model)
         #expect(model.awaitingURLCompletions.isEmpty)
     }
 
@@ -100,7 +123,7 @@ struct SessionModelURLCompletionTests {
         }
 
         #expect(fires)
-        _ = await task.value
+        _ = try await answer(of: task, on: model)
     }
 
     // MARK: - Removal

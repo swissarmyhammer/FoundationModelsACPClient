@@ -42,9 +42,15 @@ struct SessionModelCoalescingTests {
         model.apply(agentChunk(text: "two"))
         #expect(model.transcript.isEmpty)
 
-        await waitFor { clock.sleeperCount > 0 }
+        // A flush before the cadence elapsed is the failure event: then the
+        // buffer did not wait for the clock.
+        try await waitUntil { clock.sleeperCount > 0 } orFailWhen: { !model.transcript.isEmpty }
         clock.advance(by: SessionModelFixtures.bufferedCadence)
-        await waitFor { !model.transcript.isEmpty }
+        // A new sleeper while the transcript is still empty is the failure
+        // event: then the model slept again and did not flush. A model that
+        // stops with no flush and no new sleeper gives no event, and the
+        // wait then hangs: a known limit of rule T1.
+        try await waitUntil { !model.transcript.isEmpty } orFailWhen: { clock.sleeperCount > 0 }
 
         let entry = try #require(model.transcript.first?.agentMessage)
         #expect(model.transcript.map(\.id) == [.wire(.agentMessage(agentMessageId))])

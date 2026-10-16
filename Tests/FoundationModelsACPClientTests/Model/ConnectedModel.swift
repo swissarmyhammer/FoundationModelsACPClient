@@ -1,4 +1,5 @@
 import FoundationModelsACP
+import Testing
 
 @testable import FoundationModelsACPClient
 
@@ -147,13 +148,38 @@ struct ConnectedModel {
         try await model.initialize(makeInitializeRequest())
     }
 
+    /// Whether the connection of the model closed: the state is
+    /// ``ConnectionState/disconnected`` or ``ConnectionState/failed(_:)``.
+    ///
+    /// A wait for a change that the agent must make over the connection uses
+    /// it as the failure event: after the close, the change never comes. Do
+    /// not use it while the model connects again, because the model is
+    /// disconnected before the new connection opens.
+    var isConnectionClosed: Bool {
+        switch model.state {
+        case .disconnected, .failed: true
+        case .connecting, .connected: false
+        }
+    }
+
+    /// Whether the connection of the model failed: the state is
+    /// ``ConnectionState/failed(_:)``.
+    ///
+    /// A wait for the ``ConnectionState/disconnected`` state after a close
+    /// of the agent end uses it as the failure event, because a failed state
+    /// is the close with the wrong reason.
+    var isConnectionFailed: Bool {
+        guard case .failed = model.state else { return false }
+        return true
+    }
+
     /// Closes the agent end of the pair, and waits until the model records
     /// the close. After the call, the model has no open connection.
     ///
-    /// - Throws: Nothing today. The signature keeps `throws` because
-    ///   ``waitUntil(_:)`` throws.
+    /// - Throws: ``WaitEndedOnFailure`` when the connection failed, because
+    ///   that is the close with the wrong reason.
     func closeAgentEnd() async throws {
         agentEnd.close()
-        try await waitUntil { model.state == .disconnected }
+        try await waitUntil { model.state == .disconnected } orFailWhen: { isConnectionFailed }
     }
 }

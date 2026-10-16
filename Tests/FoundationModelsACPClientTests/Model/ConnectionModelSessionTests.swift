@@ -487,6 +487,7 @@ struct ConnectionModelSessionTests {
 
     @Test func newSessionRegistersAnOpenModelForTheSessionOfTheAnswer() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
@@ -499,10 +500,15 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             newSessionScript: SessionFactoryFixtures.twoMessages
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
-        try await waitUntil { session.transcript.count == SessionFactoryFixtures.twoMessages.count }
+        try await waitUntil {
+            session.transcript.count == SessionFactoryFixtures.twoMessages.count
+        } orFailWhen: {
+            session.isClosed
+        }
         #expect(session.transcript.map { $0.agentMessage?.content.joinedText } == ["first", "second"])
         #expect(!session.hasMissedUpdates)
     }
@@ -512,6 +518,7 @@ struct ConnectionModelSessionTests {
             bufferLimits: SessionFactoryFixtures.oneUpdateBuffer,
             newSessionScript: SessionFactoryFixtures.twoMessages
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
@@ -520,6 +527,7 @@ struct ConnectionModelSessionTests {
 
     @Test func anAnswerWithNoCommandListLeavesTheCommandsUnknown() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
@@ -530,6 +538,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             newSessionCommands: SessionFactoryFixtures.commands
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
@@ -542,6 +551,7 @@ struct ConnectionModelSessionTests {
             logger: ACPLogger { messages.append($0) },
             newSessionCommands: SessionFactoryFixtures.commands + SessionFactoryFixtures.commands
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
@@ -561,12 +571,18 @@ struct ConnectionModelSessionTests {
     @Test func aConnectionThatClosesAfterTheNewSessionAnswerRegistersNoSession() async throws {
         let answerGate = UpdateGate()
         let connected = try await SessionFactoryFixtures.connect(newSessionGate: answerGate)
+        defer { await connected.model.disconnect() }
         let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
         let executor = HoldableTaskExecutor()
         let creating = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
             try await model.newSession(SessionFactoryFixtures.newSessionRequest)
         }
-        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.newSession) }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends or the connection closes first, the request never comes.
+        let creatingEnd = TaskEnd(of: creating)
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.newSession) } orFailWhen: {
+            creatingEnd.hasEnded || connected.isConnectionClosed
+        }
 
         // The executor holds the part of the call that follows the answer, so
         // the close of the connection always comes before `newSession` reads
@@ -575,7 +591,7 @@ struct ConnectionModelSessionTests {
             answerGate.open()
             #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.newSession, in: requestEvents))
             connected.agentEnd.close()
-            try await waitUntil { connected.model.state == .disconnected }
+            try await waitUntil { connected.model.state == .disconnected } orFailWhen: { connected.isConnectionFailed }
         }
 
         await #expect(throws: ConnectionError.closed) {
@@ -590,6 +606,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
@@ -605,13 +622,19 @@ struct ConnectionModelSessionTests {
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         let resuming = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
+        // The gate holds the answer, so the resume task cannot end before the
+        // replay with no error. When it ends first, the replay never comes.
+        let resumingEnd = TaskEnd(of: resuming)
 
         try await waitUntil {
             SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText]
+        } orFailWhen: {
+            resumingEnd.hasEnded || session.isClosed
         }
         #expect(session.isReplaying)
         answerGate.open()
@@ -624,6 +647,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay
         )
+        defer { await connected.model.disconnect() }
         let first = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
         let second = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
@@ -636,6 +660,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionScript: SessionFactoryFixtures.manyReplayedMessages
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
@@ -649,6 +674,7 @@ struct ConnectionModelSessionTests {
             newSessionScript: SessionFactoryFixtures.twoMessages,
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         try #require(session.hasMissedUpdates)
 
@@ -663,6 +689,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionCommands: SessionFactoryFixtures.commands
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
@@ -673,6 +700,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionError: SessionFactoryFixtures.resumeRefusal
         )
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
             try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
@@ -685,6 +713,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             resumeSessionError: SessionFactoryFixtures.resumeRefusal
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
@@ -699,6 +728,7 @@ struct ConnectionModelSessionTests {
 
     @Test func resumeWithNoCapabilityThrowsUnsupportedAndSendsNothing() async throws {
         let connected = try await SessionFactoryFixtures.connect(capabilities: AgentCapabilities())
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: SessionFactoryFixtures.resumeUnsupported) {
             try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
@@ -714,12 +744,18 @@ struct ConnectionModelSessionTests {
     @Test func aConnectionThatClosesAfterTheResumeAnswerRegistersNoSession() async throws {
         let answerGate = UpdateGate()
         let connected = try await SessionFactoryFixtures.connect(resumeSessionGate: answerGate)
+        defer { await connected.model.disconnect() }
         let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
         let executor = HoldableTaskExecutor()
         let resuming = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
-        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends or the connection closes first, the request never comes.
+        let resumingEnd = TaskEnd(of: resuming)
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) } orFailWhen: {
+            resumingEnd.hasEnded || connected.isConnectionClosed
+        }
 
         // The executor holds the part of the call that follows the answer, so
         // the close of the connection always comes before `resumeSession`
@@ -728,7 +764,7 @@ struct ConnectionModelSessionTests {
             answerGate.open()
             #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.resumeSession, in: requestEvents))
             connected.agentEnd.close()
-            try await waitUntil { connected.model.state == .disconnected }
+            try await waitUntil { connected.model.state == .disconnected } orFailWhen: { connected.isConnectionFailed }
         }
 
         await #expect(throws: ConnectionError.closed) {
@@ -743,6 +779,7 @@ struct ConnectionModelSessionTests {
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         let connection = try #require(connected.model.connection)
         // The model reads the session stream only after `streamGate` opens, so
@@ -788,11 +825,17 @@ struct ConnectionModelSessionTests {
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let first = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends first, the request never comes.
+        let firstEnd = TaskEnd(of: first)
         try await waitUntil {
             SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        } orFailWhen: {
+            firstEnd.hasEnded
         }
 
         // The gate holds the answer of the first resume, so the second resume
@@ -816,14 +859,23 @@ struct ConnectionModelSessionTests {
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         let cancelled = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends first, the request never comes.
+        let cancelledEnd = TaskEnd(of: cancelled)
         try await waitUntil {
             SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        } orFailWhen: {
+            cancelledEnd.hasEnded
         }
         let resuming = SessionFactoryFixtures.startResumeNow(on: connected.model)
+        // The second resume sends its request after the cancel, and the gate
+        // holds its answer. When its task ends first, the request never comes.
+        let resumingEnd = TaskEnd(of: resuming)
 
         cancelled.cancel()
         await #expect(throws: CancellationError.self) {
@@ -831,6 +883,8 @@ struct ConnectionModelSessionTests {
         }
         try await waitUntil {
             SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.concurrentResumeCount
+        } orFailWhen: {
+            resumingEnd.hasEnded
         }
 
         // The gate still holds the answer of the second resume, so its replay
@@ -848,11 +902,17 @@ struct ConnectionModelSessionTests {
             resumeSessionScript: SessionFactoryFixtures.chunkedReplay,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let first = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends first, the request never comes.
+        let firstEnd = TaskEnd(of: first)
         try await waitUntil {
             SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.firstResumeOnlyCount
+        } orFailWhen: {
+            firstEnd.hasEnded
         }
         let waiting = SessionFactoryFixtures.startResumeNow(on: connected.model)
 
@@ -879,6 +939,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
@@ -891,11 +952,17 @@ struct ConnectionModelSessionTests {
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
             resumeSessionGate: answerGate
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
         let resuming = Task { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
         }
-        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
+        // The task sends the request, and the gate holds the answer. When the
+        // task ends first, the request never comes.
+        let resumingEnd = TaskEnd(of: resuming)
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) } orFailWhen: {
+            resumingEnd.hasEnded
+        }
 
         // The gate holds the answer of the agent, so the list of the resume
         // request is in the model before the response.
@@ -911,6 +978,7 @@ struct ConnectionModelSessionTests {
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
             resumeSessionError: SessionFactoryFixtures.resumeRefusal
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
         let itemsBeforeResume = session.mcpServers
 
@@ -927,10 +995,11 @@ struct ConnectionModelSessionTests {
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities,
             afterNewSessionScript: [try SessionFactoryFixtures.exampleStatusUpdate()]
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
-        try await waitUntil { session.mcpServers.contains { $0.status != .notReported } }
+        try await waitUntil { session.mcpServers.contains { $0.status != .notReported } } orFailWhen: { session.isClosed }
         #expect(
             SessionFactoryFixtures.mcpServerRecords(of: session) == SessionFactoryFixtures.newSessionServerRecordsAfterStatus
         )
@@ -941,6 +1010,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         #expect(session.mcpServers.isEmpty)
         _ = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
@@ -957,6 +1027,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: SessionFactoryFixtures.eachMCPTransportCapabilities
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
@@ -970,6 +1041,7 @@ struct ConnectionModelSessionTests {
             capabilities: SessionFactoryFixtures.stdioOnlyCapabilities,
             logger: ACPLogger { messages.append($0) }
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
@@ -986,6 +1058,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: InitializeFixtures.baselineCapabilities
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithServers)
 
@@ -1000,6 +1073,7 @@ struct ConnectionModelSessionTests {
             capabilities: SessionFactoryFixtures.httpOnlyCapabilities,
             logger: ACPLogger { messages.append($0) }
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithServers)
 
@@ -1013,6 +1087,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: SessionFactoryFixtures.stdioOnlyCapabilities
         )
+        defer { await connected.model.disconnect() }
         var expectedNewSession = SessionFactoryFixtures.newSessionRequestWithServers
         expectedNewSession.mcpServers = [SessionFactoryFixtures.stdioServer]
 
@@ -1035,6 +1110,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: InitializeFixtures.additionalDirectoriesCapabilities
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
 
@@ -1047,6 +1123,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: InitializeFixtures.additionalDirectoriesCapabilities
         )
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
 
@@ -1058,6 +1135,7 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             capabilities: InitializeFixtures.additionalDirectoriesCapabilities
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
 
         let resumed = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequestWithDirectories)
@@ -1078,6 +1156,7 @@ struct ConnectionModelSessionTests {
             capabilities: InitializeFixtures.additionalDirectoriesCapabilities,
             resumeSessionError: SessionFactoryFixtures.resumeRefusal
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
 
         await #expect(throws: SessionFactoryFixtures.resumeRefusal) {
@@ -1090,6 +1169,7 @@ struct ConnectionModelSessionTests {
 
     @Test func additionalDirectoriesWithNoCapabilityThrowsAndSendsNothing() async throws {
         let connected = try await SessionFactoryFixtures.connect(capabilities: InitializeFixtures.baselineCapabilities)
+        defer { await connected.model.disconnect() }
 
         await #expect(throws: SessionFactoryFixtures.newSessionUnsupported) {
             try await connected.model.newSession(SessionFactoryFixtures.newSessionRequestWithDirectories)
@@ -1110,6 +1190,7 @@ struct ConnectionModelSessionTests {
 
     @Test func aNewSessionPromptsOverTheConnection() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         let response = try await session.prompt([textBlock("Hello")])
@@ -1120,17 +1201,21 @@ struct ConnectionModelSessionTests {
 
     @Test func aNewSessionCancelsOverTheConnection() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         try await session.cancel()
 
         // A notification has no answer, so the test waits for the record of
         // the agent.
-        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.cancelSession) }
+        try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.cancelSession) } orFailWhen: {
+            connected.isConnectionClosed
+        }
     }
 
     @Test func aNewSessionSetsAConfigOptionOverTheConnection() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         try await session.setConfigOption(SessionFactoryFixtures.setModeRequest)
@@ -1142,6 +1227,7 @@ struct ConnectionModelSessionTests {
 
     @Test func twoNewSessionsGiveTwoOpenModelsInCallOrder() async throws {
         let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+        defer { await connected.model.disconnect() }
 
         let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
 
@@ -1151,6 +1237,7 @@ struct ConnectionModelSessionTests {
 
     @Test func aResumeOfAnOpenSessionAddsNoModel() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         let resumed = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
@@ -1161,6 +1248,7 @@ struct ConnectionModelSessionTests {
 
     @Test func aCloseOfTheFirstModelKeepsTheSecondModel() async throws {
         let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+        defer { await connected.model.disconnect() }
         let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
 
         try await connected.model.close(opened[0])
@@ -1172,11 +1260,12 @@ struct ConnectionModelSessionTests {
 
     @Test func aCloseOfTheConnectionEmptiesTheOpenSessions() async throws {
         let connected = try await SessionFactoryFixtures.connect(newSessionIds: SessionFactoryFixtures.twoSessionIds)
+        defer { await connected.model.disconnect() }
         let opened = try await SessionFactoryFixtures.openTwoSessions(on: connected)
 
         connected.agentEnd.close()
 
-        try await waitUntil { connected.model.state == .disconnected }
+        try await waitUntil { connected.model.state == .disconnected } orFailWhen: { connected.isConnectionFailed }
         #expect(connected.model.openSessions.isEmpty)
         #expect(connected.model.session(for: testSession) == nil)
         #expect(connected.model.session(for: otherTestSession) == nil)
@@ -1187,6 +1276,7 @@ struct ConnectionModelSessionTests {
 
     @Test func updatesForTwoOpenSessionsLandInTheirOwnModels() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let first = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         let second = try await connected.model.resumeSession(
             ResumeSessionRequest(cwd: SessionFactoryFixtures.workingDirectory, sessionId: otherTestSession)
@@ -1199,7 +1289,9 @@ struct ConnectionModelSessionTests {
             UpdateSessionNotification(sessionId: otherTestSession, update: agentChunk(text: "second", message: "agent-2"))
         )
 
-        try await waitUntil { !first.transcript.isEmpty && !second.transcript.isEmpty }
+        try await waitUntil { !first.transcript.isEmpty && !second.transcript.isEmpty } orFailWhen: {
+            first.isClosed || second.isClosed
+        }
         #expect(SessionFactoryFixtures.messageTexts(of: first) == ["first"])
         #expect(SessionFactoryFixtures.messageTexts(of: second) == ["second"])
     }
@@ -1212,12 +1304,17 @@ struct ConnectionModelSessionTests {
         ) { connection in
             ScriptedStubAgent(connection: connection, session: testSession, script: SessionFactoryFixtures.twoMessages)
         }
+        defer { await connected.model.disconnect() }
         try await connected.initialize()
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         _ = try await session.prompt([textBlock("Hello")])
 
-        try await waitUntil { SessionFactoryFixtures.messageTexts(of: session).compactMap(\.self) == ["first", "second"] }
+        try await waitUntil {
+            SessionFactoryFixtures.messageTexts(of: session).compactMap(\.self) == ["first", "second"]
+        } orFailWhen: {
+            session.isClosed
+        }
         #expect(factory.built.count == 1)
         #expect(try #require(factory.built.first).forwardedUpdateCount == SessionFactoryFixtures.twoMessages.count)
     }
@@ -1226,6 +1323,7 @@ struct ConnectionModelSessionTests {
 
     @Test func closeSendsTheCloseAndClosesTheModel() async throws {
         let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         try await connected.model.close(session)
@@ -1239,8 +1337,13 @@ struct ConnectionModelSessionTests {
         let connected = try await SessionFactoryFixtures.connect(
             newSessionScript: SessionFactoryFixtures.twoMessages
         )
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
-        try await waitUntil { session.transcript.count == SessionFactoryFixtures.twoMessages.count }
+        try await waitUntil {
+            session.transcript.count == SessionFactoryFixtures.twoMessages.count
+        } orFailWhen: {
+            session.isClosed
+        }
 
         try await connected.model.close(session)
 
@@ -1249,6 +1352,7 @@ struct ConnectionModelSessionTests {
 
     @Test func aCloseThatTheAgentRefusesThrowsItsErrorAndKeepsTheModelOpen() async throws {
         let connected = try await SessionFactoryFixtures.connect(closeSessionError: SessionFactoryFixtures.closeRefusal)
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         await #expect(throws: SessionFactoryFixtures.closeRefusal) {
@@ -1261,6 +1365,7 @@ struct ConnectionModelSessionTests {
 
     @Test func closeWithNoCapabilityThrowsUnsupportedAndKeepsTheModelOpen() async throws {
         let connected = try await SessionFactoryFixtures.connect(capabilities: AgentCapabilities())
+        defer { await connected.model.disconnect() }
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
 
         await #expect(throws: SessionFactoryFixtures.closeUnsupported) {

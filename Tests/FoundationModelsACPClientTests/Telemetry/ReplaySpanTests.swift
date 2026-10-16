@@ -119,6 +119,7 @@ struct ReplaySpanTests {
     @Test func aResumeFromTheStartGivesOneInternalReplaySpanWithTheUpdateCount() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
 
             _ = try await connected.model.resumeSession(
                 ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
@@ -145,6 +146,7 @@ struct ReplaySpanTests {
     @Test func theResumeRequestSpanIsAChildOfTheReplaySpan() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
 
             _ = try await connected.model.resumeSession(
                 ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
@@ -163,6 +165,7 @@ struct ReplaySpanTests {
     @Test func aResumeWithNoCursorGivesTheNoneValueAndACountOfZero() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
 
             _ = try await connected.model.resumeSession(ReplaySpanFixtures.resumeRequest(replayFrom: nil))
 
@@ -183,6 +186,7 @@ struct ReplaySpanTests {
     @Test func aCursorOfAnUnknownTypeGivesTheOtherValue() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
 
             _ = try await connected.model.resumeSession(
                 ReplaySpanFixtures.resumeRequest(replayFrom: ReplaySpanFixtures.replayFromUnknownCursor)
@@ -203,6 +207,7 @@ struct ReplaySpanTests {
         let refusal = ReplaySpanFixtures.resumeRefusal
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent + [refusal.message]) { context in
             let connected = try await ReplaySpanFixtures.connect(resumeSessionError: refusal)
+            defer { await connected.model.disconnect() }
 
             await #expect(throws: refusal) {
                 try await connected.model.resumeSession(
@@ -227,6 +232,7 @@ struct ReplaySpanTests {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let answerGate = UpdateGate()
             let connected = try await ReplaySpanFixtures.connect(resumeSessionGate: answerGate)
+            defer { await connected.model.disconnect() }
             let session = try await connected.model.newSession(NewSessionRequest(cwd: ReplaySpanFixtures.workingDirectory))
             let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
             session.attach(subscription)
@@ -235,12 +241,17 @@ struct ReplaySpanTests {
                     ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
                 )
             }
-            try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) }
+            // A resume that ended before the agent got it never reaches the
+            // agent, so its end is the failure event.
+            let resumingEnd = TaskEnd(of: resuming)
+            try await waitUntil { connected.receivedMethods.contains(ClientRequestSpan.Method.resumeSession) } orFailWhen: {
+                resumingEnd.hasEnded
+            }
 
             // The gate holds the answer of the agent, so the subscription
             // ends before the marker of the response can arrive.
             continuation.finish()
-            try await waitUntil { !session.isReplaying }
+            try await waitUntil { !session.isReplaying } orFailWhen: { session.isClosed || resumingEnd.hasEnded }
             answerGate.open()
             _ = try await resuming.value
 
@@ -254,6 +265,7 @@ struct ReplaySpanTests {
     @Test func twoResumesOfOneSessionGiveTwoReplaySpansWithTheirOwnCounts() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
             let request = ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
 
             for _ in 0..<ReplaySpanFixtures.twoResumes {
@@ -273,12 +285,17 @@ struct ReplaySpanTests {
     @Test func liveUpdatesAfterTheReplayDoNotChangeTheCount() async throws {
         try await TelemetryCapture.run(forbidding: ReplaySpanFixtures.forbiddenContent) { context in
             let connected = try await ReplaySpanFixtures.connect()
+            defer { await connected.model.disconnect() }
             let session = try await connected.model.resumeSession(
                 ReplaySpanFixtures.resumeRequest(replayFrom: SessionModelFixtures.replayFromStart)
             )
 
             _ = try await session.prompt(ReplaySpanFixtures.promptContent)
-            try await waitUntil { session.transcript.contains { $0.agentMessage?.content.joinedText == ReplaySpanFixtures.liveText } }
+            try await waitUntil {
+                session.transcript.contains { $0.agentMessage?.content.joinedText == ReplaySpanFixtures.liveText }
+            } orFailWhen: {
+                session.isClosed
+            }
 
             #expect(session.replayedUpdateCount == ReplaySpanFixtures.replayedUpdates.count)
             let span = try #require(context.replaySpans.first)

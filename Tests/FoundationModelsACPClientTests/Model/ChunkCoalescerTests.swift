@@ -7,6 +7,15 @@ import Testing
 
 // The unit tests of `ChunkCoalescer`, the chunk buffer of `SessionModel`. A
 // manual clock controls the cadence, so no test reads the wall clock.
+//
+// The flush task of the coalescer is private, and these tests have no
+// connection and no session. So no observable event tells that the coalescer
+// starts no sleeper, or that its flush task does not fold. These waits use
+// `noFailureEvent`, and each one is a known limit of rule T1.
+//
+// A cancel of the flush task runs the cancel handler of the clock at once, in
+// the call to `cancel()`, so the sleeper is gone when the cancel returns. The
+// tests check that with `#require` before they continue, and do not wait.
 
 /// The test cadence, in milliseconds.
 private let testCadenceMilliseconds = 40
@@ -53,7 +62,7 @@ private final class RecordingOwner {
 struct ChunkCoalescerTests {
     // MARK: - Cadence
 
-    @Test func chunksWaitUntilTheCadenceElapsesThenFoldAsOneBatch() async {
+    @Test func chunksWaitUntilTheCadenceElapsesThenFoldAsOneBatch() async throws {
         let clock = ManualClock()
         let owner = RecordingOwner()
         let coalescer = owner.makeCoalescer(cadence: testCadence, clock: clock)
@@ -64,9 +73,11 @@ struct ChunkCoalescerTests {
         coalescer.receive(second)
         #expect(owner.calls.isEmpty)
 
-        await waitFor { clock.sleeperCount > 0 }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ clock.sleeperCount > 0 }, orFailWhen: noFailureEvent)
         clock.advance(by: testCadence)
-        await waitFor { !owner.calls.isEmpty }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ !owner.calls.isEmpty }, orFailWhen: noFailureEvent)
 
         #expect(owner.calls == [.foldChunks([first, second])])
     }
@@ -109,13 +120,14 @@ struct ChunkCoalescerTests {
 
     // MARK: - Flush
 
-    @Test func flushFoldsTheBufferAtOnceAndCancelsTheScheduledFlush() async {
+    @Test func flushFoldsTheBufferAtOnceAndCancelsTheScheduledFlush() async throws {
         let clock = ManualClock()
         let owner = RecordingOwner()
         let coalescer = owner.makeCoalescer(cadence: testCadence, clock: clock)
         let chunk = agentChunk(text: "now")
         coalescer.receive(chunk)
-        await waitFor { clock.sleeperCount > 0 }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ clock.sleeperCount > 0 }, orFailWhen: noFailureEvent)
 
         coalescer.flush()
         #expect(owner.calls == [.foldChunks([chunk])])
@@ -123,7 +135,7 @@ struct ChunkCoalescerTests {
         // The cancel removes the sleeper of the scheduled flush, and a
         // cancelled flush task returns before it folds. With no sleeper, the
         // advance resumes nothing, so no second fold can come.
-        await waitFor { clock.sleeperCount == 0 }
+        try #require(clock.sleeperCount == 0)
         clock.advance(by: testCadence)
         #expect(owner.calls == [.foldChunks([chunk])])
     }
@@ -137,7 +149,7 @@ struct ChunkCoalescerTests {
         #expect(owner.calls.isEmpty)
     }
 
-    @Test func chunksAfterAFlushStartANewCadence() async {
+    @Test func chunksAfterAFlushStartANewCadence() async throws {
         let clock = ManualClock()
         let owner = RecordingOwner()
         let coalescer = owner.makeCoalescer(cadence: testCadence, clock: clock)
@@ -147,24 +159,27 @@ struct ChunkCoalescerTests {
         coalescer.flush()
 
         coalescer.receive(second)
-        await waitFor { clock.sleeperCount > 0 }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ clock.sleeperCount > 0 }, orFailWhen: noFailureEvent)
         clock.advance(by: testCadence)
-        await waitFor { owner.calls.count > 1 }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ owner.calls.count > 1 }, orFailWhen: noFailureEvent)
 
         #expect(owner.calls == [.foldChunks([first]), .foldChunks([second])])
     }
 
-    @Test func releasedCoalescerNeverFolds() async {
+    @Test func releasedCoalescerNeverFolds() async throws {
         let clock = ManualClock()
         let owner = RecordingOwner()
         var coalescer: ChunkCoalescer? = owner.makeCoalescer(cadence: testCadence, clock: clock)
         coalescer?.receive(agentChunk(text: "lost"))
-        await waitFor { clock.sleeperCount > 0 }
+        // No failure event: the flush task is private (see the file note).
+        try await waitUntil({ clock.sleeperCount > 0 }, orFailWhen: noFailureEvent)
 
         // The release cancels the scheduled flush, and the cancel removes its
         // sleeper. With no sleeper, the advance resumes nothing.
         coalescer = nil
-        await waitFor { clock.sleeperCount == 0 }
+        try #require(clock.sleeperCount == 0)
         clock.advance(by: testCadence)
 
         #expect(owner.calls.isEmpty)

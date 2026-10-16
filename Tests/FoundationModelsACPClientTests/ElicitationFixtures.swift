@@ -1,4 +1,5 @@
 import FoundationModelsACP
+import Testing
 
 // This file holds the shared builders for the elicitation tests. The
 // container tests need two wire requests that differ only in scope, so the
@@ -70,8 +71,8 @@ enum ElicitationFixtures {
     ///   - isPending: Tells whether the model that must hold the
     ///     elicitation holds it.
     /// - Returns: The task of the agent's call.
-    /// - Throws: Nothing today. The signature keeps `throws` because
-    ///   ``waitUntil(_:)`` throws.
+    /// - Throws: ``WaitEndedOnFailure`` when the call ended before the model
+    ///   held the elicitation.
     @MainActor
     static func start(
         _ request: CreateElicitationRequest,
@@ -79,7 +80,11 @@ enum ElicitationFixtures {
         until isPending: @escaping @MainActor () -> Bool
     ) async throws -> Task<CreateElicitationResponse, any Error> {
         let call = Task { try await agentConnection.createElicitation(request) }
-        try await waitUntil(isPending)
+        // The end of the call is the failure event. The call ends when the
+        // client answers, or when the connection closes. Each end before the
+        // model holds the elicitation tells that the model never holds it.
+        let callEnd = TaskEnd(of: call)
+        try await waitUntil(isPending, orFailWhen: { callEnd.hasEnded })
         return call
     }
 }

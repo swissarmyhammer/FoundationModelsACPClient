@@ -4,6 +4,7 @@
 // subscription by hand.
 import Foundation
 @testable import FoundationModelsACP
+import Testing
 @testable import FoundationModelsACPClient
 
 // This file holds the shared helpers of the `SessionModel` tests. Each helper
@@ -189,6 +190,11 @@ extension SessionModel {
     /// Starts a prompt of one text block, and waits until the fake sender
     /// holds the request.
     ///
+    /// The end of the prompt call is the failure event of the wait: the fake
+    /// sender holds each call until the test answers it, so a call that ends
+    /// first did not reach the sender. Then the wait records an issue, and
+    /// the returned call holds the error.
+    ///
     /// - Parameters:
     ///   - text: The text of the prompt.
     ///   - sender: The fake sender of this model.
@@ -200,8 +206,16 @@ extension SessionModel {
         meta: JSONValue? = nil
     ) async -> Task<PromptResponse, any Error> {
         let call = Task { try await prompt([textBlock(text)], meta: meta) }
-        var received = sender.receivedPrompts.makeAsyncIterator()
-        _ = await received.next()
+        let callEnd = TaskEnd(of: call)
+        let received = Task {
+            var prompts = sender.receivedPrompts.makeAsyncIterator()
+            _ = await prompts.next()
+        }
+        defer { received.cancel() }
+        let receivedEnd = TaskEnd(of: received)
+        // The wait records the issue itself. The caller reads the error from
+        // the returned call, so this helper does not throw.
+        try? await waitForObservation { receivedEnd.hasEnded } orFailWhen: { callEnd.hasEnded }
         return call
     }
 }

@@ -15,6 +15,10 @@ import Testing
 // The wire round trips and the capability test of `PermissionRequestTests` and
 // `ElicitationTests` test the `Client` conformance, which the model does not
 // have; the routing task of the model client ports them.
+//
+// Before a test waits for the answer of an agent's call, it requires that the
+// model holds no pending item for that call. A pending item has no answer, so
+// the test then fails and does not wait for ever.
 
 /// The option id of the "allow" option of each test permission request.
 private let allowOptionId = SessionModelFixtures.allowOption.optionId
@@ -44,19 +48,23 @@ private func sessionFormRequest(toolCallId: ToolCallId? = nil) -> CreateElicitat
 @MainActor
 @Suite
 struct SessionModelPendingTests {
-    /// Starts one elicitation and waits until it is pending.
+    /// Starts one elicitation and waits until it is pending. The end of the
+    /// agent's call is the failure event: after it, the elicitation never
+    /// becomes pending.
     ///
     /// - Parameters:
     ///   - model: The model that holds the elicitation.
     ///   - request: The request to start.
     /// - Returns: The task of the agent's call.
+    /// - Throws: ``WaitEndedOnFailure`` when the call ended first.
     private func startElicitation(
         on model: SessionModel,
         _ request: CreateElicitationRequest = sessionFormRequest()
     ) async throws -> Task<CreateElicitationResponse, Never> {
         let count = model.pendingElicitations.count
         let task = Task { await model.awaitElicitation(request) }
-        try await waitUntil { model.pendingElicitations.count == count + 1 }
+        let taskEnd = TaskEnd(of: task)
+        try await waitUntil { model.pendingElicitations.count == count + 1 } orFailWhen: { taskEnd.hasEnded }
         return task
     }
 
@@ -84,7 +92,7 @@ struct SessionModelPendingTests {
 
         await model.selectPermission(pending.id, option: rejectOptionId)
 
-        #expect(model.pendingPermissions.isEmpty)
+        try #require(model.pendingPermissions.isEmpty)
         let response = await task.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
     }
@@ -95,7 +103,9 @@ struct SessionModelPendingTests {
 
         // Task cancellation is how the connection delivers the agent's
         // withdrawal. The await returns only when the continuation resumed, so
-        // a leaked continuation makes the test wait for ever.
+        // a leaked continuation makes the test wait for ever. No observable
+        // state tells that the continuation leaked, so this wait has no
+        // failure event: a known limit of rule T1.
         task.cancel()
 
         let response = await task.value
@@ -110,7 +120,7 @@ struct SessionModelPendingTests {
         let pending = try #require(model.pendingPermissions.first)
         await model.cancelPermission(pending.id)
 
-        #expect(model.pendingPermissions.isEmpty)
+        try #require(model.pendingPermissions.isEmpty)
         let response = await task.value
         #expect(response.outcome == .cancelled)
     }
@@ -126,6 +136,7 @@ struct SessionModelPendingTests {
         await model.selectPermission(pending.id, option: rejectOptionId)
         await model.cancelPermission(pending.id)
 
+        try #require(model.pendingPermissions.isEmpty)
         let response = await task.value
         #expect(response.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
     }
@@ -139,15 +150,15 @@ struct SessionModelPendingTests {
         #expect(model.pendingPermissions.map(\.request.title) == ["First?", "Second?"])
 
         await model.selectPermission(model.pendingPermissions[1].id, option: allowOptionId)
+        try #require(model.pendingPermissions.map(\.request.title) == ["First?"])
         let secondResponse = await secondTask.value
         #expect(secondResponse.outcome == .selected(SelectedPermissionOutcome(optionId: allowOptionId)))
-        #expect(model.pendingPermissions.map(\.request.title) == ["First?"])
 
         let first = try #require(model.pendingPermissions.first)
         await model.selectPermission(first.id, option: rejectOptionId)
+        try #require(model.pendingPermissions.isEmpty)
         let firstResponse = await firstTask.value
         #expect(firstResponse.outcome == .selected(SelectedPermissionOutcome(optionId: rejectOptionId)))
-        #expect(model.pendingPermissions.isEmpty)
     }
 
     // MARK: - Elicitations
@@ -163,7 +174,7 @@ struct SessionModelPendingTests {
 
         model.acceptElicitation(pending.id, content: nameValues)
 
-        #expect(model.pendingElicitations.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
         #expect(response == .object(["action": .string("accept"), "content": nameValues]))
     }
@@ -174,7 +185,7 @@ struct SessionModelPendingTests {
 
         model.declineElicitation(try #require(model.pendingElicitations.first).id)
 
-        #expect(model.pendingElicitations.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
         #expect(response == .object(["action": .string("decline")]))
     }
@@ -185,7 +196,7 @@ struct SessionModelPendingTests {
 
         model.cancelElicitation(try #require(model.pendingElicitations.first).id)
 
-        #expect(model.pendingElicitations.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
         #expect(response == .object(["action": .string("cancel")]))
     }
@@ -194,6 +205,8 @@ struct SessionModelPendingTests {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model)
 
+        // No observable state tells that the cancel leaked the continuation,
+        // so this wait has no failure event: a known limit of rule T1.
         task.cancel()
 
         let response = await task.value
@@ -216,6 +229,7 @@ struct SessionModelPendingTests {
         #expect(pending.targetHost == "example.test")
 
         model.cancelElicitation(pending.id)
+        try #require(model.pendingElicitations.isEmpty)
         _ = await task.value
     }
 
@@ -230,7 +244,7 @@ struct SessionModelPendingTests {
 
         // The URL flow returned its data out of band, so no credentials go
         // back over ACP.
-        #expect(model.pendingElicitations.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
         #expect(response == .object(["action": .string("accept")]))
     }
@@ -246,6 +260,7 @@ struct SessionModelPendingTests {
         #expect(model.pendingElicitations.count == 1)
 
         model.cancelElicitation(try #require(model.pendingElicitations.first).id)
+        try #require(model.pendingElicitations.isEmpty)
         _ = await task.value
     }
 
@@ -273,6 +288,7 @@ struct SessionModelPendingTests {
         model.acceptElicitation(pending.id, content: nameValues)
 
         #expect(entry.linkedElicitationIDs.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         _ = await task.value
     }
 
@@ -290,6 +306,7 @@ struct SessionModelPendingTests {
         model.declineElicitation(pending.id)
 
         #expect(entry.linkedElicitationIDs.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         _ = await task.value
     }
 
@@ -297,6 +314,8 @@ struct SessionModelPendingTests {
         let model = SessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
         let task = try await startElicitation(on: model, sessionFormRequest(toolCallId: linkedToolCallId))
 
+        // No observable state tells that the cancel leaked the continuation,
+        // so this wait has no failure event: a known limit of rule T1.
         task.cancel()
         _ = await task.value
 
@@ -316,8 +335,8 @@ struct SessionModelPendingTests {
 
         model.cancelAllPending()
 
-        #expect(model.pendingPermissions.isEmpty)
-        #expect(model.pendingElicitations.isEmpty)
+        try #require(model.pendingPermissions.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         #expect(entry.linkedElicitationIDs.isEmpty)
         let permissionResponse = await permissionTask.value
         #expect(permissionResponse.outcome == .cancelled)
@@ -359,6 +378,7 @@ struct SessionModelPendingTests {
         #expect(model.pendingRequests.map(\.id) == [p1.id, e1.id, p2.id])
 
         model.cancelAllPending()
+        try #require(model.pendingRequests.isEmpty)
         for task in tasks { await task.value }
     }
 
@@ -380,6 +400,7 @@ struct SessionModelPendingTests {
         #expect(model.pendingRequests == [.permission(p2)])
         #expect(model.pendingPermissions == [p2])
         model.cancelAllPending()
+        try #require(model.pendingRequests.isEmpty)
         for task in tasks { await task.value }
     }
 
@@ -397,7 +418,7 @@ struct SessionModelPendingTests {
 
         #expect(arrivalFires)
         #expect(resolutionFires)
-        #expect(model.pendingRequests.isEmpty)
+        try #require(model.pendingRequests.isEmpty)
         #expect(await permissionTask?.value.outcome == .cancelled)
     }
 
@@ -446,6 +467,8 @@ struct SessionModelPendingTests {
 
         #expect(pendingAtCancel.elements == [0])
         #expect(entry.linkedElicitationIDs.isEmpty)
+        try #require(model.pendingPermissions.isEmpty)
+        try #require(model.pendingElicitations.isEmpty)
         let cancelled = ElicitationResponseWire.cancelResponse(reason: ACPClient.clientCancelledReason)
         #expect(await formTask.value == cancelled)
         #expect(await urlTask.value == cancelled)
@@ -459,6 +482,7 @@ struct SessionModelPendingTests {
 
         try await model.cancel()
 
+        try #require(model.pendingElicitations.isEmpty)
         let answer = await task.value
         #expect(
             answer == .object([

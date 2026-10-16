@@ -44,8 +44,9 @@ struct AgentRequestSpanRoutingTests {
     func aSelectedPermissionGivesARoutedSelectedSpan() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
-            try await Self.runTurn(of: harness) { session in
-                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: turn)
             }
 
             let spans = context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission)
@@ -65,8 +66,9 @@ struct AgentRequestSpanRoutingTests {
     func aCancelledPermissionGivesTheCancelledOutcome() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
-            try await Self.runTurn(of: harness) { session in
-                try await UserAnswers.cancelPermission(in: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                try await UserAnswers.cancelPermission(in: turn)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).first)
@@ -87,6 +89,7 @@ struct AgentRequestSpanRoutingTests {
                 title: "Run the tool?"
             )
             let harness = await Self.permissionHarness(request: request)
+            defer { await harness.teardown() }
             try await Self.runTurn(of: harness) { _ in }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).first)
@@ -104,8 +107,9 @@ struct AgentRequestSpanRoutingTests {
             var request = SessionModelFixtures.permissionRequest()
             request.meta = .object([SpanIdentity.traceparentField: .string(agentSpan.traceparent)])
             let harness = await Self.permissionHarness(request: request)
-            try await Self.runTurn(of: harness) { session in
-                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: turn)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).first)
@@ -120,11 +124,12 @@ struct AgentRequestSpanRoutingTests {
     func theSpanEndsAfterTheUserAnswers() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await Self.permissionHarness()
-            try await Self.runTurn(of: harness) { session in
-                _ = try await UserAnswers.firstPendingPermission(of: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                _ = try await UserAnswers.firstPendingPermission(of: turn)
                 let spansBeforeTheAnswer = context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission)
                 #expect(spansBeforeTheAnswer.isEmpty, "The span ended before the user answered.")
-                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: session)
+                try await UserAnswers.selectPermission(SessionModelFixtures.allowOption.optionId, in: turn)
             }
 
             #expect(context.agentRequestSpans(of: ClientRequestSpan.Method.requestPermission).count == 1)
@@ -140,8 +145,9 @@ struct AgentRequestSpanRoutingTests {
         try await TelemetryCapture.run(forbidding: []) { context in
             let request = ElicitationFixtures.formRequest(scope: .session(ElicitationFixtures.sessionScope))
             let harness = await TracedSessionHarness(elicitation: request)
-            try await Self.runTurn(of: harness) { session in
-                try await answer.give(in: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                try await answer.give(in: turn)
             }
 
             let span = try #require(context.agentRequestSpans(of: ClientRequestSpan.Method.createElicitation).first)
@@ -191,8 +197,9 @@ struct AgentRequestSpanRoutingTests {
         try await TelemetryCapture.run(forbidding: []) { context in
             let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
             let harness = await TracedSessionHarness(elicitation: request)
-            try await Self.runTurn(of: harness) { session in
-                _ = try await UserAnswers.firstPendingElicitation(of: session)
+            defer { await harness.teardown() }
+            try await Self.runTurn(of: harness) { turn in
+                _ = try await UserAnswers.firstPendingElicitation(of: turn)
                 try await harness.agentConnection.elicitationComplete(
                     CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
                 )
@@ -210,12 +217,12 @@ struct AgentRequestSpanRoutingTests {
     func anUnheldElicitationCompleteGivesUnmatched() async throws {
         try await TelemetryCapture.run(forbidding: []) { context in
             let harness = await TracedSessionHarness()
+            defer { await harness.teardown() }
             try await harness.initialize()
             try await harness.agentConnection.elicitationComplete(
                 CompleteElicitationNotification(elicitationId: unknownElicitationID)
             )
             let span = try await Self.completionSpan(in: context)
-            await harness.teardown()
 
             #expect(span.outcome == .string(ACPClientTelemetry.OutcomeValue.unmatched))
         }
@@ -266,17 +273,19 @@ struct AgentRequestSpanRoutingTests {
     /// - Parameters:
     ///   - harness: The harness of the test.
     ///   - answer: Answers the requests of the agent through the session
-    ///     model of the turn.
+    ///     model of the running turn.
     /// - Throws: Whatever `initialize`, the turn or `answer` threw.
     private static func runTurn(
         of harness: TracedSessionHarness,
-        answering answer: (SessionModel) async throws -> Void
+        answering answer: (RunningTurn) async throws -> Void
     ) async throws {
+        // The close comes before the return, so the spans of the turn ended
+        // when the test reads them. It comes also when the turn throws.
+        defer { await harness.teardown() }
         try await harness.initialize()
         let turn = try await harness.startTurn()
-        try await answer(turn.session)
+        try await answer(turn)
         try await turn.finish()
-        await harness.teardown()
     }
 
     /// Sends one elicitation from the agent with no session open, and gives
@@ -293,6 +302,9 @@ struct AgentRequestSpanRoutingTests {
         in context: TelemetryCapture.Context
     ) async throws -> FinishedInMemorySpan {
         let harness = await TracedSessionHarness()
+        // The close in the body comes before the read of the span. This one
+        // closes the connection also when the body throws first.
+        defer { await harness.teardown() }
         try await harness.initialize()
         _ = try await harness.agentConnection.createElicitation(request)
         await harness.teardown()

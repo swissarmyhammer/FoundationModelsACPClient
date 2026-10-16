@@ -36,8 +36,10 @@ final class RawBurstAgent: Sendable {
     /// - Parameter burst: The frames that the agent writes after the
     ///   `session/new` answer.
     /// - Returns: The model, the session model, and the task of the agent.
-    ///   Cancel the task, and disconnect the model, at the end of the test.
-    /// - Throws: The error of `initialize` or of `session/new`.
+    ///   Disconnect the model, and cancel the task, in a `defer` right after
+    ///   the call, so the close runs also when the test body throws.
+    /// - Throws: The error of `initialize` or of `session/new`. Before it
+    ///   throws, the call disconnects the model and cancels the agent.
     @MainActor
     static func connect(
         burst: Data
@@ -47,9 +49,15 @@ final class RawBurstAgent: Sendable {
         let agentRun = Task { try await agent.run() }
         let model = ConnectionModel(coalescingCadence: .zero)
         _ = await model.connect(over: clientEnd)
-        _ = try await model.initialize(makeInitializeRequest())
-        let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        return (model, session, agentRun)
+        do {
+            _ = try await model.initialize(makeInitializeRequest())
+            let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
+            return (model, session, agentRun)
+        } catch {
+            await model.disconnect()
+            agentRun.cancel()
+            throw error
+        }
     }
 
     /// Reads the frames of the client until the stream ends, and answers

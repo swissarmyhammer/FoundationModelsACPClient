@@ -162,10 +162,27 @@ private struct OpenQuestionConnection {
     static let resumeRequest = ResumeSessionRequest(cwd: AbsolutePath(rawValue: "/"), sessionId: testSession)
 
     /// Waits until the question of the agent is pending on the model of the
-    /// test session, or until the agent got an answer.
-    func waitForTheQuestion() async {
-        await waitFor {
+    /// test session, or until the agent got an answer. The close of the
+    /// connection is the failure event.
+    ///
+    /// - Throws: ``WaitEndedOnFailure`` when the connection closed first.
+    func waitForTheQuestion() async throws {
+        try await waitUntil {
             model.session(for: testSession)?.pendingPermissions.isEmpty == false || !answers.outcomes.isEmpty
+        } orFailWhen: {
+            model.hasClosedConnection
+        }
+    }
+}
+
+extension ConnectionModel {
+    /// Whether the connection of the model is closed: the agent closed its
+    /// side, the read failed, or the host closed it. A wait of these tests
+    /// ends on it as its failure event.
+    fileprivate var hasClosedConnection: Bool {
+        switch state {
+        case .disconnected, .failed: true
+        case .connecting, .connected: false
         }
     }
 }
@@ -294,14 +311,21 @@ struct SessionOpenQuestionTests {
     /// the agent.
     @Test func aQuestionBeforeTheResumeAnswerIsPendingOnTheSessionModel() async throws {
         let connected = try await OpenQuestionConnection(timing: .beforeTheResumeAnswer)
+        defer { await connected.model.disconnect() }
         let resume = Task { try await connected.model.resumeSession(OpenQuestionConnection.resumeRequest) }
 
-        await connected.waitForTheQuestion()
+        try await connected.waitForTheQuestion()
         #expect(connected.answers.outcomes.isEmpty, "The client answered the question before the user did.")
         let session = try #require(connected.model.session(for: testSession))
         let pending = try #require(session.pendingPermissions.first)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
 
+        // The agent answers the resume only after it got the answer. Thus the
+        // test waits for the answer first, and the close of the connection
+        // ends that wait when the answer does not come.
+        try await waitUntil { !connected.answers.outcomes.isEmpty } orFailWhen: {
+            connected.model.hasClosedConnection
+        }
         let resumed = try await resume.value
         #expect(resumed === session)
         #expect(connected.answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
@@ -313,14 +337,15 @@ struct SessionOpenQuestionTests {
     /// model of the session.
     @Test func aQuestionAtOnceAfterTheResumeAnswerIsPendingOnTheSessionModel() async throws {
         let connected = try await OpenQuestionConnection(timing: .afterTheResumeAnswer)
+        defer { await connected.model.disconnect() }
 
         let session = try await connected.model.resumeSession(OpenQuestionConnection.resumeRequest)
-        await connected.waitForTheQuestion()
+        try await connected.waitForTheQuestion()
 
         #expect(connected.answers.outcomes.isEmpty, "The client answered the question before the user did.")
         let pending = try #require(session.pendingPermissions.first)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
-        await waitFor { !connected.answers.outcomes.isEmpty }
+        try await waitUntil { !connected.answers.outcomes.isEmpty } orFailWhen: { session.isClosed }
         #expect(connected.answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
         withExtendedLifetime(connected.agentConnection) {}
     }
@@ -342,19 +367,23 @@ struct SessionOpenQuestionTests {
         let agentRun = Task { try await agent.run() }
         defer { agentRun.cancel() }
         let model = ConnectionModel(coalescingCadence: .zero)
+        defer { await model.disconnect() }
         _ = await model.connect(over: clientEnd)
         _ = try await model.initialize(makeInitializeRequest())
 
         let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        await waitFor { !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil }
+        try await waitUntil {
+            !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil
+        } orFailWhen: {
+            session.isClosed
+        }
 
         #expect(answers.agentEnd == nil, "The agent ended: \(answers.agentEnd ?? "")")
         #expect(answers.outcomes.isEmpty, "The client answered the question before the user did.")
         let pending = try #require(session.pendingPermissions.first)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
-        await waitFor { !answers.outcomes.isEmpty || answers.agentEnd != nil }
+        try await waitUntil { !answers.outcomes.isEmpty || answers.agentEnd != nil } orFailWhen: { session.isClosed }
         #expect(answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
-        await model.disconnect()
     }
 
     /// The agent sends the `session/new` answer and a question for the new
@@ -375,27 +404,37 @@ struct SessionOpenQuestionTests {
         let agentRun = Task { try await agent.run() }
         defer { agentRun.cancel() }
         let model = ConnectionModel(coalescingCadence: .zero)
+        defer { await model.disconnect() }
         let opening = model.openingSessions
-        model.beforeRegisteringNewSession = { sessionId in
+        model.beforeRegisteringNewSession = { [weak model] sessionId in
             Task {
                 await opening.waitForAWaiter(on: sessionId)
                 await MainActor.run { routeState.questionWaits = true }
             }
-            await waitFor { routeState.questionWaits || !answers.outcomes.isEmpty || answers.agentEnd != nil }
+            // The seam cannot throw. A wait that ends on its failure event
+            // records an issue itself, so the test fails also here.
+            try? await waitUntil {
+                routeState.questionWaits || !answers.outcomes.isEmpty || answers.agentEnd != nil
+            } orFailWhen: {
+                model?.hasClosedConnection ?? true
+            }
         }
         _ = await model.connect(over: clientEnd)
         _ = try await model.initialize(makeInitializeRequest())
 
         let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        await waitFor { !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil }
+        try await waitUntil {
+            !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil
+        } orFailWhen: {
+            session.isClosed
+        }
 
         #expect(answers.agentEnd == nil, "The agent ended: \(answers.agentEnd ?? "")")
         #expect(answers.outcomes.isEmpty, "The client answered the question before the user did.")
         let pending = try #require(session.pendingPermissions.first)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
-        await waitFor { !answers.outcomes.isEmpty || answers.agentEnd != nil }
+        try await waitUntil { !answers.outcomes.isEmpty || answers.agentEnd != nil } orFailWhen: { session.isClosed }
         #expect(answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
-        await model.disconnect()
     }
 }
 
