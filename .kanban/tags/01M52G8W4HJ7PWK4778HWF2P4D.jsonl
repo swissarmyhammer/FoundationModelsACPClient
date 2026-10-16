@@ -1,0 +1,1 @@
+{"id":"01M52G8W4H2NS6K0HJ81E23B9R","timestamp":"2026-10-16T14:01:21.297714Z","op":"create","item_id":"01M52G8W4HJ7PWK4778HWF2P4D","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: fbca04\n+tag_name: gap\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: fbca04\n-tag_name: gap\n","transaction_id":null}
