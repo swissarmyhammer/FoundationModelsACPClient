@@ -84,13 +84,15 @@ struct ModelClient: Client {
     /// - Returns: The user's decision, or the `cancelled` outcome when the
     ///   session is not open.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        try await traceRequest(
+        // Read before the first suspension; see `wireArrival`.
+        let arrival = Self.wireArrival
+        return try await traceRequest(
             ClientRequestSpan.Method.requestPermission,
             sessionId: params.sessionId,
             meta: params.meta,
             fallback: PendingPermissionRequest.cancelledResponse,
             outcome: { Self.permissionOutcome(of: $0.outcome) },
-            route: { await routePermission(params) }
+            route: { await routePermission(params, arrival: arrival) }
         )
     }
 
@@ -106,6 +108,8 @@ struct ModelClient: Client {
     /// - Returns: The user's response, or the `cancel` action when no model
     ///   can take the elicitation.
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
+        // Read before the first suspension; see `wireArrival`.
+        let arrival = Self.wireArrival
         let refusal = await model?.refusedElicitationReason(for: params)
         if let refusal {
             logger.log(Self.logPrefix + "answered cancel to an elicitation that the client did not advertise: \(refusal)")
@@ -116,7 +120,7 @@ struct ModelClient: Client {
             meta: params.meta,
             fallback: refusal.map(ElicitationResponseWire.cancelResponse(reason:)) ?? ElicitationResponseWire.cancelResponse,
             outcome: Self.elicitationOutcome(of:),
-            route: { refusal == nil ? await routeElicitation(params) : nil }
+            route: { refusal == nil ? await routeElicitation(params, arrival: arrival) : nil }
         )
     }
 
@@ -177,12 +181,30 @@ struct ModelClient: Client {
         }
     }
 
+    /// The arrival number of the request that the calling task handles: the
+    /// position of the request in the order that the connection read the
+    /// frames, or `nil` outside the task of an inbound request.
+    ///
+    /// The connection handles each request in its own task, so the requests
+    /// can get to a model in a different order than the wire order. The model
+    /// puts each pending request at the position of this number, so
+    /// `pendingRequests` keeps the wire order. A handler reads it as its
+    /// first statement.
+    private static var wireArrival: UInt64? {
+        ClientSideConnection.currentRequestArrival
+    }
+
     /// Gives the permission request to the open model of its session, and
     /// waits for the user's decision.
     ///
-    /// - Parameter params: The permission request.
+    /// - Parameters:
+    ///   - params: The permission request.
+    ///   - arrival: The wire arrival number of the request.
     /// - Returns: The user's decision, or `nil` when the session is not open.
-    private func routePermission(_ params: RequestPermissionRequest) async -> RequestPermissionResponse? {
+    private func routePermission(
+        _ params: RequestPermissionRequest,
+        arrival: UInt64?
+    ) async -> RequestPermissionResponse? {
         guard let model, let session = await model.openSession(waitingWhileOpening: params.sessionId) else {
             let warning = Self.closedSessionWarning(
                 answer: "cancelled",
@@ -192,7 +214,7 @@ struct ModelClient: Client {
             logger.log(warning)
             return nil
         }
-        return await session.awaitPermissionDecision(for: params) { signal in
+        return await session.awaitPermissionDecision(for: params, arrival: arrival) { signal in
             model.signalAfterCurrentResponse(signal)
         }
     }
@@ -200,15 +222,20 @@ struct ModelClient: Client {
     /// Gives the elicitation to the model of its scope, and waits for the
     /// user's response.
     ///
-    /// - Parameter params: The elicitation request.
+    /// - Parameters:
+    ///   - params: The elicitation request.
+    ///   - arrival: The wire arrival number of the request.
     /// - Returns: The user's response, or `nil` when no model can take the
     ///   elicitation.
-    private func routeElicitation(_ params: CreateElicitationRequest) async -> CreateElicitationResponse? {
+    private func routeElicitation(
+        _ params: CreateElicitationRequest,
+        arrival: UInt64?
+    ) async -> CreateElicitationResponse? {
         switch params.elicitationScope {
         case .session(let scope):
-            return await awaitSessionElicitation(params, sessionId: scope.sessionId)
+            return await awaitSessionElicitation(params, sessionId: scope.sessionId, arrival: arrival)
         case .request(let scope):
-            return await awaitRequestElicitation(params, requestId: scope.requestId)
+            return await awaitRequestElicitation(params, requestId: scope.requestId, arrival: arrival)
         case .unknownMode(let name):
             logger.log(Self.logPrefix + "answered cancel to an elicitation of the unknown mode \"\(name)\"")
             return nil
@@ -221,16 +248,18 @@ struct ModelClient: Client {
     /// - Parameters:
     ///   - request: The session-scoped elicitation.
     ///   - sessionId: The session of the elicitation.
+    ///   - arrival: The wire arrival number of the request.
     /// - Returns: The user's response, or `nil` when the session is not open.
     private func awaitSessionElicitation(
         _ request: CreateElicitationRequest,
-        sessionId: SessionId
+        sessionId: SessionId,
+        arrival: UInt64?
     ) async -> CreateElicitationResponse? {
         guard let session = await model?.openSession(waitingWhileOpening: sessionId) else {
             logger.log(Self.closedSessionWarning(answer: "cancel", request: "an elicitation", sessionId: sessionId))
             return nil
         }
-        return await session.awaitElicitation(request)
+        return await session.awaitElicitation(request, arrival: arrival)
     }
 
     /// Gives a request-scoped elicitation to the connection model, and waits
@@ -239,13 +268,21 @@ struct ModelClient: Client {
     /// - Parameters:
     ///   - request: The request-scoped elicitation.
     ///   - requestId: The wire id of the client request that it names.
+    ///   - arrival: The wire arrival number of the request.
     /// - Returns: The user's response, or `nil` when no client request with
     ///   that id is in flight.
     private func awaitRequestElicitation(
         _ request: CreateElicitationRequest,
-        requestId: RequestId
+        requestId: RequestId,
+        arrival: UInt64?
     ) async -> CreateElicitationResponse? {
-        guard let response = await model?.awaitRequestScopedElicitation(request, requestId: requestId) else {
+        guard
+            let response = await model?.awaitRequestScopedElicitation(
+                request,
+                requestId: requestId,
+                arrival: arrival
+            )
+        else {
             logger.log(
                 Self.logPrefix
                     + "answered cancel to a request-scoped elicitation, because the request \(requestId) is not in flight"

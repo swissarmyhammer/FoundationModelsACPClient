@@ -161,6 +161,54 @@ struct ConnectionModelElicitationTests {
         try await harness.finish(login)
     }
 
+    /// An elicitation with a smaller wire arrival number goes in front of the
+    /// elicitation that got to the model before it (bug ^s39vtvg). The old
+    /// code appends each elicitation, and gives the later one first.
+    @Test func anElicitationWithASmallerArrivalGoesInFrontOfTheOneThatCameFirst() async throws {
+        let harness = await LoginHarness()
+        let (login, requestId) = try await harness.startLogin()
+        let model = harness.model
+        let request = ElicitationFixtures.formRequest(scope: .request(ElicitationRequestScope(requestId: requestId)))
+
+        let later = Task { await model.awaitRequestScopedElicitation(request, requestId: requestId, arrival: 2) }
+        try await waitUntil { model.pendingElicitations.count == 1 }
+        let laterId = try #require(model.pendingElicitations.first?.id)
+        let earlier = Task { await model.awaitRequestScopedElicitation(request, requestId: requestId, arrival: 1) }
+        try await waitUntil { model.pendingElicitations.count == 2 }
+        let earlierId = try #require(model.pendingElicitations.first { $0.id != laterId }?.id)
+
+        #expect(model.pendingElicitations.map(\.id) == [earlierId, laterId])
+        #expect(model.pendingRequests.map(\.id) == [earlierId, laterId])
+        #expect(model.frontRequest?.id == earlierId)
+
+        model.cancelElicitation(earlierId)
+        model.cancelElicitation(laterId)
+        _ = await (earlier.value, later.value)
+        try await harness.finish(login)
+    }
+
+    /// The agent withdraws a request-scoped elicitation with
+    /// `$/cancel_request`: the elicitation leaves the pending list, and the
+    /// connection model keeps a record with the same id. The reason is `nil`,
+    /// because the agent sent no `_meta`.
+    @Test func anElicitationThatTheAgentWithdrawsGivesARecordOnTheConnection() async throws {
+        let harness = await LoginHarness()
+        let (login, requestId) = try await harness.startLogin()
+        let call = try await harness.startElicitation(naming: requestId)
+        let pending = try #require(harness.model.pendingRequests.first)
+
+        call.cancel()
+        try await waitUntil { !harness.model.withdrawnRequests.isEmpty }
+
+        #expect(harness.model.pendingRequests.isEmpty)
+        #expect(harness.model.withdrawnRequests.map(\.id) == [pending.id])
+        #expect(harness.model.withdrawnRequests.first?.reason == nil)
+        harness.model.dismissWithdrawn(pending.id)
+        #expect(harness.model.withdrawnRequests.isEmpty)
+        _ = try? await call.value
+        try await harness.finish(login)
+    }
+
     // MARK: - Front
 
     /// Starts a login and three elicitations that name it, in the order E1,

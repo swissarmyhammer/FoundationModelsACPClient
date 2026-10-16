@@ -111,6 +111,51 @@ public struct PendingElicitation: Identifiable, Hashable, Sendable {
     public var targetHost: String? {
         url?.host()
     }
+
+    // MARK: - Who asks
+
+    /// The `_meta` key of ``agentPath``.
+    static let agentPathMetaKey = "agentPath"
+
+    /// The `_meta` key of ``source``.
+    static let sourceMetaKey = "source"
+
+    /// The names of the agents between the root agent and the agent that
+    /// asks, outermost first, or an empty list.
+    ///
+    /// The agent sends the list in the `_meta` of `elicitation/create`, under
+    /// `agentPath`, only when the question comes from a sub-agent. The root
+    /// agent adds no name for itself, so the app adds its own label for the
+    /// root. A value that is not an array of strings gives an empty list.
+    public var agentPath: [String] {
+        guard case .array(let values) = metaMember(Self.agentPathMetaKey) else { return [] }
+        let names = values.compactMap { value -> String? in
+            guard case .string(let name) = value else { return nil }
+            return name
+        }
+        return names.count == values.count ? names : []
+    }
+
+    /// The name of the thing that asks inside the agent that asks, for
+    /// example a tool, or `nil`.
+    ///
+    /// The agent sends it in the `_meta` of `elicitation/create`, under
+    /// `source`. A value that is not a string, and an empty string, give
+    /// `nil`.
+    public var source: String? {
+        guard case .string(let source) = metaMember(Self.sourceMetaKey), !source.isEmpty else { return nil }
+        return source
+    }
+
+    /// Gives one member of the `_meta` of the request.
+    ///
+    /// - Parameter key: The key of the member.
+    /// - Returns: The member, or `nil` when the request has no `_meta`
+    ///   object or the object has no such member.
+    private func metaMember(_ key: String) -> JSONValue? {
+        guard case .object(let members) = request.meta else { return nil }
+        return members[key]
+    }
 }
 
 /// The wire keys, the action values, and the action objects of a

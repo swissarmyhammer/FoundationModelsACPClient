@@ -136,4 +136,29 @@ final class MailOrderStubAgent: Agent {
     func startElicitation(_ request: CreateElicitationRequest) -> Task<CreateElicitationResponse, any Error> {
         Task { [connection] in try await connection.createElicitation(request) }
     }
+
+    /// Sends `elicitation/create` with a cancel box, and gives the task of
+    /// the call.
+    ///
+    /// - Parameters:
+    ///   - request: The elicitation to send.
+    ///   - cancellation: The box of the `_meta` that the `$/cancel_request`
+    ///     carries. Set the `_meta` before the cancel of the task.
+    /// - Returns: The task of the call. Its cancel makes the connection send
+    ///   `$/cancel_request` for the request, with the `_meta` of the box.
+    func startElicitation(
+        _ request: CreateElicitationRequest,
+        cancellation: OutboundCancellation
+    ) -> Task<CreateElicitationResponse, any Error> {
+        Task { [connection] in try await connection.createElicitation(request, cancellation: cancellation) }
+    }
+
+    /// Sends `session/request_permission`, and gives the task of the call.
+    ///
+    /// - Parameter request: The permission request to send.
+    /// - Returns: The task of the call. Its cancel makes the connection send
+    ///   `$/cancel_request` for the request, with no `_meta`.
+    func startPermission(_ request: RequestPermissionRequest) -> Task<RequestPermissionResponse, any Error> {
+        Task { [connection] in try await connection.requestPermission(request) }
+    }
 }

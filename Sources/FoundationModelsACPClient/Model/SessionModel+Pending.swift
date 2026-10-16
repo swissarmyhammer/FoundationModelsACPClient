@@ -80,16 +80,22 @@ extension SessionModel {
     ///
     /// - Parameters:
     ///   - request: The permission request from the agent.
+    ///   - arrival: The wire arrival number of the request, which sets its
+    ///     position in ``pendingRequests``, or `nil` with no connection; see
+    ///     `PendingRequestQueue.awaitResponse(to:arrival:)`.
     ///   - afterResponse: Registers the "written" signal of the response, or
     ///     `nil` to give the signal at once, for example in a unit test with
     ///     no connection.
     /// - Returns: The user's decision, or the `cancelled` outcome.
     func awaitPermissionDecision(
         for request: RequestPermissionRequest,
+        arrival: UInt64? = nil,
         afterResponse: AfterResponse? = nil
     ) async -> RequestPermissionResponse {
-        let id = UUID()
-        let response = await permissions.awaitResponse(to: PendingPermissionRequest(id: id, request: request))
+        let pending = PendingPermissionRequest(id: UUID(), request: request)
+        let id = pending.id
+        let (response, cancelledByTask) = await permissions.awaitResponse(to: pending, arrival: arrival)
+        recordWithdrawal(of: .permission(pending), cancelledByTask: cancelledByTask)
         guard let afterResponse else {
             permissionWrites.signal(id)
             return response
@@ -98,8 +104,8 @@ extension SessionModel {
         return response
     }
 
-    /// Starts ``awaitPermissionDecision(for:afterResponse:)`` for a request,
-    /// with no connection, and gives the task of the wait.
+    /// Starts ``awaitPermissionDecision(for:arrival:afterResponse:)`` for a
+    /// request, with no connection, and gives the task of the wait.
     ///
     /// The task starts at once on the main actor, so the request is in
     /// ``pendingPermissions`` when this call returns. The task holds the
@@ -198,15 +204,21 @@ extension SessionModel {
     /// call while it is pending. When the entry does not exist yet, the entry
     /// takes the link when the agent adds the tool call.
     ///
-    /// - Parameter request: The session-scoped elicitation from the agent.
+    /// - Parameters:
+    ///   - request: The session-scoped elicitation from the agent.
+    ///   - arrival: The wire arrival number of the request, which sets its
+    ///     position in ``pendingRequests``, or `nil` with no connection; see
+    ///     `PendingRequestQueue.awaitResponse(to:arrival:)`.
     /// - Returns: The user's response as the spec's action object.
-    func awaitElicitation(_ request: CreateElicitationRequest) async -> CreateElicitationResponse {
+    func awaitElicitation(_ request: CreateElicitationRequest, arrival: UInt64? = nil) async -> CreateElicitationResponse {
         let pending = PendingElicitation(id: UUID(), request: request)
         linkToToolCall(pending)
         // A resolution from the UI removes the link at once. Task cancellation
         // and a cancellation before registration remove it here.
         defer { unlinkFromToolCall(pending) }
-        return await elicitations.awaitResponse(to: pending)
+        let (response, cancelledByTask) = await elicitations.awaitResponse(to: pending, arrival: arrival)
+        recordWithdrawal(of: .elicitation(pending), cancelledByTask: cancelledByTask)
+        return response
     }
 
     /// Accepts one pending elicitation.

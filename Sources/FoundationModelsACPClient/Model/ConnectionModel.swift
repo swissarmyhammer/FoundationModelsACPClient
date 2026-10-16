@@ -147,6 +147,22 @@ public final class ConnectionModel {
     /// has the answer.
     public internal(set) var awaitingURLCompletions: [PendingElicitation] = []
 
+    /// The request-scoped elicitations that the agent withdrew with
+    /// `$/cancel_request`, each with the reason of the agent, in withdrawal
+    /// order.
+    ///
+    /// A UI shows these records so that the user knows why a question went
+    /// away, and removes each one with ``dismissWithdrawn(_:)``. Only a
+    /// `$/cancel_request` of the agent makes a record: an answer of the user,
+    /// the finish of the named client request and a close make none. The
+    /// close of the connection and a new connection make the list empty.
+    ///
+    /// The change comes in two steps. The elicitation leaves
+    /// ``pendingRequests`` first, and its record comes into this list in a
+    /// later main-actor step, when the task of the request resumes. A UI must
+    /// not expect the two changes in one observation.
+    public internal(set) var withdrawnRequests: [WithdrawnRequest] = []
+
     /// The task that reads the outgoing-request events of the open
     /// connection, or `nil` when no connection is open. It cancels each
     /// pending elicitation whose request finished.
@@ -355,6 +371,10 @@ public final class ConnectionModel {
         requestWatch = nil
         elicitations.cancelAll()
         awaitingURLCompletions.removeAll()
+        // An empty list stays as it is, so an observer sees no change.
+        if !withdrawnRequests.isEmpty {
+            withdrawnRequests.removeAll()
+        }
     }
 
     /// Closes each open session model and empties ``openSessions``.

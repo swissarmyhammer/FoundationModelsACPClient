@@ -161,6 +161,21 @@ public final class SessionModel: Identifiable {
     /// the agent already has the answer.
     public internal(set) var awaitingURLCompletions: [PendingElicitation] = []
 
+    /// The pending requests that the agent withdrew with `$/cancel_request`,
+    /// each with the reason of the agent, in withdrawal order.
+    ///
+    /// A UI shows these records so that the user knows why a question went
+    /// away, and removes each one with ``dismissWithdrawn(_:)``. Only a
+    /// `$/cancel_request` of the agent makes a record: an answer of the user,
+    /// ``cancelAllPending()``, ``cancel(meta:)`` and a close make none. The
+    /// start of a resume and the close make the list empty.
+    ///
+    /// The change comes in two steps. The request leaves ``pendingRequests``
+    /// first, and its record comes into this list in a later main-actor step,
+    /// when the task of the request resumes. A UI must not expect the two
+    /// changes in one observation.
+    public internal(set) var withdrawnRequests: [WithdrawnRequest] = []
+
     /// The MCP servers of the session, each with its last status. The list
     /// holds one ``MCPServerOrigin/client`` item for each HTTP or stdio server
     /// of the `session/new` or `session/resume` request, in request order.
@@ -674,10 +689,42 @@ public final class SessionModel: Identifiable {
         notices.removeAll { $0.id == id }
     }
 
-    /// Removes each notice. A notice is a live event of one connection, so
-    /// the start of a resume and the close call this.
+    /// Removes each notice and each record of a withdrawn request. Both are
+    /// live events of one connection, so the start of a resume and the close
+    /// call this.
     func clearNotices() {
         notices.removeAll()
+        // An empty list stays as it is, so an observer sees no change.
+        if !withdrawnRequests.isEmpty {
+            withdrawnRequests.removeAll()
+        }
+    }
+
+    // MARK: - Withdrawn requests
+
+    /// Removes one record from ``withdrawnRequests``, for example when the
+    /// user closes it. A call with an unknown or already dismissed id changes
+    /// nothing.
+    ///
+    /// - Parameter id: The id of the record.
+    public func dismissWithdrawn(_ id: WithdrawnRequest.ID) {
+        withdrawnRequests.removeAll { $0.id == id }
+    }
+
+    /// Records a pending request that the agent withdrew.
+    ///
+    /// Call it in the task of the request, after its call returned. The
+    /// record is made only when the cancel of that task removed the request,
+    /// the agent's `$/cancel_request` cancelled the task, and the model is
+    /// open.
+    ///
+    /// - Parameters:
+    ///   - request: The request as it was pending.
+    ///   - cancelledByTask: Whether the cancel of the task removed the
+    ///     request.
+    func recordWithdrawal(of request: PendingRequest, cancelledByTask: Bool) {
+        guard cancelledByTask, !isClosed, WithdrawnRequest.currentTaskWasWithdrawnByPeer else { return }
+        withdrawnRequests.append(WithdrawnRequest(request: request, cancelMeta: ClientSideConnection.cancelRequestMeta))
     }
 
     // MARK: - Prompt links

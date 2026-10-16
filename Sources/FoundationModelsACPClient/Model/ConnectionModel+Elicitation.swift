@@ -89,15 +89,35 @@ extension ConnectionModel {
     /// - Parameters:
     ///   - request: The request-scoped elicitation from the agent.
     ///   - requestId: The wire id of the client request that it names.
+    ///   - arrival: The wire arrival number of the elicitation, which sets its
+    ///     position in ``pendingRequests``, or `nil`; see
+    ///     `PendingRequestQueue.awaitResponse(to:arrival:)`.
     /// - Returns: The user's response as the spec's action object, or `nil`
     ///   when no request of the open connection with that id is in flight.
     func awaitRequestScopedElicitation(
         _ request: CreateElicitationRequest,
-        requestId: RequestId
+        requestId: RequestId,
+        arrival: UInt64? = nil
     ) async -> CreateElicitationResponse? {
         guard let method = connection?.inFlightMethod(for: requestId) else { return nil }
         let pending = PendingElicitation(id: UUID(), request: request, requestMethod: method)
-        return await elicitations.awaitResponse(to: pending)
+        let (response, cancelledByTask) = await elicitations.awaitResponse(to: pending, arrival: arrival)
+        // A record needs the agent's `$/cancel_request`, not a close, and an
+        // open connection.
+        if cancelledByTask, connection != nil, WithdrawnRequest.currentTaskWasWithdrawnByPeer {
+            let record = WithdrawnRequest(request: .elicitation(pending), cancelMeta: ClientSideConnection.cancelRequestMeta)
+            withdrawnRequests.append(record)
+        }
+        return response
+    }
+
+    /// Removes one record from ``withdrawnRequests``, for example when the
+    /// user closes it. A call with an unknown or already dismissed id changes
+    /// nothing.
+    ///
+    /// - Parameter id: The id of the record.
+    public func dismissWithdrawn(_ id: WithdrawnRequest.ID) {
+        withdrawnRequests.removeAll { $0.id == id }
     }
 
     /// Accepts one pending request-scoped elicitation.

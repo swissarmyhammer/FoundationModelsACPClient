@@ -22,7 +22,8 @@ import Foundation
 /// resolves independently of the others.
 @MainActor @Observable
 final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendable> where Item.ID == UUID {
-    /// The items that wait for the user's answer, in arrival order.
+    /// The items that wait for the user's answer, in arrival order: the
+    /// order of their arrival numbers.
     private(set) var items: [Item] = []
 
     /// The suspended call of each unresolved item, keyed by the item id. The
@@ -30,9 +31,13 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     @ObservationIgnored private let calls: KeyedWaiters<UUID, Response>
 
     /// The arrival number of each item in ``items``, keyed by the item id.
-    /// The number comes from ``PendingArrivalCounter`` when the call
-    /// suspends.
+    /// The number is the one that the caller gave, or else a number from
+    /// ``PendingArrivalCounter`` when the call suspends.
     @ObservationIgnored private var arrivals: [UUID: UInt64] = [:]
+
+    /// The id of each item that the cancel of its own task removed, until its
+    /// call returns. ``awaitResponse(to:arrival:)`` reads and removes the id.
+    @ObservationIgnored private var cancelledByTask: Set<UUID> = []
 
     /// Gets the id of each item that leaves ``items``, for each resolution
     /// and each cancellation, or `nil` to tell nobody.
@@ -52,19 +57,46 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
 
     /// Suspends until a resolution of the item arrives.
     ///
-    /// - Parameter item: The pending item. Its id names it in the resolution
-    ///   calls.
-    /// - Returns: The response of the resolution, or the cancelled response.
-    func awaitResponse(to item: Item) async -> Response {
+    /// The item goes into ``items`` before the first item with a larger
+    /// arrival number. The connection handles each request of the agent in
+    /// its own task, so a request can get here after a request that was later
+    /// on the wire. With the wire number as `arrival`, ``items`` is still in
+    /// wire order.
+    ///
+    /// - Parameters:
+    ///   - item: The pending item. Its id names it in the resolution calls.
+    ///   - arrival: The arrival number of the item, for example
+    ///     `ClientSideConnection.currentRequestArrival`, or `nil` to take the
+    ///     next number of ``PendingArrivalCounter`` when the call suspends.
+    ///     Give the numbers of one queue from one source: the numbers of the
+    ///     connection and of the counter are not comparable.
+    /// - Returns: The response of the resolution, or the cancelled response,
+    ///   and whether the cancel of the task of the call removed the item.
+    ///   That flag is `false` for each resolution of the user or of the
+    ///   model, and for a task that was cancelled before the item was
+    ///   pending.
+    func awaitResponse(
+        to item: Item,
+        arrival: UInt64? = nil
+    ) async -> (response: Response, cancelledByTask: Bool) {
         let id = item.id
-        return await calls.wait(
+        let response = await calls.wait(
             for: id,
             onSuspend: {
-                arrivals[id] = PendingArrivalCounter.next()
-                items.append(item)
+                let number = arrival ?? PendingArrivalCounter.next()
+                arrivals[id] = number
+                let index = items.firstIndex { (arrivals[$0.id] ?? 0) > number } ?? items.endIndex
+                items.insert(item, at: index)
             },
-            onCancel: { [weak self] in self?.removeItem(id) }
+            onCancel: { [weak self] in
+                // The waiters run this step on the main actor at once after
+                // the resume, so the flag is set before this call returns.
+                if self?.removeItem(id) != nil {
+                    self?.cancelledByTask.insert(id)
+                }
+            }
         )
+        return (response, cancelledByTask.remove(id) != nil)
     }
 
     /// Gives each item of ``items`` as a ``PendingRequest``, with its
