@@ -161,4 +161,20 @@ final class MailOrderStubAgent: Agent {
     func startPermission(_ request: RequestPermissionRequest) -> Task<RequestPermissionResponse, any Error> {
         Task { [connection] in try await connection.requestPermission(request) }
     }
+
+    /// Sends `session/request_permission` with a cancel box, and gives the
+    /// task of the call.
+    ///
+    /// - Parameters:
+    ///   - request: The permission request to send.
+    ///   - cancellation: The box of the `_meta` that the `$/cancel_request`
+    ///     carries. Set the `_meta` before the cancel of the task.
+    /// - Returns: The task of the call. Its cancel makes the connection send
+    ///   `$/cancel_request` for the request, with the `_meta` of the box.
+    func startPermission(
+        _ request: RequestPermissionRequest,
+        cancellation: OutboundCancellation
+    ) -> Task<RequestPermissionResponse, any Error> {
+        Task { [connection] in try await connection.requestPermission(request, cancellation: cancellation) }
+    }
 }

@@ -101,6 +101,28 @@ struct WithdrawnRequestTests {
         await connected.model.disconnect()
     }
 
+    /// The permission handler runs in a child task of the request task, and
+    /// the reason of the `$/cancel_request` reaches it too.
+    @Test func aPermissionThatTheAgentWithdrawsGivesARecordWithTheReason() async throws {
+        let connected = try await WithdrawalSession()
+        let cancellation = OutboundCancellation()
+        let call = connected.agent.startPermission(SessionModelFixtures.permissionRequest(), cancellation: cancellation)
+        await waitFor { !connected.session.pendingPermissions.isEmpty }
+        let pending = try #require(connected.session.pendingRequests.first)
+
+        cancellation.setMeta(.object([CancelRequestNotification.reasonMetaKey: .string(runCancelledReason)]))
+        call.cancel()
+        await waitFor { !connected.session.withdrawnRequests.isEmpty }
+
+        #expect(connected.session.pendingPermissions.isEmpty)
+        let record = try #require(connected.session.withdrawnRequests.first)
+        #expect(record.id == pending.id)
+        #expect(record.request == pending)
+        #expect(record.reason == runCancelledReason)
+        await #expect(throws: (any Error).self) { try await call.value }
+        await connected.model.disconnect()
+    }
+
     @Test func dismissWithdrawnRemovesTheRecord() async throws {
         let connected = try await WithdrawalSession()
         let call = connected.agent.startElicitation(request)
