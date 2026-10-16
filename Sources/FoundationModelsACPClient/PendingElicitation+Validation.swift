@@ -43,6 +43,36 @@ extension PendingElicitation {
         return schema.validationFailure(of: values)
     }
 
+    /// Tells whether `text` has a match of the `pattern` rule of a form field.
+    ///
+    /// The bridge gives the result of
+    /// ``ElicitationValidation/patternMatches(_:pattern:)`` of Extras, so a UI
+    /// that does not import Extras checks a field while the user types with
+    /// the same rule as ``validationFailure(of:)``. The check is an ECMA-262
+    /// search with no flags, and it is not anchored.
+    ///
+    /// - Parameters:
+    ///   - text: The value of the field.
+    ///   - pattern: The `pattern` of the field schema.
+    /// - Returns: `nil` when `pattern` does not compile, `true` when a match
+    ///   is in `text`, and `false` when no match is in `text`.
+    public static func patternMatches(_ text: String, pattern: String) -> Bool? {
+        ElicitationValidation.patternMatches(text, pattern: pattern)
+    }
+
+    /// The length of `text` for the `minLength` and `maxLength` rules of a
+    /// form field.
+    ///
+    /// The bridge gives the result of
+    /// ``ElicitationValidation/codePointLength(_:)`` of Extras: the count of
+    /// the Unicode code points of `text`, as JSON Schema counts it.
+    ///
+    /// - Parameter text: The value of the field.
+    /// - Returns: The count of the Unicode code points of `text`.
+    public static func codePointLength(_ text: String) -> Int {
+        ElicitationValidation.codePointLength(text)
+    }
+
     /// Decodes a value through its JSON encoding.
     ///
     /// - Parameters:

@@ -8,7 +8,9 @@ import Testing
 // The tests of `PendingElicitation.validationFailure(of:)`: the bridge from the
 // wire schema of a form elicitation to the check of FoundationModelsExtras. A
 // valid answer gives `nil`, a field that breaks a rule gives the Extras text,
-// and a schema or an answer that Extras cannot decode gives `nil`.
+// and a schema or an answer that Extras cannot decode gives `nil`. The tests of
+// `patternMatches(_:pattern:)` and `codePointLength(_:)` use the examples of
+// AgentViewKit D-1.
 
 /// The validation bridge tests, in one suite so that `swift test --filter
 /// PendingElicitationValidationTests` selects them.
@@ -80,5 +82,25 @@ struct PendingElicitationValidationTests {
         let pending = PendingElicitation(id: UUID(), request: request)
 
         #expect(pending.validationFailure(of: nil) == nil)
+    }
+
+    @Test func aPatternIsASearchThatIsNotAnchored() {
+        #expect(PendingElicitation.patternMatches("zip 12345", pattern: "[0-9]{5}") == true)
+    }
+
+    @Test func aDigitClassMatchesOnlyASCIIDigits() {
+        // ECMA-262 `\d` is [0-9]: the Arabic-Indic digit one does not match.
+        #expect(PendingElicitation.patternMatches("\u{661}", pattern: "\\d") == false)
+    }
+
+    @Test func aPatternThatDoesNotCompileGivesNil() {
+        #expect(PendingElicitation.patternMatches("x", pattern: "[") == nil)
+    }
+
+    @Test func theLengthIsTheCountOfCodePoints() {
+        // "e" and a combining acute accent are one character but two code
+        // points; the thumbs-up emoji is one code point.
+        #expect(PendingElicitation.codePointLength("e\u{301}") == 2)
+        #expect(PendingElicitation.codePointLength("👍") == 1)
     }
 }
