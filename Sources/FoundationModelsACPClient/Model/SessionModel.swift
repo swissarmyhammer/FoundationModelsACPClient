@@ -165,6 +165,19 @@ public final class SessionModel: Identifiable {
     /// updates add no transcript entry.
     public internal(set) var mcpServers: [MCPServerItem] = []
 
+    /// The last pause of the mail delivery that the agent reported, or `nil`
+    /// when the mail delivery of the session is not paused.
+    ///
+    /// A `_mail_delivery_paused` update of the agent sets it, and a later one
+    /// replaces it. The update adds no transcript entry. The next caller
+    /// message lifts the pause, and the agent sends no update for the lift.
+    /// Thus the model clears the value when ``prompt(_:meta:)`` sends a
+    /// prompt, and when it folds a user message after the pause: the echo of
+    /// a prompt, a prompt of another client of the session, or a user
+    /// message of a replay. A replay keeps the value until it gives a later
+    /// user message, and the close keeps it.
+    public internal(set) var mailDeliveryPause: MailDeliveryPause?
+
     /// Whether the connection discarded updates of this session before the
     /// model subscribed. When this value is `true`, the transcript can lack
     /// updates. A successful replay from the start of the retained history
@@ -398,7 +411,9 @@ public final class SessionModel: Identifiable {
     /// An `_mcp_server_status` update never goes to the engine, because the
     /// engine makes an unknown transcript entry from it. A valid one changes
     /// ``mcpServers``, and an update that ``MCPServerStatusUpdate`` ignores
-    /// changes nothing.
+    /// changes nothing. A `_mail_delivery_paused` update never goes to the
+    /// engine either: a valid one sets ``mailDeliveryPause``. Each user
+    /// message clears ``mailDeliveryPause``.
     ///
     /// - Parameter updates: The updates to fold, in arrival order.
     func fold(_ updates: [SessionUpdate]) {
@@ -411,18 +426,30 @@ public final class SessionModel: Identifiable {
     /// Folds one update, and gives the change of the engine.
     ///
     /// An `_mcp_server_status` update goes to ``applyMCPServerStatus(_:)``
-    /// and not to the engine, so it gives no change. Each other update goes
+    /// and a `_mail_delivery_paused` update goes to ``mailDeliveryPause``,
+    /// and not to the engine, so they give no change. Each other update goes
     /// to the prompt correlator and then to the engine.
     ///
     /// - Parameter update: The update to fold.
     /// - Returns: The change of the engine, or `nil` for an
-    ///   `_mcp_server_status` update.
+    ///   `_mcp_server_status` or a `_mail_delivery_paused` update.
     private func engineChange(folding update: SessionUpdate) -> SessionMergeEngine.Change? {
         guard !MCPServerStatusUpdate.isStatusUpdate(update) else {
             if let status = MCPServerStatusUpdate.decode(update) {
                 applyMCPServerStatus(status)
             }
             return nil
+        }
+        guard !MailDeliveryPause.isPauseUpdate(update) else {
+            if let pause = MailDeliveryPause.decode(update) {
+                mailDeliveryPause = pause
+            }
+            return nil
+        }
+        if case .userMessage = update {
+            mailDeliveryPause = nil
+        } else if case .userMessageChunk = update {
+            mailDeliveryPause = nil
         }
         if let link = promptCorrelator.observe(update) {
             linkPrompt(link)

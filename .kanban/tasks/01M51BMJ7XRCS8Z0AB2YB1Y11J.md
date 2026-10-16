@@ -1,8 +1,27 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '80'
+comments:
+- actor: claude-code
+  id: 01m51hm2wcwc1xp1mfkn76xw8d
+  text: |-
+    ### design — sent to the step owner, waits for acceptance
+    - Source: ACPAgent d30f8cd (^t03jd5h), `MailDeliveryPauseReport.swift`. Payload: `{limit, heldCount, heldMail: [{tool, op, completionToken}], message}`. The agent sends it before the idle and keeps it in the history. No update for the lift.
+    - Proposal: public `MailDeliveryPause` and `HeldMail` (Identifiable by completionToken); decode like `MCPServerStatusUpdate`, never to the engine; `SessionModel.mailDeliveryPause`; `prompt(_:meta:)` clears it when the request goes out; a replay does not clear it.
+    - Open questions: Q1, clear on each folded `user_message` after the pause; Q2, keep or clear at close.
+  timestamp: 2026-10-16T05:05:42.796903+00:00
+- actor: claude-code
+  id: 01m51hvnh9n9wqah82h4rm6g7k
+  text: |-
+    ### implement — changed (design accepted; Q1 yes, Q2 keep)
+    - New file `MailDeliveryPause.swift`: public `MailDeliveryPause` {limit, heldCount, heldMail, message} and `HeldMail` (Identifiable by completionToken), and the internal decode. A missing member or a wrong type makes the model ignore the whole update. The update never goes to the engine.
+    - `SessionModel.mailDeliveryPause` (public internal(set)): a pause update sets it; `prompt(_:meta:)` clears it when the request goes out; each folded `user_message` or `user_message_chunk` clears it (live, another client, replay). A replay and the close keep it.
+    - New suite `SessionModelMailPauseTests`: 15 tests, 18 cases with the arguments.
+    - Full run: 589 tests in 47 suites pass. IntegrationTests builds.
+    - Push waits for the end of the queued CI run of 66dd9b6.
+  timestamp: 2026-10-16T05:09:51.273658+00:00
+position_column: done
+position_ordinal: ff8680
 title: 'Elicitation phase 3: fold the _mail_delivery_paused session update into SessionModel as an observable pause payload'
 ---
 Source: request of the step owner. Start only when the step owner gives the ACPAgent head.

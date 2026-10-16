@@ -22,7 +22,8 @@ extension SessionModel {
     /// and data of the failure, and the call throws the error again.
     ///
     /// When the request goes out, the model records its W3C trace context in
-    /// ``promptTraceMeta``, so a later cancel can link to its span.
+    /// ``promptTraceMeta``, so a later cancel can link to its span. It also
+    /// clears ``mailDeliveryPause``, because the prompt lifts the pause.
     ///
     /// The prompt is mail: the agent answers when it accepts the message, and
     /// not when its work ends. The work comes after the response, as session
@@ -45,6 +46,9 @@ extension SessionModel {
             let request = PromptRequest(prompt: content, sessionId: sessionId, meta: meta)
             let response = try await requestSender.prompt(request) { sent in
                 self.recordTraceContext(of: sent)
+                // The prompt carries the held mail to the agent, so it lifts
+                // a pause of the mail delivery.
+                self.mailDeliveryPause = nil
             }
             resolvePrompt(entry, with: response)
             return response
