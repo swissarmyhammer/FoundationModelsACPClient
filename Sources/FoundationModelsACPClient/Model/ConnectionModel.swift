@@ -124,6 +124,16 @@ public final class ConnectionModel {
         cancelledResponse: ElicitationResponseWire.cancelResponse
     )
 
+    /// The id of the pending request that the user brought to the front, or
+    /// `nil` when the user did not select one.
+    ///
+    /// ``bringToFront(_:)`` sets it. It becomes `nil` when its request
+    /// resolves, and so also at a close and at a new connection, which cancel
+    /// each pending request. It is a pointer into ``pendingRequests``: it does
+    /// not change the order of that list. ``frontRequest`` gives the request
+    /// to show.
+    public internal(set) var frontRequestID: PendingRequest.ID?
+
     /// The task that reads the outgoing-request events of the open
     /// connection, or `nil` when no connection is open. It cancels each
     /// pending elicitation whose request finished.
@@ -192,6 +202,9 @@ public final class ConnectionModel {
         self.now = now
         self.logger = logger
         connectionLogger = logger
+        elicitations.didRemove = { [weak self] id in
+            self?.clearFrontRequest(ifItIs: id)
+        }
     }
 
     // MARK: - Connection

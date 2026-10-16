@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 import Testing
 
@@ -104,8 +105,9 @@ private struct LoginHarness {
         }
     ) async throws -> Task<CreateElicitationResponse, any Error> {
         let request = makeRequest(ElicitationRequestScope(requestId: requestId))
+        let before = model.pendingElicitations.count
         return try await ElicitationFixtures.start(request, over: agentConnection) { [model] in
-            !model.pendingElicitations.isEmpty
+            model.pendingElicitations.count == before + 1
         }
     }
 
@@ -156,6 +158,135 @@ struct ConnectionModelElicitationTests {
         harness.model.cancelElicitation(pending.id)
         #expect(harness.model.pendingRequests.isEmpty)
         #expect(try await call.value == ElicitationResponseWire.cancelResponse)
+        try await harness.finish(login)
+    }
+
+    // MARK: - Front
+
+    /// Starts a login and three elicitations that name it, in the order E1,
+    /// E2, E3.
+    ///
+    /// - Parameter harness: The harness of the test.
+    /// - Returns: The login, the calls of the agent, and the three requests.
+    private func startThreeElicitations(
+        on harness: LoginHarness
+    ) async throws -> (login: Task<Void, any Error>, calls: [Task<CreateElicitationResponse, any Error>], requests: [PendingRequest]) {
+        let (login, requestId) = try await harness.startLogin()
+        var calls: [Task<CreateElicitationResponse, any Error>] = []
+        for _ in 0..<3 {
+            calls.append(try await harness.startElicitation(naming: requestId))
+        }
+        return (login, calls, harness.model.pendingRequests)
+    }
+
+    /// Cancels each pending elicitation, waits for each call of the agent, and
+    /// ends the login.
+    ///
+    /// - Parameters:
+    ///   - harness: The harness of the test.
+    ///   - login: The task of the login.
+    ///   - calls: The calls of the agent.
+    private func finish(
+        _ harness: LoginHarness,
+        login: Task<Void, any Error>,
+        calls: [Task<CreateElicitationResponse, any Error>]
+    ) async throws {
+        for pending in harness.model.pendingElicitations {
+            harness.model.cancelElicitation(pending.id)
+        }
+        for call in calls {
+            _ = try await call.value
+        }
+        try await harness.finish(login)
+    }
+
+    @Test func theFrontIsTheOldestRequestAndANewRequestGoesAtTheBack() async throws {
+        let harness = await LoginHarness()
+        #expect(harness.model.frontRequest == nil)
+        let (login, requestId) = try await harness.startLogin()
+        let first = try await harness.startElicitation(naming: requestId)
+        let oldest = try #require(harness.model.pendingRequests.first)
+
+        let second = try await harness.startElicitation(naming: requestId)
+
+        #expect(harness.model.frontRequestID == nil)
+        #expect(harness.model.frontRequest == oldest)
+        #expect(harness.model.pendingRequests.last != oldest)
+        try await finish(harness, login: login, calls: [first, second])
+    }
+
+    @Test func bringingARequestToTheFrontKeepsTheOrder() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+
+        harness.model.bringToFront(requests[2].id)
+
+        #expect(harness.model.frontRequestID == requests[2].id)
+        #expect(harness.model.frontRequest == requests[2])
+        #expect(harness.model.pendingRequests == requests)
+        try await finish(harness, login: login, calls: calls)
+    }
+
+    @Test func anUnknownIdChangesNothingOnTheConnection() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+        harness.model.bringToFront(requests[1].id)
+
+        harness.model.bringToFront(UUID())
+
+        #expect(harness.model.frontRequest == requests[1])
+        try await finish(harness, login: login, calls: calls)
+    }
+
+    @Test func anAnsweredFrontMovesTheFrontToTheOldestRequestThatStays() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+        harness.model.bringToFront(requests[2].id)
+
+        harness.model.declineElicitation(requests[2].id)
+
+        #expect(harness.model.frontRequestID == nil)
+        #expect(harness.model.frontRequest == requests[0])
+        try await finish(harness, login: login, calls: calls)
+    }
+
+    @Test func aCancelledFrontMovesTheFrontToTheOldestRequestThatStays() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+        harness.model.bringToFront(requests[0].id)
+
+        harness.model.cancelElicitation(requests[0].id)
+
+        #expect(harness.model.frontRequestID == nil)
+        #expect(harness.model.frontRequest == requests[1])
+        try await finish(harness, login: login, calls: calls)
+    }
+
+    @Test func bringingARequestToTheFrontFiresTheObservationOfTheConnectionFront() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+
+        let fires = observationFires(reading: { _ = harness.model.frontRequest }) {
+            harness.model.bringToFront(requests[1].id)
+        }
+
+        #expect(fires)
+        try await finish(harness, login: login, calls: calls)
+    }
+
+    @Test func aNewConnectionClearsTheFront() async throws {
+        let harness = await LoginHarness()
+        let (login, calls, requests) = try await startThreeElicitations(on: harness)
+        harness.model.bringToFront(requests[1].id)
+        let (clientEnd, _) = InMemoryTransport.pair()
+
+        _ = await harness.model.connect(over: clientEnd)
+
+        #expect(harness.model.frontRequestID == nil)
+        #expect(harness.model.frontRequest == nil)
+        for call in calls {
+            _ = try await call.value
+        }
         try await harness.finish(login)
     }
 
