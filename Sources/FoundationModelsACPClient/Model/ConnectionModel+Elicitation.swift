@@ -107,11 +107,29 @@ extension ConnectionModel {
     /// give no content: the URL flow returns its data out of band. A call with
     /// an unknown or already resolved id changes nothing.
     ///
+    /// An accepted url-mode elicitation moves to ``awaitingURLCompletions``,
+    /// with the same id, until the `elicitation/complete` of the agent comes.
+    ///
     /// - Parameters:
     ///   - id: The id of the pending elicitation.
     ///   - content: The form values, or `nil` for no content.
     public func acceptElicitation(_ id: PendingElicitation.ID, content: JSONValue? = nil) {
-        elicitations.resolve(id, with: ElicitationResponseWire.acceptResponse(content: content))
+        guard let removed = elicitations.resolve(id, with: ElicitationResponseWire.acceptResponse(content: content)),
+            removed.elicitationId != nil
+        else { return }
+        awaitingURLCompletions.append(removed)
+    }
+
+    /// Stops the wait for the `elicitation/complete` of one accepted
+    /// request-scoped url-mode elicitation, and removes it from
+    /// ``awaitingURLCompletions``.
+    ///
+    /// The call sends nothing to the agent: the agent already has the
+    /// answer. An id that does not wait changes nothing.
+    ///
+    /// - Parameter id: The id of the accepted elicitation.
+    public func stopWaiting(_ id: PendingElicitation.ID) {
+        awaitingURLCompletions.removeAll { $0.id == id }
     }
 
     /// Declines one pending request-scoped elicitation, which tells the agent
@@ -135,20 +153,29 @@ extension ConnectionModel {
     /// Closes the pending url-mode elicitation that an `elicitation/complete`
     /// notification names.
     ///
-    /// The first open session model that holds an elicitation with that id
-    /// closes it. When no open session model holds it, the request-scoped
-    /// elicitation with that id closes, if one is pending.
+    /// The first open session model that holds a pending or an accepted
+    /// elicitation with that id closes it. When no open session model holds
+    /// it, the request-scoped elicitation with that id closes: a pending one
+    /// resolves with the accept action, and an item of
+    /// ``awaitingURLCompletions`` leaves that list with no message to the
+    /// agent.
     ///
     /// - Parameter elicitationId: The elicitation id that the notification
     ///   names.
-    /// - Returns: `true` when a model held a pending elicitation with that id,
-    ///   `false` when nothing changed.
+    /// - Returns: `true` when a model held a pending or an accepted
+    ///   elicitation with that id, `false` when nothing changed.
     func completeElicitation(elicitationId: ElicitationId) -> Bool {
         // The `where` clause closes the elicitation when the session holds it.
         for session in openSessions where session.completeElicitation(elicitationId: elicitationId) {
             return true
         }
-        return elicitations.complete(elicitationId: elicitationId) != nil
+        if elicitations.complete(elicitationId: elicitationId) != nil {
+            return true
+        }
+        guard let index = awaitingURLCompletions.firstIndex(where: { $0.elicitationId == elicitationId })
+        else { return false }
+        awaitingURLCompletions.remove(at: index)
+        return true
     }
 
     /// Starts the task that reads the outgoing-request events of a
@@ -170,12 +197,15 @@ extension ConnectionModel {
         }
     }
 
-    /// Cancels each pending elicitation that names a request that finished.
+    /// Cancels each pending elicitation that names a request that finished,
+    /// and stops the wait for each accepted url-mode elicitation of that
+    /// request: after the request ends, no completion can matter.
     ///
     /// - Parameter requestId: The wire id of the request that finished.
     private func requestDidFinish(_ requestId: RequestId) {
         for pending in elicitations.items where pending.requestId == requestId {
             elicitations.cancel(pending.id)
         }
+        awaitingURLCompletions.removeAll { $0.requestId == requestId }
     }
 }

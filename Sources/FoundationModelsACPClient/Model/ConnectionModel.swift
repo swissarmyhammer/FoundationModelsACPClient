@@ -134,6 +134,19 @@ public final class ConnectionModel {
     /// to show.
     public internal(set) var frontRequestID: PendingRequest.ID?
 
+    /// The request-scoped url-mode elicitations that the user accepted and
+    /// whose `elicitation/complete` notification did not come yet, in accept
+    /// order.
+    ///
+    /// ``acceptElicitation(_:content:)`` of a url-mode elicitation answers the
+    /// agent and moves the item from ``pendingElicitations`` to this list,
+    /// with the same id. The `elicitation/complete` of the agent, a call of
+    /// ``stopWaiting(_:)``, the finish of the client request that the item
+    /// names, the close of the connection and a new connection remove it.
+    /// None of them sends a message to the agent, because the agent already
+    /// has the answer.
+    public internal(set) var awaitingURLCompletions: [PendingElicitation] = []
+
     /// The task that reads the outgoing-request events of the open
     /// connection, or `nil` when no connection is open. It cancels each
     /// pending elicitation whose request finished.
@@ -333,13 +346,15 @@ public final class ConnectionModel {
         closeOpenSessions()
     }
 
-    /// Stops the read of the outgoing-request events, and cancels each
-    /// pending request-scoped elicitation, whose request can no longer
-    /// finish in the eyes of the model.
+    /// Stops the read of the outgoing-request events, cancels each pending
+    /// request-scoped elicitation, whose request can no longer finish in the
+    /// eyes of the model, and stops the wait for each accepted url-mode
+    /// elicitation.
     private func stopWatchingRequests() {
         requestWatch?.cancel()
         requestWatch = nil
         elicitations.cancelAll()
+        awaitingURLCompletions.removeAll()
     }
 
     /// Closes each open session model and empties ``openSessions``.

@@ -216,11 +216,30 @@ extension SessionModel {
     /// give no content: the URL flow returns its data out of band. A call with
     /// an unknown or already resolved id changes nothing.
     ///
+    /// An accepted url-mode elicitation moves to ``awaitingURLCompletions``,
+    /// with the same id, until the `elicitation/complete` of the agent comes.
+    ///
     /// - Parameters:
     ///   - id: The id of the pending elicitation.
     ///   - content: The form values, or `nil` for no content.
     public func acceptElicitation(_ id: PendingElicitation.ID, content: JSONValue? = nil) {
-        resolveElicitation(id, with: ElicitationResponseWire.acceptResponse(content: content))
+        guard let removed = elicitations.resolve(id, with: ElicitationResponseWire.acceptResponse(content: content))
+        else { return }
+        unlinkFromToolCall(removed)
+        if removed.elicitationId != nil {
+            awaitingURLCompletions.append(removed)
+        }
+    }
+
+    /// Stops the wait for the `elicitation/complete` of one accepted url-mode
+    /// elicitation, and removes it from ``awaitingURLCompletions``.
+    ///
+    /// The call sends nothing to the agent: the agent already has the
+    /// answer. An id that does not wait changes nothing.
+    ///
+    /// - Parameter id: The id of the accepted elicitation.
+    public func stopWaiting(_ id: PendingElicitation.ID) {
+        awaitingURLCompletions.removeAll { $0.id == id }
     }
 
     /// Declines one pending elicitation, which tells the agent that the user
@@ -245,16 +264,24 @@ extension SessionModel {
     /// Closes the pending url-mode elicitation that an `elicitation/complete`
     /// notification names.
     ///
-    /// The elicitation resolves with the accept action and no content: the URL
-    /// flow returned its data out of band, so no credentials go back over ACP.
+    /// A pending elicitation resolves with the accept action and no content:
+    /// the URL flow returned its data out of band, so no credentials go back
+    /// over ACP. An elicitation of ``awaitingURLCompletions`` leaves that
+    /// list, and nothing goes to the agent, because the agent already has the
+    /// answer.
     ///
     /// - Parameter elicitationId: The elicitation id that the notification
     ///   names.
-    /// - Returns: `true` when this model held a pending elicitation with that
-    ///   id, `false` when nothing changed.
+    /// - Returns: `true` when this model held a pending or an accepted
+    ///   elicitation with that id, `false` when nothing changed.
     func completeElicitation(elicitationId: ElicitationId) -> Bool {
-        guard let removed = elicitations.complete(elicitationId: elicitationId) else { return false }
-        unlinkFromToolCall(removed)
+        if let removed = elicitations.complete(elicitationId: elicitationId) {
+            unlinkFromToolCall(removed)
+            return true
+        }
+        guard let index = awaitingURLCompletions.firstIndex(where: { $0.elicitationId == elicitationId })
+        else { return false }
+        awaitingURLCompletions.remove(at: index)
         return true
     }
 
@@ -271,10 +298,12 @@ extension SessionModel {
     // MARK: - Close
 
     /// Cancels every pending permission request and every pending
+    /// elicitation, and stops the wait for each accepted url-mode
     /// elicitation.
     ///
     /// Each permission request answers `cancelled`, and each elicitation
-    /// answers with the cancel action. Each call of
+    /// answers with the cancel action. ``awaitingURLCompletions`` becomes
+    /// empty, and nothing goes to the agent for its items. Each call of
     /// ``selectPermission(_:option:)`` or ``cancelPermission(_:)`` that waits
     /// for its response to be written returns too. A closed session thus
     /// leaves no pending prompt, no tool-call link, and no suspended call.
@@ -284,6 +313,7 @@ extension SessionModel {
         for id in pendingElicitations.map(\.id) {
             cancelElicitation(id)
         }
+        awaitingURLCompletions.removeAll()
     }
 
     // MARK: - Tool-call links

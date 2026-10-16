@@ -149,6 +149,18 @@ public final class SessionModel: Identifiable {
     /// order of that list. ``frontRequest`` gives the request to show.
     public internal(set) var frontRequestID: PendingRequest.ID?
 
+    /// The url-mode elicitations that the user accepted and whose
+    /// `elicitation/complete` notification did not come yet, in accept
+    /// order.
+    ///
+    /// ``acceptElicitation(_:content:)`` of a url-mode elicitation answers the
+    /// agent and moves the item from ``pendingElicitations`` to this list,
+    /// with the same id. The `elicitation/complete` of the agent, a call of
+    /// ``stopWaiting(_:)``, ``cancel(meta:)``, ``cancelAllPending()`` and the
+    /// close remove it. None of them sends a message to the agent, because
+    /// the agent already has the answer.
+    public internal(set) var awaitingURLCompletions: [PendingElicitation] = []
+
     /// The MCP servers of the session, each with its last status. The list
     /// holds one ``MCPServerOrigin/client`` item for each HTTP or stdio server
     /// of the `session/new` or `session/resume` request, in request order.

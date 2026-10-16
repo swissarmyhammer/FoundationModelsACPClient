@@ -373,6 +373,106 @@ struct ConnectionModelElicitationTests {
         try await harness.finish(login)
     }
 
+    // MARK: - URL completion
+
+    /// Starts a login and a url-mode elicitation that names it, accepts the
+    /// elicitation, and waits for the answer of the agent's call.
+    ///
+    /// - Parameter harness: The harness of the test.
+    /// - Returns: The login, and the accepted elicitation.
+    private func acceptRequestScopedURLElicitation(
+        on harness: LoginHarness
+    ) async throws -> (login: Task<Void, any Error>, accepted: PendingElicitation) {
+        let (login, requestId) = try await harness.startLogin()
+        let call = try await harness.startElicitation(naming: requestId) { scope in
+            ElicitationFixtures.urlRequest(scope: .request(scope))
+        }
+        let pending = try #require(harness.model.pendingElicitations.first)
+        harness.model.acceptElicitation(pending.id)
+        #expect(try await call.value == ElicitationResponseWire.acceptResponse(content: nil))
+        return (login, pending)
+    }
+
+    @Test func anAcceptedRequestScopedUrlElicitationWaitsForItsCompletion() async throws {
+        let harness = await LoginHarness()
+
+        let (login, accepted) = try await acceptRequestScopedURLElicitation(on: harness)
+
+        #expect(harness.model.pendingElicitations.isEmpty)
+        #expect(harness.model.awaitingURLCompletions == [accepted])
+        try await harness.finish(login)
+    }
+
+    @Test func theElicitationCompleteOfTheAgentRemovesTheAwaitingItem() async throws {
+        let harness = await LoginHarness()
+        let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
+
+        try await harness.agentConnection.elicitationComplete(
+            CompleteElicitationNotification(elicitationId: ElicitationFixtures.urlID)
+        )
+
+        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty }
+        try await harness.finish(login)
+    }
+
+    @Test func stopWaitingRemovesTheRequestScopedAwaitingItem() async throws {
+        let harness = await LoginHarness()
+        let (login, accepted) = try await acceptRequestScopedURLElicitation(on: harness)
+
+        harness.model.stopWaiting(accepted.id)
+
+        #expect(harness.model.awaitingURLCompletions.isEmpty)
+        try await harness.finish(login)
+    }
+
+    @Test func theFinishOfItsRequestRemovesTheAwaitingItem() async throws {
+        let harness = await LoginHarness()
+        let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
+
+        try await harness.finish(login)
+
+        try await waitUntil { harness.model.awaitingURLCompletions.isEmpty }
+    }
+
+    @Test func aNewConnectionRemovesEachAwaitingItem() async throws {
+        let harness = await LoginHarness()
+        let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
+        let (clientEnd, _) = InMemoryTransport.pair()
+
+        _ = await harness.model.connect(over: clientEnd)
+
+        #expect(harness.model.awaitingURLCompletions.isEmpty)
+        harness.loginGate.open()
+        _ = try? await login.value
+    }
+
+    @Test func aDisconnectRemovesEachAwaitingItem() async throws {
+        let harness = await LoginHarness()
+        let (login, _) = try await acceptRequestScopedURLElicitation(on: harness)
+
+        await harness.model.disconnect()
+
+        #expect(harness.model.awaitingURLCompletions.isEmpty)
+        harness.loginGate.open()
+        _ = try? await login.value
+    }
+
+    @Test func theConnectionRoutesACompleteToTheAwaitingItemOfASession() async throws {
+        let harness = await LoginHarness()
+        let session = harness.model.makeSessionModel(sessionId: testSession, requestSender: FakeSessionRequestSender())
+        harness.model.register(session)
+        let request = ElicitationFixtures.urlRequest(scope: .session(ElicitationFixtures.sessionScope))
+        let call = Task { await session.awaitElicitation(request) }
+        try await waitUntil { !session.pendingElicitations.isEmpty }
+        session.acceptElicitation(try #require(session.pendingElicitations.first).id)
+        _ = await call.value
+
+        let matched = harness.model.completeElicitation(elicitationId: ElicitationFixtures.urlID)
+
+        #expect(matched)
+        #expect(session.awaitingURLCompletions.isEmpty)
+    }
+
     // MARK: - End of the request
 
     @Test func aSuccessfulLoginRemovesItsElicitationAndTheAgentGetsCancel() async throws {

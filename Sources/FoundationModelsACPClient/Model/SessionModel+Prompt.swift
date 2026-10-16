@@ -101,7 +101,9 @@ extension SessionModel {
     /// notification goes out. Both are cancelled also when the send fails,
     /// because the user asked to stop the work. The request-scoped
     /// elicitations of the ``ConnectionModel`` belong to a client request,
-    /// not to the work of the session, so they stay pending.
+    /// not to the work of the session, so they stay pending. The call also
+    /// stops the wait for each accepted url-mode elicitation of the session
+    /// (``awaitingURLCompletions``), and sends nothing for those.
     ///
     /// The model answers before it sends the notification, but the wire does
     /// not guarantee that the answers go out before `session/cancel`. The
@@ -138,6 +140,7 @@ extension SessionModel {
     public func cancel(meta: JSONValue? = nil) async throws {
         permissions.cancelAll()
         cancelPendingElicitations(reason: ACPClient.clientCancelledReason)
+        awaitingURLCompletions.removeAll()
         let link = TraceContextMeta.extract(from: meta) == nil ? promptTraceMeta : meta
         try await requestSender.cancel(CancelSessionNotification(sessionId: sessionId, meta: meta), linkingTo: link)
     }
