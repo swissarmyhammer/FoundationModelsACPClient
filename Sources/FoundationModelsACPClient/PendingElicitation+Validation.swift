@@ -6,17 +6,36 @@ import Logging
 // The validation bridge of a pending form elicitation: the check of an answer
 // against the requested schema, before the UI sends the answer. The check is
 // the one of FoundationModelsExtras, so a UI that does not import Extras gets
-// the same rules and the same failure text as a tool of the agent.
+// the same rules and the same failure text as a tool of the agent. The issue
+// is a type of this package, so the UI can also show its own localized text.
 
 extension PendingElicitation {
     /// Tells why `content` is not a valid answer to the requested schema of
-    /// this form elicitation.
+    /// this form elicitation, as one English sentence.
+    ///
+    /// This is the ``ValidationIssue/failureText`` of
+    /// ``validationIssue(of:)``, with the same rules and the same `nil`
+    /// cases. A UI that shows localized text uses ``validationIssue(of:)``.
+    ///
+    /// - Parameter content: The form values that the UI is about to send with
+    ///   ``SessionModel/acceptElicitation(_:content:)``, or `nil` for no
+    ///   content.
+    /// - Returns: `nil` when the answer is valid or cannot be checked, or one
+    ///   sentence that names the first field that failed and the rule that it
+    ///   broke.
+    public func validationFailure(of content: JSONValue?) -> String? {
+        validationIssue(of: content)?.failureText
+    }
+
+    /// Tells why `content` is not a valid answer to the requested schema of
+    /// this form elicitation, as data that a UI can localize.
     ///
     /// The bridge decodes the wire schema of the request as the Extras
     /// ``ElicitationRequestedSchema`` (the reverse of the bridge in the
     /// elicitation relay of the agent), decodes `content` as Extras form
-    /// values, and gives the result of
-    /// ``ElicitationRequestedSchema/validationFailure(of:)``.
+    /// values, and maps the result of
+    /// ``ElicitationRequestedSchema/validationIssue(of:)`` to a
+    /// ``ValidationIssue``.
     ///
     /// Extras decodes strictly. When the schema or the content does not
     /// decode, the bridge cannot check the answer: it gives `nil` and writes
@@ -26,21 +45,25 @@ extension PendingElicitation {
     /// - Parameter content: The form values that the UI is about to send with
     ///   ``SessionModel/acceptElicitation(_:content:)``, or `nil` for no
     ///   content.
-    /// - Returns: `nil` when the answer is valid or cannot be checked, or one
-    ///   sentence that names the first field that failed and the rule that it
-    ///   broke.
-    public func validationFailure(of content: JSONValue?) -> String? {
+    /// - Returns: `nil` when the answer is valid or cannot be checked, or the
+    ///   issue of the first field that failed, with the rule that it broke.
+    public func validationIssue(of content: JSONValue?) -> ValidationIssue? {
         guard case .form(let form) = request.mode else { return nil }
         guard let schema = Self.decode(ElicitationRequestedSchema.self, from: form.requestedSchema) else {
             Self.logUncheckedAnswer("the requested schema does not decode as an Extras schema")
             return nil
         }
-        guard let content else { return schema.validationFailure(of: nil) }
-        guard let values = Self.decode([String: ElicitationValue].self, from: content) else {
-            Self.logUncheckedAnswer("the answer does not decode as Extras form values")
-            return nil
+        let values: [String: ElicitationValue]?
+        if let content {
+            guard let decoded = Self.decode([String: ElicitationValue].self, from: content) else {
+                Self.logUncheckedAnswer("the answer does not decode as Extras form values")
+                return nil
+            }
+            values = decoded
+        } else {
+            values = nil
         }
-        return schema.validationFailure(of: values)
+        return schema.validationIssue(of: values).map(ValidationIssue.init)
     }
 
     /// Tells whether `text` has a match of the `pattern` rule of a form field.
