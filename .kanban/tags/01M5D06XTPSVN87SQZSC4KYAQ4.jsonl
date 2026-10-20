@@ -1,0 +1,1 @@
+{"id":"01M5D06XTQ9KNGC8HE3SJ6KBTR","timestamp":"2026-10-20T15:52:19.031180Z","op":"create","item_id":"01M5D06XTPSVN87SQZSC4KYAQ4","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 0075ca\n+tag_name: step-5\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 0075ca\n-tag_name: step-5\n","transaction_id":null}
