@@ -51,6 +51,39 @@ comments:
     - note: the build shows the SwiftPM line "warning: missing creator for mutated node" for the mlx-swift_Cmlx.bundle of a dependency. No source file of this change causes it.
     - next: /review. A follow-up card records the gap of a public pending elicitation on a preview model.
   timestamp: 2026-10-20T19:05:41.590391+00:00
+- actor: claude-code
+  id: 01m5dbjke8k0n1st1z39n2ktc7
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (f7ed2b0). 1 finding, 1 confirmed, 0 refuted. Tests/FoundationModelsACPClientTests/Preview/PreviewRecorderTests.swift:40 (reuse/reuse).
+    - next: implement. Remove `RecorderFixtures.agentChunk(_:)` and use the shared `agentChunk(text:)` fixture. Then test, commit and review again.
+  timestamp: 2026-10-20T19:10:55.944720+00:00
+- actor: claude-code
+  id: 01m5dbjyg5x7s81389p04t143j
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 8 files
+    - test: green — swift test, 662 passed; IntegrationTests, 1 passed
+    - commit: f7ed2b0
+    - review: findings — Tests/FoundationModelsACPClientTests/Preview/PreviewRecorderTests.swift:40
+  timestamp: 2026-10-20T19:11:07.269556+00:00
+- actor: claude-code
+  id: 01m5dbp60ejawpfkxvne8h7dc9
+  text: |-
+    ### Review finding fixed, 2026-10-20
+    - Finding `PreviewRecorderTests.swift:40` `reuse/reuse`: I deleted `RecorderFixtures.agentChunk(_:)` and `RecorderFixtures.agentMessageId`. Nothing else read `agentMessageId`. The three call sites now use the shared `agentChunk(text:)`. There is no wrapper with the same name.
+    - Same cause in the same file, also removed: `promptContent` and the expected value of `twoAppliedChunksFoldAtOnceIntoOneAgentMessage` now use the shared `textBlock(_:)`, not `.text(TextContent(text:))`. The local `RecorderFixtures.allowOption` copied `SessionModelFixtures.allowOption`. I deleted it. The tests now use `SessionModelFixtures.allowOption`. The permission request keeps `SessionModel.previewSessionId`, because the shared `SessionModelFixtures.permissionRequest()` uses `testSession` and two options. That is a different request.
+    - The file still has no `@testable import`. The shared fixtures are internal symbols of the test module, so the file can use them.
+    - `PreviewElicitationRecorderTests.swift` does not have the same duplication. Its `startElicitation(on:)` starts the call with `Task.immediate` and does not wait. No shared fixture does this. I did not change the file.
+    - The rule dump (`dump validators`) was 754 KB, too large to read whole. The finding gives the `reuse` rule word for word, and I used it.
+  timestamp: 2026-10-20T19:12:53.262330+00:00
+- actor: claude-code
+  id: 01m5dbp89bbj3br7cpmkjk323k
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPClientTests/Preview/PreviewRecorderTests.swift. `swift test`: 662 tests in 54 suites passed, 0 failures. The SwiftPM line "warning: missing creator for mutated node" for the mlx-swift_Cmlx.bundle of a dependency shows again. It showed before this change, and no source file causes it. Finding PreviewRecorderTests.swift:40 is now `- [x]`. Not committed.
+    - next: /test, then /commit, then /review.
+  timestamp: 2026-10-20T19:12:55.595091+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'AVK-7 (Step 5): public SessionModel.apply(_:) and a recorder of outgoing requests'
@@ -67,3 +100,15 @@ Agree on the API with the agentviewkit-98 session when it plans AVK-7. `BoardMod
 - [x] `apply(_:)` uses the same merge path as a wire update, so a preview model and a live model show the same transcript.
 - [x] A test builds a model, applies updates, sends a prompt, and reads the recorded `session/prompt` request.
 - [x] The API is agreed with agentviewkit-98 before the implementation. #step-5
+
+## Review Findings (2026-10-20 14:09)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 7 file(s) reviewed, 5 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+> 1 file(s) not reviewed — no validator matched:
+> - `README.md` — no validator matches this file
+
+- [x] `Tests/FoundationModelsACPClientTests/Preview/PreviewRecorderTests.swift:40` `reuse/reuse` — The new static function `RecorderFixtures.agentChunk(_:)` reimplements the shared test fixture `agentChunk(text:message:)`. The shared fixture has the same shape, the same default message id ("agent-1"), and builds the same `.agentMessageChunk` update with a text block. Two copies of this helper can drift apart. The local copy also adds a second, unlabeled `agentChunk(_:)` name for the same capability. Delete `RecorderFixtures.agentChunk(_:)` and the `agentMessageId` constant if nothing else reads it. Call the shared `agentChunk(text:)` at each site instead, for example `model.apply(agentChunk(text: "Hello, "))`. The shared fixture gives the same message id by default, so the tests keep their meaning. Do not keep a static wrapper with the same name, because inside the wrapper an unqualified call would resolve to the wrapper itself.

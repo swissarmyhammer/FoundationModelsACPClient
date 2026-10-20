@@ -13,33 +13,15 @@ private enum RecorderFixtures {
     static let promptText = "Fix the failing test."
 
     /// The content of the prompt of a test.
-    static let promptContent: [ContentBlock] = [.text(TextContent(text: promptText))]
+    static let promptContent: [ContentBlock] = [textBlock(promptText)]
 
-    /// The "allow" option of the test permission request.
-    static let allowOption = PermissionOption(
-        kind: .allowOnce,
-        name: "Allow",
-        optionId: PermissionOptionId(rawValue: "allow")
-    )
-
-    /// The permission request of a preview session.
+    /// The permission request of a preview session, with the shared "allow"
+    /// option.
     static let permissionRequest = RequestPermissionRequest(
-        options: [allowOption],
+        options: [SessionModelFixtures.allowOption],
         sessionId: SessionModel.previewSessionId,
         title: "Run swift test?"
     )
-
-    /// The message id of each agent chunk of a test: all chunks belong to one
-    /// message.
-    static let agentMessageId = MessageId(rawValue: "agent-1")
-
-    /// Makes an `agent_message_chunk` update with one text block.
-    ///
-    /// - Parameter text: The text of the chunk.
-    /// - Returns: The update.
-    static func agentChunk(_ text: String) -> SessionUpdate {
-        .agentMessageChunk(ContentChunk(content: .text(TextContent(text: text)), messageId: agentMessageId))
-    }
 }
 
 @MainActor
@@ -70,12 +52,12 @@ struct PreviewRecorderTests {
     @Test func twoAppliedChunksFoldAtOnceIntoOneAgentMessage() throws {
         let model = SessionModel.preview()
 
-        model.apply(RecorderFixtures.agentChunk("Hello, "))
-        model.apply(RecorderFixtures.agentChunk("world."))
+        model.apply(agentChunk(text: "Hello, "))
+        model.apply(agentChunk(text: "world."))
 
         #expect(model.transcript.count == 1)
         let message = try #require(model.transcript.first?.agentMessageEntry)
-        #expect(message.content == [.text(TextContent(text: "Hello, ")), .text(TextContent(text: "world."))])
+        #expect(message.content == [textBlock("Hello, "), textBlock("world.")])
     }
 
     @Test func anAppliedStateUpdateSetsTheAgentState() {
@@ -91,7 +73,7 @@ struct PreviewRecorderTests {
     @Test func aPromptOfAModelThatCodeBuiltIsRecordedAsTheSessionPromptRequest() async throws {
         let sender = PreviewSessionRequestSender()
         let model = SessionModel.preview(requestSender: sender)
-        model.apply(RecorderFixtures.agentChunk("How can I help?"))
+        model.apply(agentChunk(text: "How can I help?"))
 
         _ = try await model.prompt(RecorderFixtures.promptContent)
 
@@ -123,10 +105,10 @@ struct PreviewRecorderTests {
         let model = SessionModel.preview(pendingPermissions: [RecorderFixtures.permissionRequest], requestSender: sender)
         let pending = try #require(model.pendingPermissions.first)
 
-        await model.selectPermission(pending.id, option: RecorderFixtures.allowOption.optionId)
+        await model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
 
         let selected = RequestPermissionResponse(
-            outcome: .selected(SelectedPermissionOutcome(optionId: RecorderFixtures.allowOption.optionId))
+            outcome: .selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))
         )
         #expect(sender.sent == [.permissionResponse(id: pending.id, response: selected)])
     }
@@ -164,7 +146,7 @@ struct PreviewRecorderTests {
         let mark = ReturnMark()
 
         let call = Task.immediate { @MainActor in
-            await model.selectPermission(pending.id, option: RecorderFixtures.allowOption.optionId)
+            await model.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
             mark.markReturned()
         }
 
