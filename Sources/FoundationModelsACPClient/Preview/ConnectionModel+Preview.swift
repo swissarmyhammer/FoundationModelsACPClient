@@ -28,13 +28,25 @@ extension ConnectionModel {
     ///   - authState: The auth state of the connection.
     ///   - initializeResponse: The `initialize` answer of the agent, or `nil`
     ///     when the connection did not initialize.
+    ///   - pendingElicitations: The request-scoped elicitations that wait for
+    ///     the user's answer, in order. Give requests whose scope names a
+    ///     client request. Each one is in ``pendingElicitations`` when the
+    ///     call returns, with no ``PendingElicitation/requestMethod``,
+    ///     because no client request is in flight in a preview.
+    ///   - recorder: Records the answer to each pending elicitation as
+    ///     ``PreviewSessionRequestSender/Sent/elicitationResponse(id:response:)``
+    ///     in ``PreviewSessionRequestSender/sent``, so a test can read what
+    ///     the user answered. An answer returns at once. The model sends no
+    ///     other message through it.
     /// - Returns: The model.
     public static func preview(
         state: ConnectionState = .connected,
         sessions: [SessionInfo] = [],
         openSessions: [SessionModel] = [],
         authState: AuthState = .unknown,
-        initializeResponse: InitializeResponse? = nil
+        initializeResponse: InitializeResponse? = nil,
+        pendingElicitations: [CreateElicitationRequest] = [],
+        recorder: PreviewSessionRequestSender = PreviewSessionRequestSender()
     ) -> ConnectionModel {
         let model = ConnectionModel(
             coalescingCadence: .zero,
@@ -47,6 +59,12 @@ extension ConnectionModel {
         model.initializeResponse = initializeResponse
         for session in openSessions {
             model.register(session)
+        }
+        model.elicitations.didResolve = { pending, response in
+            recorder.didAnswerElicitation(pending.id, with: response)
+        }
+        for request in pendingElicitations {
+            model.startRequestScopedElicitation(for: request)
         }
         return model
     }

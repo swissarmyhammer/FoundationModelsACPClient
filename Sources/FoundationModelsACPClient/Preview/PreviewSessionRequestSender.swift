@@ -5,7 +5,7 @@ import Observation
 /// A request sender for a preview ``SessionModel``. It never uses the
 /// network, and it never opens a process or a socket.
 ///
-/// Give it to ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:requestSender:)``.
+/// Give it to ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:pendingElicitations:requestSender:)``.
 /// ``SessionModel/prompt(_:meta:)`` then works as it does on a live model:
 /// the transcript shows the prompt at once as a local user message in the
 /// ``SendState/pending`` state, and the answer of this sender sets
@@ -25,6 +25,12 @@ import Observation
 /// _ = try await session.prompt([.text(TextContent(text: "Hello"))])
 /// #expect(sender.sent == [.prompt(PromptRequest(prompt: [.text(TextContent(text: "Hello"))], sessionId: session.sessionId))])
 /// ```
+///
+/// Give a sender also as the `recorder` of
+/// ``ConnectionModel/preview(state:sessions:openSessions:authState:initializeResponse:pendingElicitations:recorder:)``.
+/// It then records the answer to each request-scoped elicitation of the
+/// preview connection in ``sent``, with the same
+/// ``Sent/elicitationResponse(id:response:)`` shape.
 @MainActor @Observable
 public final class PreviewSessionRequestSender: SessionRequestSender {
     /// How the sender answers a `session/prompt` request.
@@ -53,9 +59,11 @@ public final class PreviewSessionRequestSender: SessionRequestSender {
         /// ``SessionModel/pendingPermissions``.
         case permissionResponse(id: PendingPermissionRequest.ID, response: RequestPermissionResponse)
 
-        /// The answer to a pending session-scoped elicitation, as the spec's
-        /// action object. The id is the ``PendingElicitation/id`` of the
-        /// elicitation, as it was in ``SessionModel/pendingElicitations``.
+        /// The answer to a pending elicitation, as the spec's action object.
+        /// The id is the ``PendingElicitation/id`` of the elicitation, as it
+        /// was in ``SessionModel/pendingElicitations``, or in
+        /// ``ConnectionModel/pendingElicitations`` for a request-scoped
+        /// elicitation of a preview connection.
         case elicitationResponse(id: PendingElicitation.ID, response: CreateElicitationResponse)
     }
 

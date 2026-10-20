@@ -4,8 +4,10 @@ import Testing
 @testable import FoundationModelsACPClient
 
 // The tests of the elicitation answers that `PreviewSessionRequestSender`
-// records. The public preview factory makes no pending elicitation, so these
-// tests start one through the internal call of the agent's request.
+// records, and of the response that the agent's call gets. The task of the
+// agent's call is internal, so these tests start the elicitation through the
+// internal `SessionModel.startElicitation(for:)` that the preview factory
+// also uses.
 
 /// Starts one session-scoped form elicitation on a model. The task starts on
 /// the main actor at once, so the elicitation is pending when the call
@@ -15,12 +17,9 @@ import Testing
 /// - Returns: The task of the agent's call.
 @MainActor
 private func startElicitation(on model: SessionModel) -> Task<CreateElicitationResponse, Never> {
-    let request = ElicitationFixtures.formRequest(
-        scope: .session(ElicitationSessionScope(sessionId: model.sessionId))
+    model.startElicitation(
+        for: ElicitationFixtures.formRequest(scope: .session(ElicitationSessionScope(sessionId: model.sessionId)))
     )
-    return Task.immediate { @MainActor in
-        await model.awaitElicitation(request)
-    }
 }
 
 @MainActor

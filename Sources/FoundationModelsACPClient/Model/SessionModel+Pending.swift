@@ -226,6 +226,25 @@ extension SessionModel {
         return response
     }
 
+    /// Starts ``awaitElicitation(_:arrival:)`` for a session-scoped
+    /// elicitation, with no connection, and gives the task of the wait.
+    ///
+    /// The task starts at once on the main actor, so the elicitation is in
+    /// ``pendingElicitations`` when this call returns. The task holds the
+    /// model until a resolution, a cancel of the task, or the close of the
+    /// model answers the elicitation. A preview model starts a pending
+    /// elicitation this way.
+    ///
+    /// - Parameter request: The session-scoped elicitation.
+    /// - Returns: The task, which gives the user's response as the spec's
+    ///   action object.
+    @discardableResult
+    func startElicitation(for request: CreateElicitationRequest) -> Task<CreateElicitationResponse, Never> {
+        Task.immediate { @MainActor in
+            await self.awaitElicitation(request)
+        }
+    }
+
     /// Accepts one pending elicitation.
     ///
     /// For a form-mode elicitation, give the form values as `content`; the

@@ -4,8 +4,9 @@ import Testing
 
 // The tests of a model that code builds with no wire: `SessionModel.apply(_:)`
 // changes it, and `PreviewSessionRequestSender.sent` records what it sends.
-// This file uses only the public API: it has no `@testable import`, so it
-// uses the model as a test of a host app uses it.
+// The same recorder reads the answers to the request-scoped elicitations of a
+// preview `ConnectionModel`. This file uses only the public API: it has no
+// `@testable import`, so it uses the model as a test of a host app uses it.
 
 /// The shared values of the recorder tests.
 private enum RecorderFixtures {
@@ -22,6 +23,17 @@ private enum RecorderFixtures {
         sessionId: SessionModel.previewSessionId,
         title: "Run swift test?"
     )
+
+    /// A form elicitation of the preview session.
+    static let sessionElicitation = ElicitationFixtures.formRequest(
+        scope: .session(ElicitationSessionScope(sessionId: SessionModel.previewSessionId))
+    )
+
+    /// A form elicitation that names the shared client request.
+    static let requestElicitation = ElicitationFixtures.formRequest(scope: .request(ElicitationFixtures.requestScope))
+
+    /// The answer of a declined elicitation, as the spec's action object.
+    static let declinedResponse: CreateElicitationResponse = .object(["action": .string("decline")])
 }
 
 @MainActor
@@ -166,5 +178,55 @@ struct PreviewRecorderTests {
 
         #expect(mark.hasReturned)
         await call.value
+    }
+
+    // MARK: - Pending elicitations of a preview model
+
+    @Test func aPreviewElicitationIsPendingAfterThePreviewPermissions() throws {
+        let model = SessionModel.preview(
+            pendingPermissions: [RecorderFixtures.permissionRequest],
+            pendingElicitations: [RecorderFixtures.sessionElicitation]
+        )
+
+        let permission = try #require(model.pendingPermissions.first)
+        let elicitation = try #require(model.pendingElicitations.first)
+        #expect(elicitation.request == RecorderFixtures.sessionElicitation)
+        #expect(model.pendingRequests == [.permission(permission), .elicitation(elicitation)])
+    }
+
+    @Test func aDeclinedPreviewElicitationIsRecordedWithTheIdOfThePendingElicitation() throws {
+        let sender = PreviewSessionRequestSender()
+        let model = SessionModel.preview(pendingElicitations: [RecorderFixtures.sessionElicitation], requestSender: sender)
+        let pending = try #require(model.pendingElicitations.first)
+
+        model.declineElicitation(pending.id)
+
+        #expect(model.pendingElicitations.isEmpty)
+        #expect(sender.sent == [.elicitationResponse(id: pending.id, response: RecorderFixtures.declinedResponse)])
+    }
+
+    // MARK: - Pending request-scoped elicitations of a preview connection
+
+    @Test func aPreviewConnectionHoldsEachElicitationAsRequestScoped() throws {
+        let connection = ConnectionModel.preview(pendingElicitations: [RecorderFixtures.requestElicitation])
+
+        let pending = try #require(connection.pendingElicitations.first)
+        #expect(pending.request == RecorderFixtures.requestElicitation)
+        #expect(pending.requestId == ElicitationFixtures.requestScope.requestId)
+        #expect(connection.pendingRequests == [.elicitation(pending)])
+    }
+
+    @Test func aDeclinedPreviewConnectionElicitationIsRecordedInTheRecorder() throws {
+        let recorder = PreviewSessionRequestSender()
+        let connection = ConnectionModel.preview(
+            pendingElicitations: [RecorderFixtures.requestElicitation],
+            recorder: recorder
+        )
+        let pending = try #require(connection.pendingElicitations.first)
+
+        connection.declineElicitation(pending.id)
+
+        #expect(connection.pendingElicitations.isEmpty)
+        #expect(recorder.sent == [.elicitationResponse(id: pending.id, response: RecorderFixtures.declinedResponse)])
     }
 }

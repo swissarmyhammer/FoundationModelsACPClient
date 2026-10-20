@@ -3,7 +3,7 @@ import FoundationModelsACP
 
 /// One transcript entry of a preview ``SessionModel``, as a simple value.
 ///
-/// ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:requestSender:)``
+/// ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:pendingElicitations:requestSender:)``
 /// makes each item into the session update that an agent sends for it, and
 /// gives that update to the merge engine that a live model uses. Thus a
 /// preview shows the real state of each entry. An ``error(code:message:)``

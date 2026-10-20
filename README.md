@@ -85,6 +85,23 @@ _ = try await session.prompt(prompt)
 #expect(sender.sent == [.prompt(PromptRequest(prompt: prompt, sessionId: session.sessionId))])
 ```
 
+`SessionModel.preview(pendingPermissions:pendingElicitations:)` makes pending
+requests. Each one is in `pendingRequests`, in the given order, and the
+elicitations come after the permission requests. An answer records
+`.permissionResponse(id:response:)` or `.elicitationResponse(id:response:)`
+in `sent`, and returns at once. `ConnectionModel.preview` takes
+`pendingElicitations` too: each one is a request-scoped elicitation in
+`connection.pendingElicitations`. Give a `PreviewSessionRequestSender` as its
+`recorder` to read the answers:
+
+```swift
+let recorder = PreviewSessionRequestSender()
+let connection = ConnectionModel.preview(pendingElicitations: [signIn], recorder: recorder)
+let pending = connection.pendingElicitations[0]
+connection.declineElicitation(pending.id)
+#expect(recorder.sent == [.elicitationResponse(id: pending.id, response: .object(["action": .string("decline")]))])
+```
+
 ## Install
 
 Add the package to the dependencies in your `Package.swift`:

@@ -115,6 +115,28 @@ extension ConnectionModel {
         return response
     }
 
+    /// Starts the wait of a request-scoped elicitation with no connection,
+    /// and gives the task of the wait.
+    ///
+    /// The task starts at once on the main actor, so the elicitation is in
+    /// ``pendingElicitations`` when this call returns. No client request is
+    /// in flight, so the elicitation has no
+    /// ``PendingElicitation/requestMethod``, and no finish of a request
+    /// cancels it. The task holds the model until a resolution or a cancel
+    /// of the task answers the elicitation. A preview model starts a pending
+    /// request-scoped elicitation this way.
+    ///
+    /// - Parameter request: The request-scoped elicitation.
+    /// - Returns: The task, which gives the user's response as the spec's
+    ///   action object.
+    @discardableResult
+    func startRequestScopedElicitation(for request: CreateElicitationRequest) -> Task<CreateElicitationResponse, Never> {
+        let pending = PendingElicitation(id: UUID(), request: request)
+        return Task.immediate { @MainActor in
+            await self.elicitations.awaitResponse(to: pending).response
+        }
+    }
+
     /// Removes one record from ``withdrawnRequests``, for example when the
     /// user closes it. A call with an unknown or already dismissed id changes
     /// nothing.

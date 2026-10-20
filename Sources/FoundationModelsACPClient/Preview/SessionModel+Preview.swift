@@ -52,6 +52,12 @@ extension SessionModel {
     ///   - pendingPermissions: The permission requests that wait for the
     ///     user's answer, in order. Each one is in ``pendingPermissions``
     ///     when the call returns.
+    ///   - pendingElicitations: The session-scoped elicitations that wait for
+    ///     the user's answer, in order. Each one is in ``pendingElicitations``
+    ///     when the call returns, and comes after the permission requests in
+    ///     ``pendingRequests``. An answer records
+    ///     ``PreviewSessionRequestSender/Sent/elicitationResponse(id:response:)``
+    ///     in `requestSender`, and returns at once.
     ///   - requestSender: The sender of the requests of the session.
     /// - Returns: The model.
     public static func preview(
@@ -62,6 +68,7 @@ extension SessionModel {
         configOptions: [SessionConfigOption]? = nil,
         mcpServers: [MCPServer] = [],
         pendingPermissions: [RequestPermissionRequest] = [],
+        pendingElicitations: [CreateElicitationRequest] = [],
         requestSender: PreviewSessionRequestSender = PreviewSessionRequestSender()
     ) -> SessionModel {
         let model = SessionModel(
@@ -79,6 +86,9 @@ extension SessionModel {
         }
         for request in pendingPermissions {
             model.startPermissionDecision(for: request)
+        }
+        for request in pendingElicitations {
+            model.startElicitation(for: request)
         }
         return model
     }
