@@ -84,8 +84,24 @@ comments:
     - evidence: 1 file — Tests/FoundationModelsACPClientTests/Preview/PreviewRecorderTests.swift. `swift test`: 662 tests in 54 suites passed, 0 failures. The SwiftPM line "warning: missing creator for mutated node" for the mlx-swift_Cmlx.bundle of a dependency shows again. It showed before this change, and no source file causes it. Finding PreviewRecorderTests.swift:40 is now `- [x]`. Not committed.
     - next: /test, then /commit, then /review.
   timestamp: 2026-10-20T19:12:55.595091+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5dbrqehwd07savy5rfbyz43
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 963fc3b). 1 file reviewed. 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. The prior finding at `PreviewRecorderTests.swift:40` (`reuse/reuse`) is checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-20T19:14:16.657053+00:00
+- actor: claude-code
+  id: 01m5dbrz75xtgbynn3v7qen6r0
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (PreviewRecorderTests.swift)
+    - test: green — swift test, 662 passed
+    - commit: 963fc3b
+    - review: clean — 0 findings; the prior finding is checked
+  timestamp: 2026-10-20T19:14:24.613229+00:00
+position_column: done
+position_ordinal: ff9580
 title: 'AVK-7 (Step 5): public SessionModel.apply(_:) and a recorder of outgoing requests'
 ---
 Source: decision D105 (h) in ../TestudoApp/features/decisions.md. The request came from the testudoapp-4c session on 2026-10-20. Do not start it now. It is Step 5 work.
