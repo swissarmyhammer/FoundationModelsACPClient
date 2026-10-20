@@ -45,4 +45,52 @@ protocol SessionRequestSender: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on a
     ///   disconnect or a timeout.
     func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws
+
+    /// Gets the answer that the model gave to one pending permission request.
+    ///
+    /// The model calls it when a resolution removes the request from
+    /// ``SessionModel/pendingPermissions``: a selection, a cancel of the
+    /// request, or a cancel of the work. The answer goes to the agent as the
+    /// return value of its request, and not through this sender, so the
+    /// default implementation does nothing. A sender with no connection can
+    /// record the answer here.
+    ///
+    /// - Parameters:
+    ///   - id: The local id of the pending request.
+    ///   - response: The answer of the model.
+    @MainActor
+    func didAnswerPermission(_ id: PendingPermissionRequest.ID, with response: RequestPermissionResponse)
+
+    /// Gets the answer that the model gave to one pending session-scoped
+    /// elicitation.
+    ///
+    /// The model calls it when a resolution removes the elicitation from
+    /// ``SessionModel/pendingElicitations``. As for a permission answer, the
+    /// default implementation does nothing.
+    ///
+    /// - Parameters:
+    ///   - id: The local id of the pending elicitation.
+    ///   - response: The answer of the model, as the spec's action object.
+    @MainActor
+    func didAnswerElicitation(_ id: PendingElicitation.ID, with response: CreateElicitationResponse)
+}
+
+extension SessionRequestSender {
+    /// Does nothing: the connection sends the answer as the return value of
+    /// the request of the agent.
+    ///
+    /// - Parameters:
+    ///   - id: The local id of the pending request; not used.
+    ///   - response: The answer of the model; not used.
+    @MainActor
+    func didAnswerPermission(_ id: PendingPermissionRequest.ID, with response: RequestPermissionResponse) {}
+
+    /// Does nothing: the connection sends the answer as the return value of
+    /// the request of the agent.
+    ///
+    /// - Parameters:
+    ///   - id: The local id of the pending elicitation; not used.
+    ///   - response: The answer of the model; not used.
+    @MainActor
+    func didAnswerElicitation(_ id: PendingElicitation.ID, with response: CreateElicitationResponse) {}
 }

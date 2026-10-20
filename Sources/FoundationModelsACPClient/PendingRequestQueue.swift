@@ -47,6 +47,14 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// and each cancellation, or `nil` to tell nobody.
     @ObservationIgnored var didRemove: (@MainActor (UUID) -> Void)?
 
+    /// Gets each item that a resolution of this queue removed, with the
+    /// response that its call resumes with, or `nil` to tell nobody.
+    ///
+    /// ``resolve(_:with:)``, ``cancel(_:)`` and ``cancelAll()`` call it. A
+    /// cancel of the task of the call does not call it: the queue gives no
+    /// response then, and the call returns the cancelled response itself.
+    @ObservationIgnored var didResolve: (@MainActor (Item, Response) -> Void)?
+
     /// The response for an item that the user did not decide.
     @ObservationIgnored private let cancelledResponse: Response
 
@@ -121,7 +129,7 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// Removes one item and resumes its call with the response.
     ///
     /// An unknown or already resolved id changes nothing, so no call resumes
-    /// two times.
+    /// two times. A removed item and its response go to ``didResolve``.
     ///
     /// - Parameters:
     ///   - id: The id of the item.
@@ -129,8 +137,9 @@ final class PendingRequestQueue<Item: Identifiable & Sendable, Response: Sendabl
     /// - Returns: The removed item, or `nil` when nothing changed.
     @discardableResult
     func resolve(_ id: UUID, with response: Response) -> Item? {
-        guard calls.resumeFirst(of: id, with: response) else { return nil }
-        return removeItem(id)
+        guard calls.resumeFirst(of: id, with: response), let removed = removeItem(id) else { return nil }
+        didResolve?(removed, response)
+        return removed
     }
 
     /// Cancels one item and resumes its call with the cancelled response.

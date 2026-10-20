@@ -71,6 +71,20 @@ models. `prompt(_:meta:)` on a preview model adds the user message and gets
 an answer from `PreviewSessionRequestSender`, so its `sendState` changes as
 it does in a live model.
 
+`apply(_:)` gives one `SessionUpdate` to a model with no wire, on the same
+path as an update of the agent. `PreviewSessionRequestSender.sent` records
+each message that the model sends, in send order: prompts, cancels, config
+changes, and the answers to permission requests and elicitations. A test can
+thus check what a Send button sent:
+
+```swift
+let sender = PreviewSessionRequestSender()
+let session = SessionModel.preview(requestSender: sender)
+let prompt: [ContentBlock] = [.text(TextContent(text: "Fix the test."))]
+_ = try await session.prompt(prompt)
+#expect(sender.sent == [.prompt(PromptRequest(prompt: prompt, sessionId: session.sessionId))])
+```
+
 ## Install
 
 Add the package to the dependencies in your `Package.swift`:

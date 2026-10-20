@@ -267,6 +267,12 @@ public final class SessionModel: Identifiable {
     /// permission response, keyed by the id of the request.
     @ObservationIgnored let permissionWrites = ResponseWriteWaiters()
 
+    /// The ids of the pending permission requests that have no connection,
+    /// for example the requests of a preview model. No connection writes
+    /// their response, so ``selectPermission(_:option:)`` and
+    /// ``cancelPermission(_:)`` do not wait for a write of them.
+    @ObservationIgnored var permissionsWithNoConnection: Set<PendingPermissionRequest.ID> = []
+
     /// The pending session-scoped elicitations and the continuation of each
     /// one. The queue is observable, so a read of ``pendingElicitations``
     /// tracks it.
@@ -384,6 +390,12 @@ public final class SessionModel: Identifiable {
         }
         permissions.didRemove = clearFront
         elicitations.didRemove = clearFront
+        permissions.didResolve = { pending, response in
+            requestSender.didAnswerPermission(pending.id, with: response)
+        }
+        elicitations.didResolve = { pending, response in
+            requestSender.didAnswerElicitation(pending.id, with: response)
+        }
     }
 
     /// Makes a function that gives the time on a clock from now to the call.
@@ -410,15 +422,28 @@ public final class SessionModel: Identifiable {
 
     /// Receives one `session/update`.
     ///
+    /// Each update of the wire comes through this call, so an update that
+    /// code gives here changes the model as the same update from the agent
+    /// does. A preview model or a test can thus build a session with no
+    /// wire, and it shows the transcript that a live model shows:
+    ///
+    /// ```swift
+    /// let session = SessionModel.preview()
+    /// let hello = ContentChunk(content: .text(TextContent(text: "Hello")), messageId: MessageId(rawValue: "m-1"))
+    /// session.apply(.agentMessageChunk(hello))
+    /// ```
+    ///
     /// Each ``updateTap()`` stream gets the update at once. The update then
     /// goes to the shared ``ChunkCoalescer``: a coalescible chunk goes into
     /// the buffer, which flushes on the cadence, and any other update flushes
     /// the buffer first and then folds, so the applied order is the arrival
-    /// order. A closed model ignores the update. While a replay that asks
-    /// for a replay runs, the update adds 1 to ``replayedUpdateCount``.
+    /// order. A preview model has no cadence, so each update folds before
+    /// this call returns. A closed model ignores the update. While a replay
+    /// that asks for a replay runs, the update adds 1 to
+    /// ``replayedUpdateCount``.
     ///
     /// - Parameter update: The update to receive.
-    func apply(_ update: SessionUpdate) {
+    public func apply(_ update: SessionUpdate) {
         guard !isClosed else { return }
         if isReplayingHistory {
             replayedUpdateCount += 1

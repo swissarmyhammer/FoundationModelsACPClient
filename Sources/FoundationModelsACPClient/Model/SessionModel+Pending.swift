@@ -76,7 +76,9 @@ extension SessionModel {
     ///
     /// After the decision, the model gives the "written" signal of the
     /// request to `afterResponse`. ``selectPermission(_:option:)`` and
-    /// ``cancelPermission(_:)`` return only after that signal.
+    /// ``cancelPermission(_:)`` return only after that signal. A request
+    /// with no `afterResponse` has no connection that writes its response,
+    /// so those two calls return at once for it.
     ///
     /// - Parameters:
     ///   - request: The permission request from the agent.
@@ -84,8 +86,8 @@ extension SessionModel {
     ///     position in ``pendingRequests``, or `nil` with no connection; see
     ///     `PendingRequestQueue.awaitResponse(to:arrival:)`.
     ///   - afterResponse: Registers the "written" signal of the response, or
-    ///     `nil` to give the signal at once, for example in a unit test with
-    ///     no connection.
+    ///     `nil` when no connection writes the response, for example in a
+    ///     preview model or in a unit test with no connection.
     /// - Returns: The user's decision, or the `cancelled` outcome.
     func awaitPermissionDecision(
         for request: RequestPermissionRequest,
@@ -94,13 +96,13 @@ extension SessionModel {
     ) async -> RequestPermissionResponse {
         let pending = PendingPermissionRequest(id: UUID(), request: request)
         let id = pending.id
+        if afterResponse == nil {
+            permissionsWithNoConnection.insert(id)
+        }
+        defer { permissionsWithNoConnection.remove(id) }
         let (response, cancelledByTask) = await permissions.awaitResponse(to: pending, arrival: arrival)
         recordWithdrawal(of: .permission(pending), cancelledByTask: cancelledByTask)
-        guard let afterResponse else {
-            permissionWrites.signal(id)
-            return response
-        }
-        afterResponse(responseWrittenSignal(for: id))
+        afterResponse?(responseWrittenSignal(for: id))
         return response
     }
 
@@ -130,8 +132,10 @@ extension SessionModel {
     /// returns when the connection gave the response to the transport, so a
     /// request that the caller sends after this call goes on the wire after
     /// the response. When the connection closes before it writes the
-    /// response, the call returns too. A call with an unknown or already
-    /// resolved id changes nothing and returns at once.
+    /// response, the call returns too. No connection writes the response of
+    /// a request of a preview model, so the call returns at once for it. A
+    /// call with an unknown or already resolved id changes nothing and
+    /// returns at once.
     ///
     /// - Parameters:
     ///   - id: The id of the pending request.
@@ -159,9 +163,10 @@ extension SessionModel {
     /// caller resolved.
     ///
     /// - Parameter resolved: The request that the caller resolved, or `nil`
-    ///   when the call resolved nothing. A `nil` request returns at once.
+    ///   when the call resolved nothing. A `nil` request, and a request with
+    ///   no connection, return at once.
     private func waitUntilWritten(_ resolved: PendingPermissionRequest?) async {
-        guard let resolved else { return }
+        guard let resolved, !permissionsWithNoConnection.contains(resolved.id) else { return }
         permissionWrites.expect(resolved.id)
         await permissionWrites.waitUntilWritten(resolved.id)
     }
