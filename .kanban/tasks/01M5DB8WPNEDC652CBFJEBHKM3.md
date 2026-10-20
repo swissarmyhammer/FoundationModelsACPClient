@@ -41,8 +41,24 @@ comments:
     - note: the pre-existing SwiftPM line "warning: missing creator for mutated node" (dependency MLX bundle) is recorded on ^kc2d71h.
     - next: /review.
   timestamp: 2026-10-20T20:56:09.168573+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5dhs04znt7jtj5j5by1y783
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 693e69c). Counts: 0 findings, 0 confirmed, 1 refuted, 7 attempted, 0 failed. The ignore rule (.reviewignore) excluded 4 .kanban files. No validator matched README.md. The task has no prior Review Findings section.
+    - next: none. The task is in done.
+  timestamp: 2026-10-20T20:59:17.023447+00:00
+- actor: claude-code
+  id: 01m5dhs71ekpejsx7n21s2yp4a
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 9 files
+    - test: green — swift test, 666 passed; IntegrationTests, 1 passed
+    - commit: 693e69c
+    - review: clean — 0 findings
+  timestamp: 2026-10-20T20:59:24.078971+00:00
+position_column: done
+position_ordinal: ff9680
 title: 'Preview: a public way to make a pending elicitation on a preview SessionModel'
 ---
 Found during ^yvrk73p (AVK-7).
