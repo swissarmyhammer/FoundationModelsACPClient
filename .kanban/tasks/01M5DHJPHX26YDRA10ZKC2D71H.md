@@ -52,8 +52,17 @@ comments:
     - review: not run
     - next: a person must choose. A: move the MLX parts of FoundationModelsExtras into a separate product. B: report the bug to swiftlang/swift-build. C: accept the warning again and close this card.
   timestamp: 2026-10-20T21:02:22.537006+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5e72ra0d59pyrs48nwtgyse
+  text: |-
+    ### decision — resolved
+    - The user said: "allow that warning and resolve the issue" (2026-10-20).
+    - The warning "missing creator for mutated node" for mlx-swift_Cmlx.bundle is allowed. A test run with only this warning is green. Any other warning is still red.
+    - The cause is upstream (Swift Build and `.metal` resources). No code change in this package.
+    - next: none. The card goes to done.
+  timestamp: 2026-10-21T03:11:36.768773+00:00
+position_column: done
+position_ordinal: ff9780
 title: The SwiftPM warning "missing creator for mutated node" for mlx-swift_Cmlx.bundle came back
 ---
 Found during ^jebhkm3.
@@ -65,5 +74,5 @@ Found during ^jebhkm3.
 The card 01M3Z8M7YKRR5TQ5NRPZWS9QZT removed this warning before. It is in `done`, but the warning is in the build again. The cards ^yvrk73p and ^jebhkm3 record it too. No source file of this package causes it: the MLX bundle comes from a dependency (FoundationModelsExtras).
 
 ## Acceptance criteria
-- [ ] Find which dependency revision brought the warning back.
-- [ ] `swift build`, `swift test` and `swift build --build-tests --package-path IntegrationTests` show zero warnings.
+- [x] Find the cause of the warning. The Swift Build engine (the default build system in Swift 6.4) shows it for each target with `.metal` resources. The `Cmlx` target of mlx-swift 0.32.3 has them. No dependency revision of this package can remove it.
+- [x] The user decision on 2026-10-20: the warning is allowed. `swift build`, `swift test` and `swift build --build-tests --package-path IntegrationTests` must show zero warnings other than this one.
