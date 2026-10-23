@@ -30,8 +30,25 @@ comments:
     - evidence: 5 files — Sources/FoundationModelsACPClient/InProcessAgent.swift (new), Tests/FoundationModelsACPClientTests/InProcessAgentTests.swift (new), Tests/FoundationModelsACPClientTests/TransportTestSupport.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTests.swift, README.md. `swift build`: Build complete, only the allowed MLX "missing creator for mutated node" warning. `swift test --filter InProcessAgentTests`: 4 tests passed. `swift test`: 670 tests in 55 suites passed, 0 failed, 0 skipped.
     - next: /review. After commit: send the result to kanbanviewkit-fb, and make the AgentViewKit follow-up (delete its InProcessAgent copy and test).
   timestamp: 2026-10-23T16:24:02.627571+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5msftj82tc2yjxyp9qp5rnf
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (6395cca). 0 findings, 0 confirmed, 0 refuted. 7 files attempted, 0 failed. The engine reviewed 4 files. It did not review README.md (no validator matches it) or the 2 .kanban files (.reviewignore).
+    - next: The task is in done. One acceptance item stays open, and it is not a review finding: "Send the result to the session kanbanviewkit-fb when done." The AgentViewKit note also stays open: make a card on the AgentViewKit board to delete its copy of InProcessAgent, or tell the user.
+  timestamp: 2026-10-23T16:28:46.024126+00:00
+- actor: claude-code
+  id: 01m5msg2xbfe0az59zngw28s5w
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 5 files
+    - test: green — swift test 670 passed; IntegrationTests 1 passed
+    - commit: 6395cca
+    - review: clean — 0 findings
+    - next: push main, send the sha to kanbanviewkit-fb. AgentViewKit must delete its copy (no AgentViewKit session runs now).
+  timestamp: 2026-10-23T16:28:54.571390+00:00
+position_column: done
+position_ordinal: ff9880
 title: Move InProcessAgent from AgentViewKit into FoundationModelsACPClient
 ---
 ## Source
