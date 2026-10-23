@@ -54,8 +54,25 @@ comments:
     - evidence: 1 source file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/GraphQLTunnelTests.swift (doc comment only), plus the finding checkbox on this card. `swift test --package-path IntegrationTests --no-parallel`: 7 tests in 2 suites passed, 0 failures; the only warning is the allowed mlx-swift_Cmlx.bundle "missing creator for mutated node".
     - next: /review. Then send the result to session kanbanviewkit-fb (the last acceptance box).
   timestamp: 2026-10-23T17:03:49.296942+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5mvhmz1mc8dswgnasy3btpk
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (eb1dee4). 0 findings, 0 confirmed, 0 refuted. 7 validator runs attempted, 0 failed. 1 file reviewed (GraphQLTunnelTests.swift). The prior finding on GraphQLTunnelTests.swift (`reuse/reuse`, copy of `collect`) is checked. The doc comment tells why the two packages keep two copies.
+    - next: The task moved to done. The acceptance item "Send the result to the session kanbanviewkit-fb when done" is not checked. That item is not a review finding.
+  timestamp: 2026-10-23T17:04:42.977055+00:00
+- actor: claude-code
+  id: 01m5mvhwyz1zyps40yk6dh5pam
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (doc comment only)
+    - test: green — IntegrationTests 7 passed (main package not changed)
+    - commit: eb1dee4
+    - review: clean — 0 findings; prior finding checked
+    - next: push main, send the sha to kanbanviewkit-fb.
+  timestamp: 2026-10-23T17:04:51.167146+00:00
+position_column: done
+position_ordinal: ff9980
 title: SAHGraphQLClient over a real ACP connection (ACPC-6)
 ---
 ## Source
