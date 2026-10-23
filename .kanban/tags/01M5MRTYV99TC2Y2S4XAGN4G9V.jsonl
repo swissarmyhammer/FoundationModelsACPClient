@@ -1,0 +1,1 @@
+{"id":"01M5MRTYVAPVX7NA2XGAVHD6GK","timestamp":"2026-10-23T16:17:22.282374Z","op":"create","item_id":"01M5MRTYV99TC2Y2S4XAGN4G9V","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 7057ff\n+tag_name: graphql\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 7057ff\n-tag_name: graphql\n","transaction_id":null}

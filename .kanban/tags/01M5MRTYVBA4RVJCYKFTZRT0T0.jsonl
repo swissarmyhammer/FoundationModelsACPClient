@@ -1,0 +1,1 @@
+{"id":"01M5MRTYVBXSXN6CZCDY4B00C7","timestamp":"2026-10-23T16:17:22.283743Z","op":"create","item_id":"01M5MRTYVBA4RVJCYKFTZRT0T0","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: e36209\n+tag_name: kanbanviewkit\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: e36209\n-tag_name: kanbanviewkit\n","transaction_id":null}
