@@ -57,14 +57,6 @@ extension ConnectionState {
     }
 }
 
-extension ConnectionCloseReason {
-    /// Whether the input stream of the transport finished.
-    fileprivate var isEndOfInput: Bool {
-        guard case .endOfInput = self else { return false }
-        return true
-    }
-}
-
 /// A transport whose byte stream fails when the test calls ``fail(with:)``.
 ///
 /// A write goes nowhere: the tests of this file send no request.

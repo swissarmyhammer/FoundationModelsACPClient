@@ -57,6 +57,17 @@ func waitForIdle(of session: SessionModel, sourceLocation: SourceLocation = #_so
     )
 }
 
+extension ConnectionCloseReason {
+    /// Whether the input stream of the transport finished.
+    ///
+    /// `ConnectionCloseReason` is not `Equatable`, because a transport failure
+    /// holds `any Error`, so a test reads the case with this property.
+    var isEndOfInput: Bool {
+        guard case .endOfInput = self else { return false }
+        return true
+    }
+}
+
 /// Makes the initialize request the transport tests send.
 ///
 /// - Returns: The request, with this package's version and capabilities.

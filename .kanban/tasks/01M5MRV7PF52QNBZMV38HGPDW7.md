@@ -1,8 +1,37 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8180'
+comments:
+- actor: claude-code
+  id: 01m5ms2bxt3vbe2h9yb6twanan
+  text: |-
+    Research done.
+    - AgentViewKit sets defaultIsolation(MainActor) on its targets, so its InProcessAgent is @MainActor by default. This package has no default isolation, and ConnectionModel is @MainActor. The port marks InProcessAgent @MainActor to keep the same behavior for the callers.
+    - The ComposedAgent example of the doc comment is still correct: ComposedAgent.compose(name:workingDirectory:home:), agent(boundTo:), waitForConnectionTeardown() and AgentHome.makeCustom(synced:local:) exist in FoundationModelsACPAgent now.
+    - Test helpers for the port: ScriptedStubAgent (agent), ThreadSafeBuffer (keeps the AgentSideConnection that the factory gets), waitUntil(_:orFailWhen:) (no clock, no poll), makeInitializeRequest(), agentChunk(text:message:), idleState(stopReason:).
+    - ConnectionModelTests has a fileprivate ConnectionCloseReason.isEndOfInput. The new test needs it too, so the extension moves to TransportTestSupport.swift to prevent a copy.
+    - ConnectionModelTests.disconnectEndsAnInProcessAgent already proves the endOfInput close for a hand-made pair; the new tests prove it through the helper.
+  timestamp: 2026-10-23T16:21:25.050928+00:00
+- actor: claude-code
+  id: 01m5ms72v3vzc0eph6ks8kmd4y
+  text: |-
+    Implementation landed (TDD).
+    - RED: `swift test --filter InProcessAgentTests` failed to compile with "cannot find 'InProcessAgent' in scope" and no other error.
+    - GREEN: Sources/FoundationModelsACPClient/InProcessAgent.swift. Same name and signature as AgentViewKit. The enum is @MainActor, because AgentViewKit has a MainActor default isolation and ConnectionModel is @MainActor. The doc comment has no "plan.md §3.9", no "The kit does not import an agent package", and no makeAgentViewKitRequest link. The example has a plain InitializeRequest step.
+    - Tests: Tests/FoundationModelsACPClientTests/InProcessAgentTests.swift has the four cases. The agent is ScriptedStubAgent. A ThreadSafeBuffer keeps the AgentSideConnection in place of AgentConnectionBox. waitUntil(_:orFailWhen:) replaces ObservationWait. No sleep, clock wait, poll or .timeLimit.
+    - ConnectionCloseReason.isEndOfInput moved from a fileprivate extension in ConnectionModelTests.swift to TransportTestSupport.swift, so the two test files share one copy.
+    - README.md: the in-process paragraph now names InProcessAgent.makeConnection(serving:), with an example.
+    - Still open after review and commit: the acceptance item "Send the result to the session kanbanviewkit-fb when done", and the AgentViewKit follow-up (delete its copy and its test). This step did not edit AgentViewKit and did not make a card on its board; the user gets the note.
+  timestamp: 2026-10-23T16:23:59.587410+00:00
+- actor: claude-code
+  id: 01m5ms75t3ybkv8qpee6wp3t4c
+  text: |-
+    ### implement — changed
+    - evidence: 5 files — Sources/FoundationModelsACPClient/InProcessAgent.swift (new), Tests/FoundationModelsACPClientTests/InProcessAgentTests.swift (new), Tests/FoundationModelsACPClientTests/TransportTestSupport.swift, Tests/FoundationModelsACPClientTests/Model/ConnectionModelTests.swift, README.md. `swift build`: Build complete, only the allowed MLX "missing creator for mutated node" warning. `swift test --filter InProcessAgentTests`: 4 tests passed. `swift test`: 670 tests in 55 suites passed, 0 failed, 0 skipped.
+    - next: /review. After commit: send the result to kanbanviewkit-fb, and make the AgentViewKit follow-up (delete its InProcessAgent copy and test).
+  timestamp: 2026-10-23T16:24:02.627571+00:00
+position_column: doing
+position_ordinal: '80'
 title: Move InProcessAgent from AgentViewKit into FoundationModelsACPClient
 ---
 ## Source
@@ -23,10 +52,10 @@ Request from the KanbanViewKit session (../KanbanViewKit/plan.md §3.3, §7.3, �
 
 Port ../AgentViewKit/Tests/AgentViewKitTests/ACP/InProcessAgentTests.swift. That test uses AgentViewKit helpers (`InMemoryDemoACPAgent`, `AgentConnectionBox`, `ObservationWait`, `agentMessageText`). Use the test helpers of this package in their place (for example Tests/FoundationModelsACPClientTests/Model/ConnectedModel.swift and RawBurstAgent.swift), or add a small test agent. Keep the four cases:
 
-- [ ] The returned model is connected.
-- [ ] A prompt round trip puts the reply of the agent in the transcript.
-- [ ] The state of the model becomes disconnected after the agent closes.
-- [ ] A disconnect of the model closes the agent side with `endOfInput`.
+- [x] The returned model is connected.
+- [x] A prompt round trip puts the reply of the agent in the transcript.
+- [x] The state of the model becomes disconnected after the agent closes.
+- [x] A disconnect of the model closes the agent side with `endOfInput`.
 
 ## Note for AgentViewKit (do not edit AgentViewKit here)
 
@@ -34,7 +63,7 @@ After this card is done, AgentViewKit must delete its copy (Sources/AgentViewKit
 
 ## Acceptance
 
-- [ ] Public `InProcessAgent` in FoundationModelsACPClient, same name and signature.
-- [ ] Ported tests pass.
-- [ ] README mentions the helper.
+- [x] Public `InProcessAgent` in FoundationModelsACPClient, same name and signature.
+- [x] Ported tests pass.
+- [x] README mentions the helper.
 - [ ] Send the result to the session kanbanviewkit-fb when done. #kanbanviewkit

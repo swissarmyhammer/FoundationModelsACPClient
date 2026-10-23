@@ -46,8 +46,20 @@ Each item of `transcript` is a `TranscriptEntry` with a stable `id`, so a
 SwiftUI `ForEach` can key on it. A streamed chunk changes only the object of
 its own entry, so a view redraws only that row.
 
-For an agent in the same process, make a transport pair with
-`InMemoryTransport.pair()` and connect over the client end.
+For an agent in the same process, `InProcessAgent.makeConnection(serving:)`
+connects a new `ConnectionModel` to it over the real ACP wire. The helper
+makes an `InMemoryTransport.pair()`, serves your `Agent` on the agent end, and
+returns the model, connected and not initialized:
+
+```swift
+let model = await InProcessAgent.makeConnection { connection in
+    MyAgent(connection: connection)
+}
+```
+
+`model.disconnect()` ends the input of the agent side, as it ends an agent
+process. When the agent closes its side first, the state of the model becomes
+`.disconnected`.
 
 ## Previews
 
