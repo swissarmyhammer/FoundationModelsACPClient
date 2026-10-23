@@ -106,6 +106,16 @@ private struct TunnelAgent {
 
 /// Reads each element of a stream until it ends.
 ///
+/// This function is a copy of `collect` in
+/// `Tests/FoundationModelsACPClientTests/GraphQL/SAHGraphQLClientConnectionTests.swift`
+/// of the root package. If you change one copy, change the other copy also.
+/// The two test targets cannot share one function. This package gets only the
+/// library product and the ACP wire from the root package, and a test target
+/// cannot be a dependency of another package. A shared function must thus go
+/// into the library as public API, or into a new test-support product. The
+/// library does not keep test helpers, and a new product changes the package
+/// boundary. Thus each test target keeps its own copy.
+///
 /// - Parameter stream: The stream.
 /// - Returns: The elements, and the error that ended the stream, or `nil` for
 ///   a normal finish.
