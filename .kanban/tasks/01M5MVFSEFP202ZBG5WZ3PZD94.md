@@ -17,8 +17,24 @@ comments:
     - evidence: 4 files — Tests/FoundationModelsACPClientTests/AsyncThrowingStreamCollection.swift (new), Tests/FoundationModelsACPClientTests/GraphQL/SAHGraphQLClientTests.swift, Tests/FoundationModelsACPClientTests/GraphQL/SAHGraphQLClientConnectionTests.swift, IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/GraphQLTunnelTests.swift (doc comment only); swift test: 684 tests in 56 suites passed, 0 failures, only the allowed MLX warning
     - next: /review
   timestamp: 2026-10-23T19:48:48.893117+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m5n59ad7vx99695fzy4m1rvv
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~2..HEAD (a581ecb, 705a708). 0 findings, 0 confirmed, 0 refuted. 5 files reviewed. 2 .kanban files not reviewed (.reviewignore).
+    - next: none. The task moved to done.
+  timestamp: 2026-10-23T19:54:55.783184+00:00
+- actor: claude-code
+  id: 01m5n59hvmt0qrpvdshn4zvfpj
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files (new AsyncThrowingStreamCollection.swift, two GraphQL unit test files, GraphQLTunnelTests.swift doc comment)
+    - test: green — swift test 684 passed; IntegrationTests 7 passed (fix: runSwiftBuild reads only stdout)
+    - commit: a581ecb, 705a708
+    - review: clean — 0 findings
+  timestamp: 2026-10-23T19:55:03.412709+00:00
+position_column: done
+position_ordinal: ff9a80
 title: Fold the two `collect` stream helpers of the unit GraphQL tests into one
 ---
 ## What
