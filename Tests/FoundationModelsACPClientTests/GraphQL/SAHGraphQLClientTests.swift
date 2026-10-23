@@ -97,25 +97,6 @@ private final class EndingStubHandler: SAHGraphQLStubHandler {
     }
 }
 
-/// Reads each element of a stream until it ends.
-///
-/// - Parameter stream: The stream.
-/// - Returns: The elements, and the error that ended the stream, or `nil` for
-///   a completion.
-private func collect(
-    _ stream: AsyncThrowingStream<JSONValue, any Error>
-) async -> (elements: [JSONValue], error: (any Error)?) {
-    var elements: [JSONValue] = []
-    do {
-        for try await element in stream {
-            elements.append(element)
-        }
-        return (elements, nil)
-    } catch {
-        return (elements, error)
-    }
-}
-
 @Suite("SAHGraphQLClient on a stub handler")
 struct SAHGraphQLClientTests {
     @Test func executeSendsTheWholeRequestToTheHandlerAndGivesItsResult() async throws {
@@ -176,9 +157,9 @@ struct SAHGraphQLClientTests {
         let events: [JSONValue] = [.object(["data": .number(1)]), .object(["data": .number(2)])]
         let client = SAHGraphQLClient(stub: EndingStubHandler(events: events, endError: nil))
 
-        let (elements, error) = await collect(
-            client.subscribe(endpoint: "kanban", sessionId: sessionId, document: "subscription { changes }")
-        )
+        let (elements, error) = await client.subscribe(
+            endpoint: "kanban", sessionId: sessionId, document: "subscription { changes }"
+        ).collect()
 
         #expect(elements == events)
         #expect(error == nil)
@@ -192,9 +173,9 @@ struct SAHGraphQLClientTests {
         let events: [JSONValue] = [.object(["data": .number(1)])]
         let client = SAHGraphQLClient(stub: EndingStubHandler(events: events, endError: endError))
 
-        let (elements, error) = await collect(
-            client.subscribe(endpoint: "kanban", sessionId: sessionId, document: "subscription { changes }")
-        )
+        let (elements, error) = await client.subscribe(
+            endpoint: "kanban", sessionId: sessionId, document: "subscription { changes }"
+        ).collect()
 
         #expect(elements == events)
         #expect(error as? SAHGraphQLError == endError)

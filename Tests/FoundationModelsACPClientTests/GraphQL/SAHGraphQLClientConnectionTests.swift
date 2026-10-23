@@ -82,25 +82,6 @@ private struct TunnelConnection {
     }
 }
 
-/// Reads each element of a stream until it ends.
-///
-/// - Parameter stream: The stream.
-/// - Returns: The elements, and the error that ended the stream, or `nil` for
-///   a normal finish.
-private func collect(
-    _ stream: AsyncThrowingStream<JSONValue, any Error>
-) async -> (elements: [JSONValue], error: (any Error)?) {
-    var elements: [JSONValue] = []
-    do {
-        for try await element in stream {
-            elements.append(element)
-        }
-        return (elements, nil)
-    } catch {
-        return (elements, error)
-    }
-}
-
 /// Starts the board subscription of the tests on `client`.
 ///
 /// - Parameter client: The client.
@@ -210,7 +191,7 @@ struct SAHGraphQLClientConnectionTests {
 
         let subscriptionCount = 2
         for _ in 0..<subscriptionCount {
-            _ = await collect(subscribeToChanges(on: tunnel.client))
+            _ = await subscribeToChanges(on: tunnel.client).collect()
         }
 
         let requests = tunnel.agent.subscribeRequests.elements
@@ -229,7 +210,7 @@ struct SAHGraphQLClientConnectionTests {
         let tunnel = try await TunnelConnection.make { GraphQLTunnelStubAgent(connection: $0, subscription: script) }
         defer { await tunnel.model.disconnect() }
 
-        let (elements, error) = await collect(subscribeToChanges(on: tunnel.client))
+        let (elements, error) = await subscribeToChanges(on: tunnel.client).collect()
 
         #expect(
             elements == [
@@ -245,7 +226,7 @@ struct SAHGraphQLClientConnectionTests {
         let tunnel = try await TunnelConnection.make { GraphQLTunnelStubAgent(connection: $0, subscription: script) }
         defer { await tunnel.model.disconnect() }
 
-        let (elements, error) = await collect(subscribeToChanges(on: tunnel.client))
+        let (elements, error) = await subscribeToChanges(on: tunnel.client).collect()
 
         #expect(elements == [.object(["data": .object(["changes": .object(["cursor": .string("c-2")])])])])
         #expect(error == nil)
@@ -256,7 +237,7 @@ struct SAHGraphQLClientConnectionTests {
         let tunnel = try await TunnelConnection.make { GraphQLTunnelStubAgent(connection: $0, subscription: script) }
         defer { await tunnel.model.disconnect() }
 
-        let (elements, error) = await collect(subscribeToChanges(on: tunnel.client))
+        let (elements, error) = await subscribeToChanges(on: tunnel.client).collect()
 
         #expect(elements.count == 1)
         #expect(error as? SAHGraphQLError == .graphQL(.array(cursorExpiredErrors)))
@@ -269,7 +250,7 @@ struct SAHGraphQLClientConnectionTests {
         let tunnel = try await TunnelConnection.make { GraphQLTunnelStubAgent(connection: $0, subscription: script) }
         defer { await tunnel.model.disconnect() }
 
-        let (elements, error) = await collect(subscribeToChanges(on: tunnel.client))
+        let (elements, error) = await subscribeToChanges(on: tunnel.client).collect()
 
         #expect(elements.isEmpty)
         #expect((error as? RequestError)?.code == .invalidParams)
@@ -298,7 +279,7 @@ struct SAHGraphQLClientConnectionTests {
         let tunnel = try await TunnelConnection.make { GraphQLTunnelStubAgent(connection: $0) }
         await tunnel.model.disconnect()
 
-        let (elements, error) = await collect(subscribeToChanges(on: tunnel.client))
+        let (elements, error) = await subscribeToChanges(on: tunnel.client).collect()
 
         #expect(elements.isEmpty)
         #expect(error as? SAHGraphQLError == .connectionClosed)
