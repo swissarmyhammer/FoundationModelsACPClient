@@ -62,7 +62,6 @@ enum LiveAgentServer {
         let agent = try await makeAgent(arguments)
         let connection = await AgentSideConnection(stream: StdioTransport()) { connection in
             agent.bind(connection: connection)
-            return agent
         }
         _ = await connection.closed
         await agent.waitForConnectionTeardown()
@@ -78,29 +77,38 @@ enum LiveAgentServer {
     /// - Throws: The error of the file write, of the configuration load or of
     ///   the profile resolution.
     private static func makeAgent(_ arguments: LaunchArguments) async throws -> RoutedACPAgent {
-        let userDirectory = arguments.stateDirectory.appending(path: "user", directoryHint: .isDirectory)
+        // A custom home keeps the user layer in its synced root and the hook
+        // data in its local root, so the agent reads and writes no folder of
+        // the real home.
+        let home = AgentHome.makeCustom(
+            synced: arguments.stateDirectory.appending(path: "user", directoryHint: .isDirectory),
+            local: arguments.stateDirectory.appending(path: "local", directoryHint: .isDirectory))
         let recordingsDirectory = arguments.stateDirectory.appending(
             path: "recordings", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: userDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home.synced, withIntermediateDirectories: true)
         try userConfigYAML.write(
-            to: userDirectory.appending(path: ConfigurationLoader.configFileName),
+            to: home.synced.appending(path: ConfigurationLoader.configFileName),
             atomically: true, encoding: .utf8)
         let name = try DotfolderName(agentName)
         let configuration = try ConfigurationLoader(
-            name: name,
-            workingDirectory: arguments.workingDirectory,
-            userDirectory: userDirectory,
-            environment: [:]
+            settingsFolders: SettingsFolders(name: name, home: home, environment: [:]),
+            workingDirectory: arguments.workingDirectory
         ).load().configuration
+        let hooks = AgentHooks(dataDirectory: home.hooksDirectory)
+        // The loader keeps the shared Hugging Face cache, not the model
+        // folder of the custom home, so a run does not download the models
+        // again.
         let router = Router(
             recordingsDir: recordingsDirectory,
             loader: LiveModelLoader(),
-            samplingMode: .greedy)
+            samplingMode: .greedy,
+            hooks: hooks.dispatcher)
         return try await RoutedACPAgent(
             name: name,
             router: router,
+            hooks: hooks,
             configuration: configuration,
-            userDirectory: userDirectory,
+            home: home,
             environment: [:])
     }
 }
