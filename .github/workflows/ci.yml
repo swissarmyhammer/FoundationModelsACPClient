@@ -8,8 +8,8 @@ name: CI
 #
 # - `swift test` at the root runs each unit test of this repository, and only
 #   unit tests. Each unit test runs in process, against an in-memory or a
-#   scripted stub agent. The one test that needs a real external system lives
-#   in the nested `IntegrationTests/` package. The root manifest does not name
+#   scripted stub agent. The tests that need a real external system live in
+#   the nested `IntegrationTests/` package. The root manifest does not name
 #   that package, so the root run cannot see it.
 # - No environment variable selects a suite. The package path selects the
 #   suite by the build graph.
@@ -17,11 +17,13 @@ name: CI
 #   because the root build does not compile it, and a broken integration test
 #   must not stay unseen between runs. The integration job then builds and runs
 #   that package, after the unit job.
-# - The integration test drives this library against a real agent:
-#   `RoutedACPAgent` of FoundationModelsACPAgent, with the real model
-#   `mlx-community/Qwen3-4B-4bit` and greedy decoding. The agent runs in a
-#   separate process: the `live-agent-server` executable of the
-#   `IntegrationTests/LiveAgentServer` package. The test builds that package
+# - The integration tests drive this library against a real agent:
+#   `RoutedACPAgent` of FoundationModelsACPAgent. The agent runs in a
+#   separate process, an executable of the `IntegrationTests/LiveAgentServer`
+#   package. The turn test starts `live-agent-server`, with the real model
+#   `mlx-community/Qwen3-4B-4bit` and greedy decoding. The GraphQL tests start
+#   `graphql-tunnel-server`, with the GraphQL tunnel of the agent, the stub
+#   model path and a small test endpoint. Each test builds that package
 #   with `swift build --package-path` and starts the executable, so the
 #   integration job builds the agent on each run, inside the test. That
 #   package stays out of the graph of `IntegrationTests`, because a graph

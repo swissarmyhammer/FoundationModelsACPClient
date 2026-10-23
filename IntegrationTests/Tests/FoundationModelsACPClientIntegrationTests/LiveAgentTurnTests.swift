@@ -28,9 +28,8 @@ struct LiveAgentTurnTests {
     /// The text of the one prompt.
     private static let promptText = "Say hello in one short sentence."
 
-    /// The client identity that the test gives in `initialize`.
-    private static let clientInfo = Implementation(
-        name: "acp-client-integration-test", version: "1.0.0")
+    /// The client name that the test gives in `initialize`.
+    private static let clientName = "acp-client-integration-test"
 
     /// `ConnectionModel` connects to a real agent, opens a session, sends one
     /// prompt that the real model answers, and closes the session on
@@ -38,10 +37,12 @@ struct LiveAgentTurnTests {
     @Test
     @MainActor
     func aConnectionModelRunsOneTurnAgainstARealAgent() async throws {
-        let root = try Self.makeTemporaryDirectory()
-        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
-        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
-        let agentProcess = try await Self.startAgent(under: root, workspace: workspace)
+        let root = try IntegrationTemporaryDirectory.make(prefix: Self.temporaryDirectoryPrefix)
+        let workspace = try IntegrationTemporaryDirectory.makeWorkspace(in: root)
+        // The server writes its user layer and its recordings under `root`,
+        // and loads its models before it reads the first frame.
+        let agentProcess = try await LiveAgentServerBuild(rootDirectory: root)
+            .startServer(LiveAgentServerBuild.liveAgentServer, workspace: workspace)
         // This stops the agent process also when the body throws first. After
         // the reap at the end of the body, it does nothing.
         defer { agentProcess.shutdown() }
@@ -51,11 +52,7 @@ struct LiveAgentTurnTests {
         // The disconnect of the body is the behavior under test. This one
         // closes the connection also when the body throws first.
         defer { await model.disconnect() }
-        _ = try await model.initialize(
-            InitializeRequest(
-                info: Self.clientInfo,
-                protocolVersion: ACPClient.supportedProtocolVersion,
-                capabilities: ACPClient.advertisedCapabilities))
+        _ = try await model.initialize(.integrationTest(clientName: Self.clientName))
         #expect(model.state == .connected)
 
         let session = try await model.newSession(
@@ -86,36 +83,6 @@ struct LiveAgentTurnTests {
         let agentExit = try await agentProcess.waitForExit()
         #expect(agentExit != .notCollected, "the teardown did not reap the agent process")
         try FileManager.default.removeItem(at: root)
-    }
-
-    /// Makes a new temporary directory, with each symbolic link of its path
-    /// resolved.
-    ///
-    /// - Returns: The directory.
-    /// - Throws: The error of the directory creation.
-    private static func makeTemporaryDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(temporaryDirectoryPrefix)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.resolvingSymlinksInPath()
-    }
-
-    /// Builds the agent server, and starts it as an external agent over
-    /// stdio.
-    ///
-    /// The server writes its user layer and its recordings under `root`, and
-    /// loads its models before it reads the first frame.
-    ///
-    /// - Parameters:
-    ///   - root: The temporary directory of the test. It also receives the
-    ///     log of each `swift build`.
-    ///   - workspace: The working directory of the configuration load of the
-    ///     agent.
-    /// - Returns: The agent process. Its transport carries the connection.
-    /// - Throws: The error of the build or of the start of the process.
-    private static func startAgent(under root: URL, workspace: URL) async throws -> AgentProcess {
-        let executable = try await LiveAgentServerBuild(logDirectory: root).makeExecutable()
-        return try AgentProcess(command: executable, arguments: [root.path, workspace.path])
     }
 
     /// Gives the first user message of the transcript of `session`.

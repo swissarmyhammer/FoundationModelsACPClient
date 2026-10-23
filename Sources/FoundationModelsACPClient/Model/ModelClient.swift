@@ -56,14 +56,28 @@ struct ModelClient: Client {
     /// The diagnostic sink of the connection; never stdout.
     private let logger: ACPLogger
 
+    /// The GraphQL subscriptions of the connection. The router gives each
+    /// `_sah/graphql/next`, `_sah/graphql/complete` and `_sah/graphql/error`
+    /// of the agent to this table.
+    private let graphQLSubscriptions: SAHGraphQLSubscriptions
+
     /// Makes the router of a model.
     ///
     /// - Parameters:
     ///   - model: The model that this router serves.
     ///   - logger: The diagnostic sink of the connection; never stdout.
-    init(model: ConnectionModel, logger: ACPLogger) {
+    ///   - graphQLSubscriptions: The GraphQL subscriptions of the connection.
+    init(model: ConnectionModel, logger: ACPLogger, graphQLSubscriptions: SAHGraphQLSubscriptions) {
         self.model = model
         self.logger = logger
+        self.graphQLSubscriptions = graphQLSubscriptions
+    }
+
+    /// The handlers of the `_sah/graphql/next`, `_sah/graphql/complete` and
+    /// `_sah/graphql/error` notifications of the agent. The connection reads
+    /// them one time, when it gets this router.
+    var extensionHandlers: ExtensionHandlers {
+        graphQLSubscriptions.extensionHandlers
     }
 
     /// Ignores the update. The session model reads it from its subscription.

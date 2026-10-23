@@ -2,6 +2,7 @@ import Foundation
 import FoundationModelsACP
 import FoundationModelsACPAgent
 import FoundationModelsRouter
+import LiveAgentServerSupport
 
 /// The real agent of the integration test of FoundationModelsACPClient,
 /// served over stdio.
@@ -36,16 +37,10 @@ enum LiveAgentServer {
     /// FoundationModelsAgents uses the same pair.
     static let flashModel = "mlx-community/Qwen3-1.7B-4bit"
 
-    /// The user-layer `config.yaml` of the agent.
-    ///
-    /// The profile names two small models. The skills marketplace list is
-    /// empty and the code context is off, so the turn does not use the
-    /// network and does not index the workspace.
+    /// The user-layer `config.yaml` of the agent: the offline tools section
+    /// of each test server, and a profile that names two small models.
     static let userConfigYAML = """
-        tools:
-          codeContext: false
-          skills:
-            marketplaces: []
+        \(IntegrationAgentHome.offlineToolsYAML)
         profile:
           standard: ["\(standardModel)"]
           flash: ["\(flashModel)"]
@@ -54,7 +49,7 @@ enum LiveAgentServer {
     /// Makes the agent, serves it on stdin and stdout, and returns when the
     /// connection closed and the agent finished its teardown.
     ///
-    /// - Throws: ``LaunchArguments/Failure`` for a wrong argument list, or
+    /// - Throws: `LaunchArguments.Failure` for a wrong argument list, or
     ///   the error of the file write, of the configuration load or of the
     ///   profile resolution.
     static func main() async throws {
@@ -77,18 +72,9 @@ enum LiveAgentServer {
     /// - Throws: The error of the file write, of the configuration load or of
     ///   the profile resolution.
     private static func makeAgent(_ arguments: LaunchArguments) async throws -> RoutedACPAgent {
-        // A custom home keeps the user layer in its synced root and the hook
-        // data in its local root, so the agent reads and writes no folder of
-        // the real home.
-        let home = AgentHome.makeCustom(
-            synced: arguments.stateDirectory.appending(path: "user", directoryHint: .isDirectory),
-            local: arguments.stateDirectory.appending(path: "local", directoryHint: .isDirectory))
+        let home = try IntegrationAgentHome.make(under: arguments.stateDirectory, userConfigYAML: userConfigYAML)
         let recordingsDirectory = arguments.stateDirectory.appending(
             path: "recordings", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: home.synced, withIntermediateDirectories: true)
-        try userConfigYAML.write(
-            to: home.synced.appending(path: ConfigurationLoader.configFileName),
-            atomically: true, encoding: .utf8)
         let name = try DotfolderName(agentName)
         let configuration = try ConfigurationLoader(
             settingsFolders: SettingsFolders(name: name, home: home, environment: [:]),
@@ -111,50 +97,4 @@ enum LiveAgentServer {
             home: home,
             environment: [:])
     }
-}
-
-/// The two directories that the test gives the server on its command line.
-struct LaunchArguments {
-    /// A command line that does not hold exactly the two directories.
-    enum Failure: Error, CustomStringConvertible {
-        /// The command line held this count of arguments after the
-        /// executable path.
-        case wrongArgumentCount(Int)
-
-        /// The usage text, with the count that the command line held.
-        var description: String {
-            switch self {
-            case .wrongArgumentCount(let count):
-                "usage: live-agent-server <state-directory> <working-directory> (got \(count) arguments)"
-            }
-        }
-    }
-
-    /// The directory that holds the user layer and the recordings of the
-    /// agent.
-    let stateDirectory: URL
-
-    /// The working directory of the configuration load.
-    let workingDirectory: URL
-
-    /// Reads the two directories from a command line.
-    ///
-    /// - Parameter commandLine: The command line: the executable path, then
-    ///   the state directory and the working directory.
-    /// - Throws: ``Failure/wrongArgumentCount(_:)`` when the command line
-    ///   does not hold exactly two directories after the executable path.
-    init(commandLine: [String]) throws {
-        let directories = commandLine.dropFirst().map { URL(filePath: $0, directoryHint: .isDirectory) }
-        guard let stateDirectory = directories.first,
-            let workingDirectory = directories.last,
-            directories.count == Self.directoryCount
-        else {
-            throw Failure.wrongArgumentCount(directories.count)
-        }
-        self.stateDirectory = stateDirectory
-        self.workingDirectory = workingDirectory
-    }
-
-    /// The count of directories on the command line.
-    private static let directoryCount = 2
 }

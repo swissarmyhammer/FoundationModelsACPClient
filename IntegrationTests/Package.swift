@@ -22,16 +22,19 @@ private let wireDependencyName = "FoundationModelsACP"
 /// and the integration job of the shared CI workflow run it. No environment
 /// variable selects the test.
 ///
-/// The one test drives `ConnectionModel` and `SessionModel` through the
-/// public API of the library, against a real agent with a real model:
+/// The tests drive the public API of the library against the real agent,
+/// `RoutedACPAgent` of FoundationModelsACPAgent, in a server process of the
+/// `LiveAgentServer` package beside this manifest. Each test builds that
+/// package, and starts its server over stdio with `AgentProcess` of the
+/// library:
 ///
-/// - The agent is `RoutedACPAgent` of FoundationModelsACPAgent, with greedy
-///   decoding. The `live-agent-server` executable of the `LiveAgentServer`
-///   package beside this manifest serves it over stdio. The test builds that
-///   package and starts the executable with `AgentProcess` of the library.
-/// - The model that answers is `mlx-community/Qwen3-4B-4bit`. The server
-///   holds the configuration of the agent, and tells why it names this
-///   model.
+/// - The turn test drives `ConnectionModel` and `SessionModel` against the
+///   `live-agent-server` executable: the agent with greedy decoding and the
+///   real model `mlx-community/Qwen3-4B-4bit`. The server holds the
+///   configuration of the agent, and tells why it names this model.
+/// - The GraphQL tests drive `SAHGraphQLClient` against the
+///   `graphql-tunnel-server` executable: the GraphQL tunnel of the agent,
+///   the stub model path, and a small test endpoint.
 ///
 /// This graph holds only the local library (by path) and the wire. It must
 /// not hold FoundationModelsACPAgent: that package depends on this library by

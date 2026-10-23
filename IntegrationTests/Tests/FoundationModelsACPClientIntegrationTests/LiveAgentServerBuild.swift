@@ -1,20 +1,26 @@
 import Foundation
+import FoundationModelsACP
+import FoundationModelsACPClient
 import Testing
 
-/// Builds the `live-agent-server` executable of the `LiveAgentServer`
-/// package, and gives its path.
+/// Builds an executable of the `LiveAgentServer` package, gives its path,
+/// and starts it as an external agent.
 ///
 /// The package stands beside the manifest of this test package, outside the
 /// graph of this package: the manifest of `LiveAgentServer` tells why. Thus
 /// `swift test` does not build it, and the test builds it here with
-/// `swift build --package-path`. The second build of one run finds the
-/// products of the first and builds nothing.
+/// `swift build --package-path`. A later build of one run finds the products
+/// of the first and builds nothing.
 ///
 /// The output of each `swift build` goes to a log file, and not to the
 /// output of the test. A failed build throws an error that holds the log.
 struct LiveAgentServerBuild {
-    /// The name of the executable product of the package.
-    static let productName = "live-agent-server"
+    /// The executable of the real agent with a real model.
+    static let liveAgentServer = "live-agent-server"
+
+    /// The executable of the real agent with its GraphQL tunnel, the stub
+    /// model path, and the small probe endpoint.
+    static let graphQLTunnelServer = "graphql-tunnel-server"
 
     /// The directory of the `LiveAgentServer` package. This file is in
     /// `IntegrationTests/Tests/<target>/`, and the package is in
@@ -45,23 +51,43 @@ struct LiveAgentServerBuild {
         }
     }
 
-    /// The directory that holds the log file of each `swift build`.
-    let logDirectory: URL
+    /// The temporary directory of the test. It holds the log file of each
+    /// `swift build`, and the state of each server that ``startServer(_:workspace:)``
+    /// starts.
+    let rootDirectory: URL
 
-    /// Builds the executable, and gives its absolute path.
+    /// Builds an executable, and starts it as an external agent over stdio.
     ///
+    /// The server writes its state under ``rootDirectory``, and loads its
+    /// configuration from `workspace`.
+    ///
+    /// - Parameters:
+    ///   - productName: The executable product of the package, for example
+    ///     ``liveAgentServer``.
+    ///   - workspace: The working directory of the configuration load of the
+    ///     agent.
+    /// - Returns: The agent process. Its transport carries the connection.
+    /// - Throws: The error of the build or of the start of the process.
+    func startServer(_ productName: String, workspace: URL) async throws -> AgentProcess {
+        let executable = try await makeExecutable(productName)
+        return try AgentProcess(command: executable, arguments: [rootDirectory.path, workspace.path])
+    }
+
+    /// Builds an executable, and gives its absolute path.
+    ///
+    /// - Parameter productName: The executable product of the package.
     /// - Returns: The absolute path of the executable.
     /// - Throws: ``Failure`` for a failed `swift build`, the error of a log
     ///   file, or the error of `#require` when `--show-bin-path` wrote no
     ///   path.
-    func makeExecutable() async throws -> String {
-        _ = try await runSwiftBuild(["--product", Self.productName], logName: "build.log")
+    func makeExecutable(_ productName: String) async throws -> String {
+        _ = try await runSwiftBuild(["--product", productName], logName: "build-\(productName).log")
         let binPathOutput = try await runSwiftBuild(["--show-bin-path"], logName: "bin-path.log")
         let binDirectory = try #require(
             binPathOutput.split(whereSeparator: \.isNewline).last,
             "swift build --show-bin-path wrote no path")
         return URL(filePath: String(binDirectory), directoryHint: .isDirectory)
-            .appending(path: Self.productName)
+            .appending(path: productName)
             .path
     }
 
@@ -71,14 +97,14 @@ struct LiveAgentServerBuild {
     /// - Parameters:
     ///   - arguments: The arguments after `swift build --package-path
     ///     <package>`.
-    ///   - logName: The name of the log file in ``logDirectory`` that
+    ///   - logName: The name of the log file in ``rootDirectory`` that
     ///     receives stdout and stderr.
     /// - Returns: The output of the command: stdout and stderr together.
     /// - Throws: ``Failure`` when the command ends with a status other than
     ///   0, or the error of the log file or of the start of the command.
     private func runSwiftBuild(_ arguments: [String], logName: String) async throws -> String {
         let swiftArguments = ["build", "--package-path", Self.packageDirectory.path] + arguments
-        let logFile = logDirectory.appending(path: logName)
+        let logFile = rootDirectory.appending(path: logName)
         try Data().write(to: logFile)
         let log = try FileHandle(forWritingTo: logFile)
         let process = Process()
@@ -111,5 +137,47 @@ struct LiveAgentServerBuild {
                 continuation.resume(throwing: error)
             }
         }
+    }
+}
+
+/// A new temporary directory of an integration test.
+enum IntegrationTemporaryDirectory {
+    /// Makes a new temporary directory, with each symbolic link of its path
+    /// resolved.
+    ///
+    /// - Parameter prefix: The prefix of the name of the directory.
+    /// - Returns: The directory.
+    /// - Throws: The error of the directory creation.
+    static func make(prefix: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.resolvingSymlinksInPath()
+    }
+
+    /// Makes the `workspace` directory of a test in its temporary directory:
+    /// the working directory of the agent and of its sessions.
+    ///
+    /// - Parameter root: The temporary directory of the test.
+    /// - Returns: The workspace directory.
+    /// - Throws: The error of the directory creation.
+    static func makeWorkspace(in root: URL) throws -> URL {
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        return workspace
+    }
+}
+
+extension InitializeRequest {
+    /// The `initialize` request of an integration test, with the protocol
+    /// version and the capabilities of the library.
+    ///
+    /// - Parameter clientName: The client name that the test gives.
+    /// - Returns: The request.
+    static func integrationTest(clientName: String) -> InitializeRequest {
+        InitializeRequest(
+            info: Implementation(name: clientName, version: "1.0.0"),
+            protocolVersion: ACPClient.supportedProtocolVersion,
+            capabilities: ACPClient.advertisedCapabilities)
     }
 }

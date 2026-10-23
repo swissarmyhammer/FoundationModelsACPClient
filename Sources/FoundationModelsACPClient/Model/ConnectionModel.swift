@@ -117,6 +117,13 @@ public final class ConnectionModel {
     /// that comes from an earlier connection changes nothing.
     @ObservationIgnored private(set) var connection: ClientSideConnection?
 
+    /// The GraphQL subscriptions of the open connection, or `nil` when no
+    /// connection is open. Each connection gets a new table, because a
+    /// subscription id is unique only for one connection. The close of the
+    /// connection finishes each open subscription with
+    /// ``SAHGraphQLError/connectionClosed``.
+    @ObservationIgnored private(set) var graphQLSubscriptions: SAHGraphQLSubscriptions?
+
     /// The generation of the connection: each connect and each recorded
     /// close add 1 to it. A request-scoped elicitation reads it before and
     /// after its wait, so a record of a withdrawal on an earlier connection
@@ -269,7 +276,10 @@ public final class ConnectionModel {
     /// in front of the router. Such a wrapper must forward `sessionUpdate(_:)`
     /// and `elicitationComplete(_:)` to the router: the connection gives each
     /// of them one time, to the served `Client` only, so a wrapper that drops
-    /// one leaves the models stale.
+    /// one leaves the models stale. The wrapper must also give the
+    /// `extensionHandlers` of the router as its own: they serve the
+    /// `_sah/graphql/*` notifications of a ``SAHGraphQLClient`` over this
+    /// model.
     ///
     /// The model never reconnects on its own. After a close, the host can
     /// call this method again with a new transport. Each call forgets the
@@ -311,22 +321,27 @@ public final class ConnectionModel {
         elicitations.arrivalSpace.reset()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger
+        let subscriptions = SAHGraphQLSubscriptions()
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
-        let served = wrap(ModelClient(model: self, logger: connectionLogger))
+        let served = wrap(ModelClient(model: self, logger: connectionLogger, graphQLSubscriptions: subscriptions))
         let opened = await ClientSideConnection(
             stream: transport,
             logger: connectionLogger,
             bufferLimits: bufferLimits
         ) { _ in served }
         connection = opened
+        graphQLSubscriptions = subscriptions
         requestWatch = watchOutgoingRequests(of: opened)
         state = .connected
         // The wait for the close runs in a task of its own, never in an
         // inbound handler: the close reason comes only after each inbound
-        // handler ended, so a wait inside one never ends.
+        // handler ended, so a wait inside one never ends. The task closes
+        // the subscriptions of its own connection also when a later
+        // connection replaced it in this model.
         Task { [weak self] in
             let reason = await opened.closed
+            subscriptions.closeAll()
             self?.connectionDidClose(opened, because: reason)
         }
         return opened
@@ -364,8 +379,9 @@ public final class ConnectionModel {
     }
 
     /// Records the close of a connection: sets ``state`` from the reason,
-    /// cancels each pending request-scoped elicitation, and closes each open
-    /// session model.
+    /// cancels each pending request-scoped elicitation, finishes each open
+    /// GraphQL subscription with ``SAHGraphQLError/connectionClosed``, and
+    /// closes each open session model.
     ///
     /// - Parameters:
     ///   - closed: The connection that closed.
@@ -373,6 +389,8 @@ public final class ConnectionModel {
     private func connectionDidClose(_ closed: ClientSideConnection, because reason: ConnectionCloseReason) {
         guard closed === connection else { return }
         connection = nil
+        graphQLSubscriptions?.closeAll()
+        graphQLSubscriptions = nil
         connectionGeneration += 1
         state = ConnectionState(closedBecause: reason)
         stopWatchingRequests()
