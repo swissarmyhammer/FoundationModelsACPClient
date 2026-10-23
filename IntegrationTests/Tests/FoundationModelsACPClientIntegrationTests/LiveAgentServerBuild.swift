@@ -12,8 +12,8 @@ import Testing
 /// `swift build --package-path`. A later build of one run finds the products
 /// of the first and builds nothing.
 ///
-/// The output of each `swift build` goes to a log file, and not to the
-/// output of the test. A failed build throws an error that holds the log.
+/// The stdout and the stderr of each `swift build` go to two log files, and
+/// not to the output of the test. A failed build throws an error that holds the log.
 struct LiveAgentServerBuild {
     /// The executable of the real agent with a real model.
     static let liveAgentServer = "live-agent-server"
@@ -98,24 +98,29 @@ struct LiveAgentServerBuild {
     ///   - arguments: The arguments after `swift build --package-path
     ///     <package>`.
     ///   - logName: The name of the log file in ``rootDirectory`` that
-    ///     receives stdout and stderr.
-    /// - Returns: The output of the command: stdout and stderr together.
+    ///     receives stdout. Stderr goes to the file with the same name and
+    ///     the suffix `.err`. Tests run in parallel and share one package, so
+    ///     SwiftPM can write a "waiting" notice to stderr. A separate file
+    ///     keeps that notice out of the stdout that the caller parses.
+    /// - Returns: The stdout of the command.
     /// - Throws: ``Failure`` when the command ends with a status other than
     ///   0, or the error of the log file or of the start of the command.
     private func runSwiftBuild(_ arguments: [String], logName: String) async throws -> String {
         let swiftArguments = ["build", "--package-path", Self.packageDirectory.path] + arguments
-        let logFile = rootDirectory.appending(path: logName)
-        try Data().write(to: logFile)
-        let log = try FileHandle(forWritingTo: logFile)
+        let outputFile = rootDirectory.appending(path: logName)
+        let errorFile = rootDirectory.appending(path: logName + ".err")
+        try Data().write(to: outputFile)
+        try Data().write(to: errorFile)
         let process = Process()
         process.executableURL = Self.environmentLauncher
         process.arguments = ["swift"] + swiftArguments
-        process.standardOutput = log
-        process.standardError = log
+        process.standardOutput = try FileHandle(forWritingTo: outputFile)
+        process.standardError = try FileHandle(forWritingTo: errorFile)
         let status = try await Self.run(process)
-        let output = try String(contentsOf: logFile, encoding: .utf8)
+        let output = try String(contentsOf: outputFile, encoding: .utf8)
         guard status == 0 else {
-            throw Failure(arguments: swiftArguments, status: status, output: output)
+            let errors = try String(contentsOf: errorFile, encoding: .utf8)
+            throw Failure(arguments: swiftArguments, status: status, output: output + errors)
         }
         return output
     }
