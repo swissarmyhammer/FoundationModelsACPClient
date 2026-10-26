@@ -1,8 +1,16 @@
 ---
 assignees:
 - claude-code
-position_column: doing
-position_ordinal: '80'
+comments:
+- actor: claude-code
+  id: 01m5x3h9132307t911fptfbgca
+  text: |-
+    ### commit — changed
+    - evidence: d7acd64 feat(graphql): give a named GraphQLEndpoint over the _sah/graphql tunnel. `swift test`: 692 tests passed. `swift test --package-path IntegrationTests --filter GraphQLTunnelTests`: 9 tests passed.
+    - next: reply to KanbanViewKit ^n7mvj7h.
+  timestamp: 2026-10-26T21:58:14.819025+00:00
+position_column: done
+position_ordinal: ff9b80
 title: Give a named GraphQLEndpoint over the _sah/graphql tunnel
 ---
 Request from KanbanViewKit (^n7mvj7h).
