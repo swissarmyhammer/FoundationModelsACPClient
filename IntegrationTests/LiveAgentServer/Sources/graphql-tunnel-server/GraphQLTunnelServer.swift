@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import FoundationModelsKanban
 import LiveAgentServerSupport
 
 // `registerHostTools(_:)` of `RoutedACPAgent` is internal. Its doc comment
@@ -14,7 +15,9 @@ import LiveAgentServerSupport
 /// The agent is the real `RoutedACPAgent` of FoundationModelsACPAgent, so
 /// the test reaches the real GraphQL tunnel (`GraphQLTunnel`) of the agent.
 /// The agent uses the stub model path of `ComposedAgent`, so it loads no
-/// model. A host tool gives each session the small ``ProbeEndpoint``.
+/// model. Host tools give each session the small ``ProbeEndpoint``, and the
+/// `kanban` endpoint (`KanbanGraph`) over the board of the working
+/// directory.
 ///
 /// Usage: `graphql-tunnel-server <state-directory> <working-directory>`. The
 /// server writes its user layer under the state directory, and loads the
@@ -44,10 +47,12 @@ enum GraphQLTunnelServer {
             home: home,
             environment: [:],
             modelSource: .stub)
-        await composed.agent.registerHostTools([ProbeTool()])
+        let board = try await KanbanHost.shared.session(workingDirectory: arguments.workingDirectory, actor: agentName)
+        await composed.agent.registerHostTools([ProbeTool(), KanbanTool(graph: board)])
         let connection = await composed.serve(over: StdioTransport())
         _ = await connection.closed
         await composed.waitForConnectionTeardown()
         await composed.closeOpenSessions()
+        await board.close()
     }
 }

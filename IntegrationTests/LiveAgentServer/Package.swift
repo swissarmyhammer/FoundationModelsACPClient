@@ -40,9 +40,15 @@ private let routerPackageName = "FoundationModelsRouter"
 /// The family leaf: the GraphQL endpoint protocol of the test endpoint.
 private let extrasPackageName = "FoundationModelsExtras"
 
+/// The kanban endpoint: the GraphQL server serves `KanbanTool`, so the test
+/// reaches a real `KanbanGraph` through the tunnel.
+private let kanbanPackageName = "FoundationModelsKanban"
+
 /// The family packages that the servers link. Each one ships a library
 /// product with the name of its package.
-private let familyPackageNames = [wirePackageName, agentPackageName, routerPackageName, extrasPackageName]
+private let familyPackageNames = [
+    wirePackageName, agentPackageName, routerPackageName, extrasPackageName, kanbanPackageName,
+]
 
 /// The GraphQL engine package. The test endpoint takes its `Map` values. The
 /// URL and the floor are the pin of FoundationModelsExtras, which owns the
@@ -110,7 +116,7 @@ let package = Package(
         .executableTarget(
             name: graphQLServerProductName,
             dependencies: [.target(name: supportTargetName)]
-                + familyProducts([wirePackageName, agentPackageName, extrasPackageName])
+                + familyProducts([wirePackageName, agentPackageName, extrasPackageName, kanbanPackageName])
                 + [.product(name: graphQLPackageName, package: graphQLPackageName)],
             path: "Sources/\(graphQLServerProductName)"
         ),

@@ -23,8 +23,8 @@ let package = Package(
         .library(name: "FoundationModelsACPClient", targets: ["FoundationModelsACPClient"]),
     ],
     dependencies: [
-        // The first two are the whole in-family dependency list of this
-        // package, by design: a client that knows only ACP can drive any
+        // The first two are the whole in-family dependency list of the
+        // library target, by design: a client that knows only ACP can drive any
         // conforming agent, so this package must not depend on the agent
         // runtime. Each pin is `branch: "main"` over the SSH URL, matching how
         // every sibling in this family pins an in-family package. A version
@@ -58,6 +58,20 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.6.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.15.1"),
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.11.0"),
+        // The GraphQL package, for its `Map` value type only: the
+        // `GraphQLEndpoint` protocol of `FoundationModelsExtras` takes the
+        // variables of a call as `Map` values. `FoundationModelsExtras`
+        // already puts this package into the graph. The URL and the floor
+        // are the pin of `FoundationModelsExtras`.
+        .package(url: "https://github.com/GraphQLSwift/GraphQL.git", from: "4.3.0"),
+        // The kanban endpoint `KanbanGraph`, for the tests only. The tests
+        // of `SAHGraphQLEndpoint` serve it through an in-process agent, and
+        // compare its results with the results of the tunnel. The library
+        // target does not link it.
+        .package(
+            url: "git@github.com:swissarmyhammer/FoundationModelsKanban.git",
+            branch: "main"
+        ),
     ],
     targets: [
         // The library target. It must not import FoundationModelsRouter,
@@ -74,6 +88,8 @@ let package = Package(
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Metrics", package: "swift-metrics"),
+                // The `Map` values of `SAHGraphQLEndpoint`.
+                .product(name: "GraphQL", package: "GraphQL"),
             ],
             // The string catalog of the texts that the library gives a UI,
             // for example `AuthFailure.Reason.message`. A host app translates
@@ -94,6 +110,11 @@ let package = Package(
                 // The request metric tests read the counts and the durations
                 // of each metric from the test metrics factory of a capture.
                 .product(name: "MetricsTestKit", package: "swift-metrics"),
+                // The tests of `SAHGraphQLEndpoint` give variables as `Map`
+                // values, and serve `KanbanGraph` through an in-process
+                // agent.
+                .product(name: "GraphQL", package: "GraphQL"),
+                .product(name: "FoundationModelsKanban", package: "FoundationModelsKanban"),
             ]
         ),
     ]

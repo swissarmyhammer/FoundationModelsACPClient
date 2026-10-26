@@ -18,6 +18,10 @@ import Testing
 //   and then `{"data":{"cancelled":true}}` each time the server cancels
 //   another stream of the endpoint.
 //
+// Another host tool gives the `kanban` endpoint (`KanbanGraph`) over the
+// board of the workspace. The kanban tests reach it as a `GraphQLEndpoint`
+// with `SAHGraphQLClient.endpoint(named:sessionId:)`.
+//
 // The tests use the public API of the library only. No wait reads a clock or
 // polls: each wait reads a stream, and the close of the connection ends each
 // stream.
@@ -33,6 +37,12 @@ private let probeEndpoint = "probe"
 
 /// The document of each probe call. The probe endpoint does not read it.
 private let probeDocument = "{ probe }"
+
+/// The name of the kanban endpoint of the server.
+private let kanbanEndpoint = "kanban"
+
+/// The mutation that makes the board of the session, with the name `Work`.
+private let initBoardDocument = #"mutation { initBoard(input: {name: "Work"}) { id } }"#
 
 /// The first event of a watching stream.
 private let watchingEvent: JSONValue = .object(["data": .object(["watching": .bool(true)])])
@@ -169,7 +179,28 @@ private func graphQLErrorCodes(of error: (any Error)?) -> [String]? {
     guard case .graphQL(.array(let items))? = error as? SAHGraphQLError else {
         return nil
     }
-    return items.compactMap { item in
+    return codes(of: items)
+}
+
+/// The `extensions.code` of each GraphQL error of a JSON response text.
+///
+/// - Parameter text: The JSON text of the response.
+/// - Returns: The codes, in order; an error with no code gives no entry.
+private func graphQLErrorCodes(inResponse text: String) -> [String] {
+    guard case .object(let response)? = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+        case .array(let items)? = response["errors"]
+    else {
+        return []
+    }
+    return codes(of: items)
+}
+
+/// The `extensions.code` of each GraphQL error of an `errors` array.
+///
+/// - Parameter items: The GraphQL errors.
+/// - Returns: The codes, in order; an error with no code gives no entry.
+private func codes(of items: [JSONValue]) -> [String] {
+    items.compactMap { item in
         guard case .object(let error) = item,
             case .object(let extensions)? = error["extensions"],
             case .string(let code)? = extensions["code"]
@@ -178,6 +209,26 @@ private func graphQLErrorCodes(of error: (any Error)?) -> [String]? {
         }
         return code
     }
+}
+
+/// Reads one string at a path of keys in a JSON response text.
+///
+/// - Parameters:
+///   - keys: The keys from the top object down.
+///   - text: The JSON text of the response.
+/// - Returns: The string, or `nil` when the path has no string.
+private func string(at keys: [String], inResponse text: String) -> String? {
+    var value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+    for key in keys {
+        guard case .object(let object)? = value else {
+            return nil
+        }
+        value = object[key]
+    }
+    guard case .string(let string)? = value else {
+        return nil
+    }
+    return string
 }
 
 @MainActor
@@ -271,5 +322,57 @@ struct GraphQLTunnelTests {
 
         let ending = await nextResult(of: &held)
         #expect(endingError(of: ending) as? SAHGraphQLError == .connectionClosed)
+    }
+
+    // MARK: - The kanban endpoint as a GraphQLEndpoint
+
+    @Test func anUnknownEndpointNameThrowsUnknownEndpoint() async throws {
+        let agent = try await TunnelAgent.start()
+        defer { await agent.stop() }
+
+        await #expect(throws: SAHGraphQLEndpointError.unknownEndpoint(name: "noSuchEndpoint")) {
+            try await agent.client.endpoint(named: "noSuchEndpoint", sessionId: agent.sessionId)
+        }
+    }
+
+    // The agent gives the trust `userDevice` to a connection with no
+    // connection header, as this stdio connection is. Only an HTTP
+    // connection with no device token is `external`, so this test cannot
+    // check `UNREACHABLE_BOARD`. `SAHGraphQLEndpointTests` of the unit tests
+    // checks it with an agent that gives an `external` viewer.
+    @Test func theKanbanEndpointReadsAndWritesTheBoardOfItsSession() async throws {
+        let agent = try await TunnelAgent.start()
+        defer { await agent.stop() }
+        let kanban = try await agent.client.endpoint(named: kanbanEndpoint, sessionId: agent.sessionId)
+
+        let made = try await kanban.execute(query: initBoardDocument, variables: [:], operationName: nil, viewer: nil)
+        let own = try await kanban.execute(query: "{ board { name } }", variables: [:], operationName: nil, viewer: nil)
+
+        #expect(graphQLErrorCodes(inResponse: made) == [], "\(made)")
+        #expect(own == #"{"data":{"board":{"name":"Work"}}}"#)
+    }
+
+    @Test func aKanbanMutationGivesOneSubscriptionEvent() async throws {
+        let agent = try await TunnelAgent.start()
+        defer { await agent.stop() }
+        let kanban = try await agent.client.endpoint(named: kanbanEndpoint, sessionId: agent.sessionId)
+        _ = try await kanban.execute(query: initBoardDocument, variables: [:], operationName: nil, viewer: nil)
+        let read = try await kanban.execute(query: "{ board { cursor } }", variables: [:], operationName: nil, viewer: nil)
+        let cursor = try #require(string(at: ["data", "board", "cursor"], inResponse: read), "\(read)")
+
+        let added = try await kanban.execute(
+            query: #"mutation { addTask(input: {title: "Write the tests"}) { id } }"#, variables: [:],
+            operationName: nil, viewer: nil)
+        let addedId = try #require(string(at: ["data", "addTask", "id"], inResponse: added), "\(added)")
+        // The subscription starts from the cursor before the mutation, so its
+        // first event is the change of the mutation, with no race.
+        var changes = try await kanban.subscribe(
+            query: #"subscription { changes(after: "\#(cursor)") { updates { id } } }"#, variables: [:],
+            operationName: nil, viewer: nil
+        ).makeAsyncIterator()
+        let event = try #require(try await changes.next())
+
+        #expect(event.contains(addedId), "\(event)")
+        #expect(graphQLErrorCodes(inResponse: event) == [], "\(event)")
     }
 }
