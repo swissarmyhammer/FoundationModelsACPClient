@@ -47,6 +47,20 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// The `_meta` field of the tool call.
     public internal(set) var meta: JSONValue?
 
+    /// The child session that this tool call started, from the
+    /// `_meta.sah.agentRun` link of the tool call, or `nil` when the call has
+    /// no link or the child is gone. The reference is weak: the parent owns
+    /// its children.
+    @ObservationIgnored public internal(set) weak var childSession: SessionModel?
+
+    /// Sets the child session of this tool call.
+    ///
+    /// - Parameter child: The child, or `nil`.
+    func setChild(_ child: SessionModel?) {
+        guard childSession !== child else { return }
+        childSession = child
+    }
+
     /// The local identities of the pending elicitations that name this tool
     /// call, in the order they arrived.
     public internal(set) var linkedElicitationIDs: [PendingElicitation.ID] = []

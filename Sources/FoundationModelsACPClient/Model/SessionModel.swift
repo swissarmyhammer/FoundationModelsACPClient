@@ -243,6 +243,19 @@ public final class SessionModel: Identifiable {
     /// `nil` when the agent gave none. A root session has none here.
     public internal(set) var capabilities: SubagentSessionCapabilities?
 
+    /// Whether the work state of this session is current. A root session is
+    /// always confirmed. A child is unconfirmed after a resume until its first
+    /// current snapshot: it shows ``workState`` unknown, it has no
+    /// capabilities, and it allows no cancel. A snapshot of a replay is
+    /// history and never confirms.
+    public internal(set) var isWorkStateConfirmed = true
+
+    /// The id of the tool call that started this child, from the
+    /// `_meta.sah.agentRun` link of its `subagent_update`, or `nil` when the
+    /// child has no link. The model removes a finished child when this tool
+    /// call reaches a final status.
+    public internal(set) var startedByToolCallId: ToolCallId?
+
     /// The last state that the parent mirrored onto the child, so the model
     /// writes a mirrored state one time and never over a later state of the
     /// child itself.
@@ -704,6 +717,7 @@ public final class SessionModel: Identifiable {
             timekeeper.entryDidStart(object)
         }
         transcript.append(object)
+        refreshChildLinks()
     }
 
     /// Copies the merged state of a changed engine entry into its object.
@@ -726,6 +740,7 @@ public final class SessionModel: Identifiable {
         }
         object.update(from: entry)
         timekeeper.entryDidChange(object)
+        refreshChildLinks()
     }
 
     /// Records a defect of the model: the assertion stops a debug build, and

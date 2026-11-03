@@ -22,7 +22,7 @@ import Synchronization
 ///
 /// ``ScriptedStubAgent`` sends its script before the prompt answer: the old
 /// order of a prompt turn.
-final class MailOrderStubAgent: Agent {
+final class MailOrderStubAgent: Agent, UpdateSendingStubAgent {
     /// The connection back to the client.
     private let connection: AgentSideConnection
 

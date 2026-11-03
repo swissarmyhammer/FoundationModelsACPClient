@@ -23,35 +23,17 @@ private let grandChild = SessionId(rawValue: "grandchild-1")
 /// session. The test sends the child updates itself.
 @MainActor
 private struct SubagentConnection {
-    /// The model under test.
-    let model: ConnectionModel
+    let connected: ConnectedStub<MailOrderStubAgent>
 
-    /// The agent-side connection. The test holds it so that the agent end of
-    /// the pair outlives the test body.
-    let agentConnection: AgentSideConnection
+    var model: ConnectionModel { connected.model }
+    var agent: MailOrderStubAgent { connected.agent }
+    var root: SessionModel { connected.root }
 
-    /// The stub agent.
-    let agent: MailOrderStubAgent
-
-    /// The open root session.
-    let root: SessionModel
-
-    /// Connects a model, initializes it, and opens the root session.
+    /// Connects the model and opens the root session.
     ///
     /// - Throws: The error of `initialize` or of `session/new`.
-    init() async throws {
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let built = Mutex<MailOrderStubAgent?>(nil)
-        agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
-            let stub = MailOrderStubAgent(connection: connection, messageIds: [])
-            built.withLock { $0 = stub }
-            return stub
-        }
-        model = ConnectionModel(coalescingCadence: .zero)
-        _ = await model.connect(over: clientEnd)
-        _ = try await model.initialize(makeInitializeRequest())
-        root = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        agent = try #require(built.withLock { $0 })
+    static func make() async throws -> Self {
+        Self(connected: try await ConnectedStub.make { MailOrderStubAgent(connection: $0, messageIds: []) })
     }
 
     /// Announces a child session in the stream of its parent, and waits
@@ -64,24 +46,7 @@ private struct SubagentConnection {
     /// - Throws: ``WaitEndedOnFailure`` when the root session closed first.
     @discardableResult
     func announce(_ child: SubagentUpdate, in parent: SessionId = testSession) async throws -> SessionModel {
-        try await agent.send(.subagentUpdate(child), to: parent)
-        try await waitForObservation { self.child(child.sessionId) != nil } orFailWhen: { root.isClosed }
-        return try #require(self.child(child.sessionId))
-    }
-
-    /// Finds the model of a child session in the tree under the root.
-    ///
-    /// - Parameter sessionId: The id of the child.
-    /// - Returns: The model, or `nil` when no model has that id.
-    func child(_ sessionId: SessionId) -> SessionModel? {
-        func find(in session: SessionModel) -> SessionModel? {
-            for child in session.children {
-                if child.id == sessionId { return child }
-                if let found = find(in: child) { return found }
-            }
-            return nil
-        }
-        return find(in: root)
+        try await connected.announce(.subagentUpdate(child), child: child.sessionId, in: parent)
     }
 }
 
@@ -111,7 +76,7 @@ struct SubagentTreeTests {
     // MARK: - Tree
 
     @Test func aSubagentUpdateMakesAChildThatKnowsItsParent() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
@@ -121,7 +86,7 @@ struct SubagentTreeTests {
     }
 
     @Test func childrenAreInAnnounceOrder() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         try await connected.announce(SubagentUpdate(sessionId: secondChild))
@@ -131,7 +96,7 @@ struct SubagentTreeTests {
     }
 
     @Test func aChildOfAChildWorksByTheSameRule() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
@@ -143,7 +108,7 @@ struct SubagentTreeTests {
     }
 
     @Test func aRepeatedAnnouncementKeepsTheSameChildObject() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild, title: .value("one")))
 
@@ -157,7 +122,7 @@ struct SubagentTreeTests {
     // MARK: - Patch rules
 
     @Test func aValueReplacesAndAnOmittedFieldStaysAndNullClears() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(
             SubagentUpdate(sessionId: firstChild, description: .value("reads"), title: .value("Reader"))
@@ -173,7 +138,7 @@ struct SubagentTreeTests {
     }
 
     @Test func theCwdAndTheAdditionalDirectoriesFollowThePatchRules() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let work = AbsolutePath(rawValue: "/work")
         let extra = AbsolutePath(rawValue: "/extra")
@@ -187,7 +152,7 @@ struct SubagentTreeTests {
     }
 
     @Test func capabilitiesReplaceAsAWhole() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let cancelOnly = SubagentSessionCapabilities(cancel: SessionCancelCapabilities())
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild, capabilities: .value(cancelOnly)))
@@ -206,7 +171,7 @@ struct SubagentTreeTests {
     // MARK: - Work state
 
     @Test func aChildHasUnknownWorkStateUntilItReportsOne() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
@@ -215,7 +180,7 @@ struct SubagentTreeTests {
     }
 
     @Test func theWorkStateFollowsTheStateUpdatesOfTheChild() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 
@@ -232,7 +197,7 @@ struct SubagentTreeTests {
     }
 
     @Test func theStateOfASubagentUpdateSetsTheWorkState() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         let child = try await connected.announce(
@@ -245,7 +210,7 @@ struct SubagentTreeTests {
     // MARK: - Routing
 
     @Test func anUpdateWithTheChildIdReachesOnlyTheChild() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 
@@ -256,7 +221,7 @@ struct SubagentTreeTests {
     }
 
     @Test func anUpdateOfAnUnannouncedChildChangesNoModel() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         try await connected.agent.send(agentChunk(text: "lost"), to: secondChild)
@@ -269,7 +234,7 @@ struct SubagentTreeTests {
     }
 
     @Test func aSessionMessageGoesToTheTranscriptOfTheOuterSession() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let message = SessionMessage(
             messageId: MessageId(rawValue: "m-1"),
@@ -289,7 +254,7 @@ struct SubagentTreeTests {
     // MARK: - Cancel
 
     @Test func cancelOnAChildSendsSessionCancelWithTheChildId() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(
             SubagentUpdate(
@@ -312,7 +277,7 @@ struct SubagentTreeTests {
 
 extension SubagentTreeTests {
     @Test func aPermissionRequestWithTheChildIdStaysWithTheChild() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
         let request = RequestPermissionRequest(
@@ -330,7 +295,7 @@ extension SubagentTreeTests {
     }
 
     @Test func anElicitationWithTheChildIdStaysWithTheChild() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
         let request = ElicitationFixtures.formRequest(scope: .session(ElicitationSessionScope(sessionId: firstChild)))
@@ -345,7 +310,7 @@ extension SubagentTreeTests {
     // MARK: - Refused operations
 
     @Test func promptOnAChildThrowsWithoutSending() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 
@@ -355,7 +320,7 @@ extension SubagentTreeTests {
     }
 
     @Test func cancelOnAChildWithNoCancelCapabilityThrowsWithoutSending() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 
@@ -365,7 +330,7 @@ extension SubagentTreeTests {
     }
 
     @Test func setConfigOptionOnAChildThrowsWithoutSending() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
         let request = SetSessionConfigOptionRequest(
@@ -380,7 +345,7 @@ extension SubagentTreeTests {
     }
 
     @Test func closeOnAChildThrowsWithoutSending() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 
@@ -390,7 +355,7 @@ extension SubagentTreeTests {
     }
 
     @Test func slashCommandsOfAChildAreNotOffered() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
         let command = AvailableCommand.command(Command(description: "Makes a plan", name: "plan"))
@@ -409,7 +374,7 @@ extension SubagentTreeTests {
     // MARK: - Close
 
     @Test func closingAParentRemovesItsChildrenAtEachLevel() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
         let nested = try await connected.announce(SubagentUpdate(sessionId: grandChild), in: firstChild)
@@ -455,7 +420,7 @@ extension SubagentTreeTests {
     // MARK: - Observation
 
     @Test func aNewChildFiresTheObservationOfChildren() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
 
         let fired = await observationFiresAsync(reading: { _ = connected.root.children }, during: {
@@ -466,7 +431,7 @@ extension SubagentTreeTests {
     }
 
     @Test func aChangeOfTheWorkStateFiresItsObservation() async throws {
-        let connected = try await SubagentConnection()
+        let connected = try await SubagentConnection.make()
         defer { await connected.model.disconnect() }
         let child = try await connected.announce(SubagentUpdate(sessionId: firstChild))
 

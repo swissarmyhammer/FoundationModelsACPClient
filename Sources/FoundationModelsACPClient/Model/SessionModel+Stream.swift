@@ -194,6 +194,14 @@ extension SessionModel {
             flushPendingChunks()
             resetTranscript()
         }
+        // A replay with history rebuilds the child models from the replayed
+        // announcements. A resume with no history keeps them, and each one
+        // waits for a current snapshot.
+        if replayFrom != nil {
+            closeChildren()
+        } else {
+            invalidateChildren()
+        }
         replayRequests = ReplayRequests()
         replayedUpdateCount = 0
         replayPhase = .replaying(from: replayFrom)
@@ -217,6 +225,7 @@ extension SessionModel {
         replayPhase = .idle
         replayRequests = ReplayRequests()
         replaySucceeded = succeeded
+        endChildReplays(succeeded: succeeded)
         defer { resumeReplayEndWaiters() }
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
         history = .retained(replayFrom: replayFrom)

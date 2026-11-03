@@ -40,7 +40,8 @@ public enum SessionWorkState: Hashable, Sendable {
 extension SessionModel {
     /// The state of the foreground work, from ``agentState``.
     public var workState: SessionWorkState {
-        switch agentState {
+        if parent != nil, !isWorkStateConfirmed { return .unknown }
+        return switch agentState {
         case .running: .running
         case .requiresAction: .requiresAction
         case .idle(let idle): .idle(stopReason: idle.stopReason, error: idle.error)
@@ -51,23 +52,85 @@ extension SessionModel {
     /// Writes the folded announcement of this child.
     ///
     /// Each field of the fold is the whole current value, so a field that no
-    /// update gave is `nil`. The state is the exception: the child sends its
-    /// own `state_update` too, so the model writes a mirrored state only when
-    /// the parent changed it.
+    /// update gave is `nil`. A snapshot of a replay is history: it writes the
+    /// description of the child, and it never writes the capabilities or the
+    /// state, and never confirms the child. A current snapshot writes them and
+    /// confirms the child. The state is written only when the parent changed
+    /// it, because the child sends its own `state_update` too.
     ///
-    /// - Parameter announcement: The folded `subagent_update` of this child.
-    func applyAnnouncement(_ announcement: SubagentUpdate) {
+    /// - Parameters:
+    ///   - announcement: The folded `subagent_update` of this child.
+    ///   - isHistory: Whether the announcement is part of a replay.
+    func applyAnnouncement(_ announcement: SubagentUpdate, isHistory: Bool) {
         write(announcement.title.currentValue, to: \.title)
         write(announcement.description.currentValue, to: \.description)
-        write(announcement.capabilities.currentValue, to: \.capabilities)
         write(announcement.cwd.currentValue, to: \.cwd)
         write(announcement.additionalDirectories.currentValue ?? [], to: \.additionalDirectories)
-        guard announcement.state != mirroredState else { return }
-        mirroredState = announcement.state
-        switch announcement.state {
-        case .value(let state): changeAgentState(state)
-        case .cleared: agentState = nil
-        case .unchanged: break
+        write(SAH.AgentRun.extract(from: announcement.meta.currentValue)?.toolCallId, to: \.startedByToolCallId)
+        guard !isHistory else { return }
+        write(announcement.capabilities.currentValue, to: \.capabilities)
+        if announcement.state != mirroredState {
+            mirroredState = announcement.state
+            switch announcement.state {
+            case .value(let state): changeAgentState(state)
+            case .cleared: agentState = nil
+            case .unchanged: break
+            }
+        }
+        write(true, to: \.isWorkStateConfirmed)
+    }
+
+    /// Forgets the current state of each descendant: a resume makes the cached
+    /// work state and capabilities of each child stale. Each child is
+    /// unconfirmed until its first current snapshot.
+    func invalidateChildren() {
+        for child in children {
+            child.write(nil, to: \.capabilities)
+            child.mirroredState = .unchanged
+            if child.agentState != nil { child.agentState = nil }
+            child.write(false, to: \.isWorkStateConfirmed)
+            child.invalidateChildren()
+        }
+    }
+
+    /// Closes and removes each child, at each level.
+    func closeChildren() {
+        let closing = children
+        children.removeAll()
+        for child in closing {
+            child.markClosed()
+        }
+    }
+
+    /// Ends the replay of each child that still replays, at the end of the
+    /// replay of this session. A child has no marker of its own.
+    ///
+    /// - Parameter succeeded: Whether the root replay ended with a result.
+    func endChildReplays(succeeded: Bool) {
+        for child in children where child.isReplaying {
+            child.endReplay(succeeded: succeeded)
+        }
+    }
+
+    /// Removes this child from its parent and closes it, at each level.
+    func removeFromParent() {
+        parent?.children.removeAll { $0 === self }
+        markClosed()
+    }
+
+    /// Links each tool-call entry to the child that its `_meta.sah.agentRun`
+    /// names, and removes each child whose started-by tool call reached a
+    /// final status.
+    func refreshChildLinks() {
+        guard !children.isEmpty || transcript.contains(where: { if case .toolCall = $0 { true } else { false } }) else { return }
+        for case .toolCall(let entry) in transcript {
+            let linked = SAH.AgentRun.extract(from: entry.meta)?.sessionId
+            entry.setChild(children.first { $0.sessionId == linked && linked != nil })
+            guard let status = entry.status, status.isFinal else { continue }
+            for child in children where child.startedByToolCallId == entry.toolCallId {
+                child.removeFromParent()
+                entry.setChild(nil)
+            }
         }
     }
 

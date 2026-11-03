@@ -140,10 +140,7 @@ extension TranscriptEntry {
     /// - Returns: `true` for `completed`, `failed`, and `cancelled`. A
     ///   `paused` tool call is not final: it can return to `in_progress`.
     private static func isFinished(_ status: ToolCallStatus) -> Bool {
-        switch status {
-        case .completed, .failed, .cancelled: true
-        case .pending, .inProgress, .paused, .unknown: false
-        }
+        status.isFinal
     }
 
     /// Tells whether a compaction status is a final status.
@@ -221,5 +218,17 @@ struct TranscriptTimekeeper {
     private mutating func endOpenEntry(at date: Date) {
         openEntry?.end(at: date)
         openEntry = nil
+    }
+}
+
+extension ToolCallStatus {
+    /// Whether this is a final status: `completed`, `failed`, or
+    /// `cancelled`. A `paused` tool call is not final, because it can return
+    /// to `in_progress`.
+    var isFinal: Bool {
+        switch self {
+        case .completed, .failed, .cancelled: true
+        case .pending, .inProgress, .paused, .unknown: false
+        }
     }
 }

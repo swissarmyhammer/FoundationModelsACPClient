@@ -38,7 +38,8 @@ extension ConnectionModel {
     ///   - parent: The session that announced the child.
     func applySubagent(_ announcement: SubagentUpdate, under parent: SessionModel) {
         if let child = parent.children.first(where: { $0.sessionId == announcement.sessionId }) {
-            child.applyAnnouncement(announcement)
+            child.applyAnnouncement(announcement, isHistory: parent.isReplayingHistory)
+            parent.refreshChildLinks()
             return
         }
         guard let connection, session(for: announcement.sessionId) == nil,
@@ -50,8 +51,15 @@ extension ConnectionModel {
             return
         }
         let child = makeSubscribedSessionModel(sessionId: announcement.sessionId, over: connection)
+        if parent.isReplayingHistory {
+            // A child of a replay is history until the response of the root
+            // request ends its replay, and it is unconfirmed after that.
+            child.isWorkStateConfirmed = false
+            child.replayPhase = parent.replayPhase
+        }
         parent.addChild(child)
-        child.applyAnnouncement(announcement)
+        child.applyAnnouncement(announcement, isHistory: parent.isReplayingHistory)
+        parent.refreshChildLinks()
     }
 
     /// Throws when a session id names a child, because the client sends no
