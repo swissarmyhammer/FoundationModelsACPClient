@@ -256,6 +256,10 @@ public final class SessionModel: Identifiable {
     /// call reaches a final status.
     public internal(set) var startedByToolCallId: ToolCallId?
 
+    /// The connection model that made this session model. A root session reads
+    /// it to list the root sessions as its siblings. The reference is weak.
+    @ObservationIgnored weak var owner: ConnectionModel?
+
     /// The last state that the parent mirrored onto the child, so the model
     /// writes a mirrored state one time and never over a later state of the
     /// child itself.

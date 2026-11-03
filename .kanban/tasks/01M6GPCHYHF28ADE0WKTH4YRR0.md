@@ -1,6 +1,11 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m6gzyj8cmj4rvbrfbvmd9gjt
+  text: 'BLOCKED BY (other board, so not in depends_on): FoundationModelsACP card 01M6GZRBRBGZHYHWJ00YRHVMFB (shortid yrhvmfb): SessionMergeEngine gets a replay boundary call, so a current subagent_update that omits state or capabilities does not keep the history value. The client calls it when the resume response arrives (SessionModel.endReplay). The ACP session will message the commit id and the final call name. Until then, a child that gets a current snapshot with no state can show the history state as confirmed (see the card 2/4 comment).'
+  timestamp: 2026-11-03T15:20:24.588890+00:00
 depends_on:
 - 01M6GH6FH41C6VSFC3QRT8H1FS
 - 01M6GPC4KAYTRB13E8SE6SRMMS

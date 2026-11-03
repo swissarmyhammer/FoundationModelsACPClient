@@ -1,6 +1,16 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m6gzyfyzcwxnmjxz6w52rp9n
+  text: |-
+    Ready for review, 2026-11-03. Not committed. Root `swift test`: 760 tests pass (14 new in SubagentDerivedViewTests). Review (review working): clean, 0 findings.
+
+    Public API (SessionModel+Views.swift): SessionPathEntry (sessionId, title, path, workState, pendingRequestCount, needsAttention; Hashable, Sendable, Identifiable). On SessionModel: displayTitle (child title, else sessionInfo title, else session id), pendingRequestCount (own only), needsAttention (own requires_action or own pending request or any child needsAttention; false when closed), pathEntry, ancestors (root first), siblings (parent.children, or the open root sessions for a root), descendants (depth first, announce order, computed). One rule at every level; tests run at depth 2 and 4. No selected-session state in ConnectionModel. A root session reads its siblings through a weak owner link set by ConnectionModel.
+
+    Note for card 4: replayed content raises no needsAttention because a replayed child is unconfirmed (workState unknown) and a replay makes no pending request. The wire gap (history snapshot state kept) now has ACP card 01M6GZRBRBGZHYHWJ00YRHVMFB (shortid yrhvmfb): the engine gets a replay boundary call. Card 4 needs that card if it must show unknown after a current snapshot with no state.
+  timestamp: 2026-11-03T15:20:22.239300+00:00
 depends_on:
 - 01M6GH6FH41C6VSFC3QRT8H1FS
 position_column: todo
