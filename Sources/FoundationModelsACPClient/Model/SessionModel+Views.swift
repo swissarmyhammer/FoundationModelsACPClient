@@ -193,7 +193,20 @@ extension SessionModel {
     /// All sessions below this session, depth first, in announce order. The
     /// list is computed from ``children`` and keeps no copy.
     public var descendants: [SessionPathEntry] {
-        children.flatMap { [$0.pathEntry] + $0.descendants }
+        descendantModels.map(\.pathEntry)
+    }
+
+    /// All models below this session, depth first, in announce order.
+    var descendantModels: [SessionModel] {
+        Self.subtrees(of: children)
+    }
+
+    /// Each given model followed by all models below it, depth first.
+    ///
+    /// - Parameter models: The roots of the subtrees.
+    /// - Returns: The models of the subtrees, in announce order.
+    static func subtrees(of models: [SessionModel]) -> [SessionModel] {
+        models.flatMap { [$0] + $0.descendantModels }
     }
 
     /// The titles from the root session to this session, this session last.

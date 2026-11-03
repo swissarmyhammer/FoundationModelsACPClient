@@ -5,9 +5,10 @@
 /// pending item, and ``KeyedTurnQueue`` keys its callers by the key of their
 /// operation. The callers of one key wait in call order.
 ///
-/// A caller resumes in one of two ways:
+/// A caller resumes in one of three ways:
 ///
 /// - ``resumeFirst(of:with:)`` resumes the first caller of a key with a value.
+/// - ``resumeAll(keysWhere:with:)`` resumes each caller of the accepted keys.
 /// - Cancellation of the task of the caller takes the caller out of the
 ///   queue and resumes it with the cancelled value. A caller whose task was
 ///   cancelled before the call does not wait: it gets the cancelled value at
@@ -92,6 +93,20 @@ final class KeyedWaiters<Key: Hashable & Sendable, Value: Sendable> {
         waiters[key] = queue.isEmpty ? nil : queue
         first.continuation.resume(returning: value)
         return true
+    }
+
+    /// Resumes each caller of each key that the predicate accepts, with one
+    /// value.
+    ///
+    /// - Parameters:
+    ///   - shouldResume: Tells if the callers of a key must resume.
+    ///   - value: The value to resume the callers with.
+    func resumeAll(keysWhere shouldResume: (Key) -> Bool, with value: Value) {
+        for key in waiters.keys where shouldResume(key) {
+            for waiter in waiters.removeValue(forKey: key) ?? [] {
+                waiter.continuation.resume(returning: value)
+            }
+        }
     }
 
     /// Takes a cancelled caller out of the callers of a key, resumes it with

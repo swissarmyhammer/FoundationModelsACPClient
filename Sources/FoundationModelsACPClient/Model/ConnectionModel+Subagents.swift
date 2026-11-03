@@ -59,9 +59,8 @@ extension ConnectionModel {
     ///
     /// - Parameter children: The child models to forget.
     func forgetChildren(_ children: [SessionModel]) {
-        for child in children {
+        for child in SessionModel.subtrees(of: children) {
             removeFromIndex(child)
-            forgetChildren(child.children)
         }
     }
 
@@ -70,10 +69,9 @@ extension ConnectionModel {
     ///
     /// - Parameter children: The child models to index again.
     func reviveChildren(_ children: [SessionModel]) {
-        for child in children {
+        for child in SessionModel.subtrees(of: children) {
             childModels[child.sessionId] = child
             closedSessionIds.remove(child.sessionId)
-            reviveChildren(child.children)
         }
     }
 

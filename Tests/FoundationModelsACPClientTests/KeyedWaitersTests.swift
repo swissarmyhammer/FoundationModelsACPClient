@@ -139,3 +139,21 @@ func aWaiterWhoseTaskWasCancelledBeforeTheCallDoesNotWait() async throws {
     #expect(log.suspended.isEmpty)
     #expect(!waiters.resumeFirst(of: firstKey, with: "one"))
 }
+
+@MainActor @Test
+func resumeAllResumesTheWaitersOfEachAcceptedKeyAndNoOther() async throws {
+    let waiters = makeWaiters()
+    let log = WaiterLog()
+    let accepted = startWaiter("accepted", for: firstKey, on: waiters, log: log)
+    let acceptedEnd = TaskEnd(of: accepted)
+    try await waitUntil { log.suspended == ["accepted"] } orFailWhen: { acceptedEnd.hasEnded }
+    let kept = startWaiter("kept", for: secondKey, on: waiters, log: log)
+    let keptEnd = TaskEnd(of: kept)
+    try await waitUntil { log.suspended == ["accepted", "kept"] } orFailWhen: { keptEnd.hasEnded }
+
+    waiters.resumeAll(keysWhere: { $0 == firstKey }, with: "all")
+
+    #expect(await accepted.value == "all")
+    #expect(waiters.resumeFirst(of: secondKey, with: "later"))
+    #expect(await kept.value == "later")
+}

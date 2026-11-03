@@ -46,6 +46,20 @@ private struct SubagentConnection {
     func announce(_ child: SubagentUpdate, in parent: SessionId = testSession) async throws -> SessionModel {
         try await connected.announce(.subagentUpdate(child), child: child.sessionId, in: parent)
     }
+
+    /// Sends an idle state update to a child, and waits until the child shows
+    /// the idle work state.
+    ///
+    /// - Parameters:
+    ///   - child: The child session model.
+    ///   - stopReason: The stop reason of the idle state.
+    /// - Throws: ``WaitEndedOnFailure`` when the root session closed first.
+    func sendIdleAndWait(_ child: SessionModel, stopReason: StopReason) async throws {
+        try await agent.send(.stateUpdate(.idle(IdleStateUpdate(stopReason: stopReason))), to: child.sessionId)
+        try await waitForObservation { child.workState == .idle(stopReason: stopReason, error: nil) } orFailWhen: {
+            root.isClosed
+        }
+    }
 }
 
 /// Tells if an asynchronous write fires the observation of a read.
@@ -185,13 +199,7 @@ struct SubagentTreeTests {
         try await connected.agent.send(.stateUpdate(.running(RunningStateUpdate())), to: firstChild)
         try await waitForObservation { child.workState == .running } orFailWhen: { connected.root.isClosed }
 
-        try await connected.agent.send(
-            .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))),
-            to: firstChild
-        )
-        try await waitForObservation { child.workState == .idle(stopReason: .cancelled, error: nil) } orFailWhen: {
-            connected.root.isClosed
-        }
+        try await connected.sendIdleAndWait(child, stopReason: .cancelled)
     }
 
     @Test func theStateOfASubagentUpdateSetsTheWorkState() async throws {
@@ -211,10 +219,7 @@ struct SubagentTreeTests {
         let child = try await connected.announce(
             SubagentUpdate(sessionId: firstChild, state: .value(.running(RunningStateUpdate())))
         )
-        try await connected.agent.send(.stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))), to: firstChild)
-        try await waitForObservation { child.workState == .idle(stopReason: .endTurn, error: nil) } orFailWhen: {
-            connected.root.isClosed
-        }
+        try await connected.sendIdleAndWait(child, stopReason: .endTurn)
 
         try await connected.agent.send(.subagentUpdate(SubagentUpdate(sessionId: firstChild, title: .value("Late"))))
         try await waitForObservation { child.title == "Late" } orFailWhen: { connected.root.isClosed }
@@ -228,10 +233,7 @@ struct SubagentTreeTests {
         let child = try await connected.announce(
             SubagentUpdate(sessionId: firstChild, state: .value(.running(RunningStateUpdate())))
         )
-        try await connected.agent.send(.stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))), to: firstChild)
-        try await waitForObservation { child.workState == .idle(stopReason: .endTurn, error: nil) } orFailWhen: {
-            connected.root.isClosed
-        }
+        try await connected.sendIdleAndWait(child, stopReason: .endTurn)
 
         try await connected.agent.send(
             .subagentUpdate(SubagentUpdate(sessionId: firstChild, state: .value(.requiresAction(RequiresActionStateUpdate()))))

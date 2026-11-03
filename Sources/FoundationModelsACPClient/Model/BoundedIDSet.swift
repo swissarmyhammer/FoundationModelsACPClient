@@ -1,3 +1,5 @@
+import Logging
+
 /// A set of ids with a fixed size limit. It drops the oldest id when a new id
 /// goes over the limit, so a long-running connection holds a bounded table.
 struct BoundedIDSet<ID: Hashable>: Sendable where ID: Sendable {
@@ -15,6 +17,11 @@ struct BoundedIDSet<ID: Hashable>: Sendable where ID: Sendable {
     /// - Parameter limit: The most ids that the set holds. It must be 1 or
     ///   more.
     init(limit: Int) {
+        if limit < 1 {
+            let detail = "limit must be 1 or more, got \(limit)"
+            assertionFailure(detail)
+            Logger(label: ACPClientTelemetry.logLabel).error("\(detail)")
+        }
         self.limit = max(1, limit)
     }
 
@@ -33,12 +40,16 @@ struct BoundedIDSet<ID: Hashable>: Sendable where ID: Sendable {
     /// set is over its limit, the oldest id leaves.
     ///
     /// - Parameter id: The id to add.
-    mutating func insert(_ id: ID) {
-        guard members.insert(id).inserted else { return }
+    /// - Returns: The oldest id that left because the set went over its
+    ///   limit, or `nil` when no id left.
+    @discardableResult
+    mutating func insert(_ id: ID) -> ID? {
+        guard members.insert(id).inserted else { return nil }
         order.append(id)
-        if members.count > limit {
-            members.remove(order.removeFirst())
-        }
+        guard members.count > limit else { return nil }
+        let evicted = order.removeFirst()
+        members.remove(evicted)
+        return evicted
     }
 
     /// Removes an id.

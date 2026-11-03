@@ -51,11 +51,15 @@ struct SubagentRestoreFailureTests {
                 UpdateSessionNotification(sessionId: testSession, update: try snapshot(firstChild))
             )
         }
+        // The build of the snapshot is in the throwing test, so a failed build
+        // fails the test.
+        let failed = try failedSnapshot(firstChild, reason: missingTool)
         connected.agent.setAfterAnswer { connection in
             // The failure comes with the current snapshots, after the response.
-            let failed = try? failedSnapshot(firstChild, reason: missingTool)
-            if let failed {
-                try? await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: failed))
+            do {
+                try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: failed))
+            } catch {
+                Issue.record(error, "the stub agent could not send the failure snapshot")
             }
         }
         _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)

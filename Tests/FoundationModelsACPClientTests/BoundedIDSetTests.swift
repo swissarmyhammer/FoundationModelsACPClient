@@ -40,4 +40,17 @@ struct BoundedIDSetTests {
 
         #expect(ids.contains(2) && ids.contains(3))
     }
+
+    @Test func anIdOverTheLimitIsReturnedAsEvicted() {
+        var ids = BoundedIDSet<Int>(limit: 1)
+        ids.insert(1)
+
+        #expect(ids.insert(2) == 1)
+    }
+
+    @Test func anIdWithinTheLimitEvictsNothing() {
+        var ids = BoundedIDSet<Int>(limit: 2)
+
+        #expect(ids.insert(1) == nil)
+    }
 }
