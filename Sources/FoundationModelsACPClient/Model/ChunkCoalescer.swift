@@ -74,7 +74,7 @@ final class ChunkCoalescer {
         case .userMessageChunk, .userMessage, .agentMessage, .agentThought, .stateUpdate, .toolCallContentChunk,
             .toolCallUpdate, .terminalUpdate, .terminalOutputChunk, .planUpdate, .availableCommandsUpdate,
             .configOptionUpdate, .sessionInfoUpdate, .usageUpdate, .notice, .compactionUpdate,
-            .compactionSummaryChunk, .unknown:
+            .compactionSummaryChunk, .subagentUpdate, .sessionMessage, .sessionMessageChunk, .unknown:
             false
         }
     }

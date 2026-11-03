@@ -154,6 +154,16 @@ struct TranscriptEntryTimingTests {
         #expect(toolCall.endedAt == start + firstStep + secondStep)
     }
 
+    @Test func aPausedToolCallDoesNotEnd() throws {
+        let model = timedModel()
+
+        model.apply(toolCallStatus(id: toolCallRawId, .inProgress))
+        wallClock.advance(by: firstStep)
+        model.apply(toolCallStatus(id: toolCallRawId, .paused))
+
+        #expect(try #require(model.transcript.first?.toolCall).endedAt == nil)
+    }
+
     @Test func aLaterToolCallUpdateDoesNotMoveItsEnd() throws {
         let model = timedModel()
 

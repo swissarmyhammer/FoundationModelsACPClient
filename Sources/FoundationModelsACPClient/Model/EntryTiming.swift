@@ -109,6 +109,7 @@ extension TranscriptEntry {
         case .plan(let entry): entry.timing
         case .unknown(let entry): entry.timing
         case .compaction(let entry): entry.timing
+        case .sessionMessage(let entry): entry.timing
         case .error(let entry): entry.timing
         }
     }
@@ -125,7 +126,7 @@ extension TranscriptEntry {
     var timingEnd: TimingEnd {
         switch self {
         case .userMessage, .error: .atStart
-        case .agentMessage, .thought, .unknown: .atNextEntry
+        case .agentMessage, .thought, .unknown, .sessionMessage: .atNextEntry
         case .toolCall(let entry): .atFinish(isFinished: entry.status.map(Self.isFinished) ?? false)
         case .terminal(let entry): .atFinish(isFinished: entry.exitStatus != nil)
         case .compaction(let entry): .atFinish(isFinished: Self.isFinished(entry.status))
@@ -136,11 +137,12 @@ extension TranscriptEntry {
     /// Tells whether a tool-call status is a final status.
     ///
     /// - Parameter status: The status of the tool call.
-    /// - Returns: `true` for `completed`, `failed`, and `cancelled`.
+    /// - Returns: `true` for `completed`, `failed`, and `cancelled`. A
+    ///   `paused` tool call is not final: it can return to `in_progress`.
     private static func isFinished(_ status: ToolCallStatus) -> Bool {
         switch status {
         case .completed, .failed, .cancelled: true
-        case .pending, .inProgress, .unknown: false
+        case .pending, .inProgress, .paused, .unknown: false
         }
     }
 

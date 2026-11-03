@@ -132,7 +132,7 @@ struct PreviewRecorderTests {
 
         await model.cancelPermission(pending.id)
 
-        #expect(sender.sent == [.permissionResponse(id: pending.id, response: RequestPermissionResponse(outcome: .cancelled))])
+        #expect(sender.sent == [.permissionResponse(id: pending.id, response: RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome())))])
     }
 
     @Test func aCancelOfTheWorkRecordsThePermissionAnswerBeforeTheCancel() async throws {
@@ -144,7 +144,7 @@ struct PreviewRecorderTests {
 
         #expect(
             sender.sent == [
-                .permissionResponse(id: pending.id, response: RequestPermissionResponse(outcome: .cancelled)),
+                .permissionResponse(id: pending.id, response: RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))),
                 .cancel(CancelSessionNotification(sessionId: model.sessionId)),
             ]
         )

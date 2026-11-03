@@ -610,6 +610,9 @@ public final class SessionModel: Identifiable {
         case .usageChanged(let report): usage = report
         case .agentStateChanged(let state): changeAgentState(state)
         case .sessionInfoChanged(let info): changeSessionInfo(info)
+        // The model of the child sessions is the work of the sub-agent
+        // cards. This change adds no state to the model before that work.
+        case .subagentChanged: break
         case .notice(let notice): notices.append(SessionNotice(notice: notice, arrivalTime: elapsedTime()))
         }
     }

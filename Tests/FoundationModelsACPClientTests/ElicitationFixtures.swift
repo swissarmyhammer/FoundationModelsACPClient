@@ -20,6 +20,7 @@ enum ElicitationFixtures {
     /// string.
     static let nameSchema = ElicitationSchema(
         properties: .object(["name": .object(["type": .string("string")])]),
+        type: .object,
         required: ["name"]
     )
 

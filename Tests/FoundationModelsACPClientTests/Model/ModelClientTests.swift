@@ -123,7 +123,7 @@ struct ModelClientTests {
 
         let response = try await routed.agentConnection.requestPermission(request)
 
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
         #expect(routed.loggedMessages.count == 1)
     }
 
@@ -154,7 +154,7 @@ struct ModelClientTests {
         // The stub agent answers the prompt only after the permission request
         // returned, so the outcome is in the record when the turn ends.
         _ = try await turn.value
-        #expect(connected.permissionOutcomes == [.cancelled])
+        #expect(connected.permissionOutcomes == [.cancelled(CancelledPermissionOutcome())])
     }
 
     // MARK: - Elicitations

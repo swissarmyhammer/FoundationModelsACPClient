@@ -56,10 +56,23 @@ struct IdentifiableWireTests {
         #expect(info.id == sessionId)
     }
 
-    @Test func theIdOfAnAvailableCommandIsItsName() {
-        let command = AvailableCommand(description: "Makes a plan", name: "create_plan")
+    @Test func theIdOfACommandAvailableCommandIsItsName() {
+        let command = AvailableCommand.command(Command(description: "Makes a plan", name: "create_plan"))
 
         #expect(command.id == "create_plan")
+    }
+
+    @Test func theIdOfAnUnknownAvailableCommandIsTheNameMemberOfItsPayload() {
+        let payload = JSONValue.object(["name": .string("future_command")])
+        let command = AvailableCommand.unknown(IdentifiableWireFixtures.futureMethodType, payload)
+
+        #expect(command.id == "future_command")
+    }
+
+    @Test func theIdOfAnUnknownAvailableCommandWithNoNameIsItsType() {
+        let command = AvailableCommand.unknown(IdentifiableWireFixtures.futureMethodType, .object([:]))
+
+        #expect(command.id == IdentifiableWireFixtures.futureMethodType)
     }
 
     @Test func theIdOfAConfigOptionIsItsConfigId() {

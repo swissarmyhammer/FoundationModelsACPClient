@@ -49,6 +49,11 @@ extension TranscriptEntry {
         if case .compaction(let object) = self { object } else { nil }
     }
 
+    /// The inter-session message object, or `nil` for another kind.
+    var sessionMessage: SessionMessageEntry? {
+        if case .sessionMessage(let object) = self { object } else { nil }
+    }
+
     /// The error object, or `nil` for another kind.
     var error: ErrorEntry? {
         if case .error(let object) = self { object } else { nil }

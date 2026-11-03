@@ -14,13 +14,13 @@ private enum SessionUniqueIDFixtures {
     static let repeatedCommandName = "create_plan"
 
     /// The first copy of the repeated command.
-    static let firstPlanCommand = AvailableCommand(description: "Makes a plan", name: repeatedCommandName)
+    static let firstPlanCommand = AvailableCommand.command(Command(description: "Makes a plan", name: repeatedCommandName))
 
     /// The last copy of the repeated command.
-    static let lastPlanCommand = AvailableCommand(description: "Makes a better plan", name: repeatedCommandName)
+    static let lastPlanCommand = AvailableCommand.command(Command(description: "Makes a better plan", name: repeatedCommandName))
 
     /// A command that the agent sends one time.
-    static let researchCommand = AvailableCommand(description: "Reads the code", name: "research_codebase")
+    static let researchCommand = AvailableCommand.command(Command(description: "Reads the code", name: "research_codebase"))
 
     /// The commands of one update, with the plan command two times.
     static let commandsWithRepeat = [firstPlanCommand, researchCommand, lastPlanCommand]

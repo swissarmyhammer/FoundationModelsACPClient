@@ -13,7 +13,7 @@ import Testing
 private let truncatedStopReason = "_truncated"
 
 /// The command that the command tests advertise.
-private let planCommand = AvailableCommand(description: "Makes a plan", name: "create_plan")
+private let planCommand = AvailableCommand.command(Command(description: "Makes a plan", name: "create_plan"))
 
 /// The configuration option that the option tests report.
 private let modeOption = SessionConfigOption(

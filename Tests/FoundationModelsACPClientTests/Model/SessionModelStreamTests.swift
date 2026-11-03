@@ -63,7 +63,7 @@ private func requestFinished(
 private let summaryMessageId = MessageId(rawValue: "summary-1")
 
 /// The command that the compacted record announces.
-private let compactedRecordCommand = AvailableCommand(description: "Makes a plan", name: "create_plan")
+private let compactedRecordCommand = AvailableCommand.command(Command(description: "Makes a plan", name: "create_plan"))
 
 /// The live updates of the first turn, before the compaction.
 private let firstTurnUpdates: [SessionUpdate] = [
@@ -564,7 +564,7 @@ struct SessionModelStreamTests {
         // A request that is still pending is not cancelled, so the test
         // fails here and does not wait for the task.
         try #require(model.pendingPermissions.isEmpty)
-        #expect(await task.value.outcome == .cancelled)
+        #expect(await task.value.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test func closeEndsTheUpdateTap() async throws {

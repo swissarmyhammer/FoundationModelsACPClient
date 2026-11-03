@@ -194,4 +194,10 @@ struct ChunkCoalescerTests {
         #expect(!ChunkCoalescer.isCoalescible(userChunk(text: "c")))
         #expect(!ChunkCoalescer.isCoalescible(idleState(stopReason: .endTurn)))
     }
+
+    @Test func aSubagentUpdateDoesNotCoalesce() {
+        let update = SessionUpdate.subagentUpdate(SubagentUpdate(sessionId: SessionId(rawValue: "child")))
+
+        #expect(!ChunkCoalescer.isCoalescible(update))
+    }
 }

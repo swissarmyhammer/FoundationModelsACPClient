@@ -26,9 +26,22 @@ extension SessionInfo: @retroactive Identifiable {
 
 extension AvailableCommand: @retroactive Identifiable {
     /// The name of the command. The agent gives each command a unique name.
+    ///
+    /// For a command of a type that this schema revision does not know, the
+    /// id is the string `name` member of the payload. A command with no such
+    /// member has its `type` value as its id, so its id is stable.
     public var id: String {
-        name
+        switch self {
+        case .command(let command):
+            command.name
+        case .unknown(let type, let payload):
+            payload.stringMember(Self.nameMember) ?? type
+        }
     }
+
+    /// The name of the member that holds the name in the payload of a
+    /// command.
+    private static let nameMember = "name"
 }
 
 extension SessionConfigOption: @retroactive Identifiable {

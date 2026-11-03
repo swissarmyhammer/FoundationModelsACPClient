@@ -62,6 +62,10 @@ public enum TranscriptEntry: Identifiable, Sendable {
     /// **UNSTABLE** A context compaction. It changes no earlier entry.
     case compaction(CompactionEntry)
 
+    /// **UNSTABLE** A message between this session and another session of
+    /// the same agent.
+    case sessionMessage(SessionMessageEntry)
+
     /// An error that the client shows in the transcript.
     case error(ErrorEntry)
 
@@ -96,6 +100,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .plan(let entry): entry.id
         case .unknown(let entry): entry.id
         case .compaction(let entry): entry.id
+        case .sessionMessage(let entry): entry.id
         case .error(let entry): entry.id
         }
     }
@@ -115,6 +120,8 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .plan: self = .plan(PlanTranscriptEntry(wire: entry))
         case .unknown: self = .unknown(UnknownEntry(wire: entry))
         case .compaction(let compaction): self = .compaction(CompactionEntry(wire: entry, compaction: compaction))
+        case .sessionMessage(let message):
+            self = .sessionMessage(SessionMessageEntry(wire: entry, message: message))
         }
     }
 
@@ -137,6 +144,7 @@ public enum TranscriptEntry: Identifiable, Sendable {
         case .plan(let object): object.update(from: entry)
         case .unknown(let object): object.update(from: entry)
         case .compaction(let object): object.update(from: entry)
+        case .sessionMessage(let object): object.update(from: entry)
         case .error(let object): object.recordKindMismatch()
         }
     }

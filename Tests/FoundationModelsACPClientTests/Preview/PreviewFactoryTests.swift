@@ -35,6 +35,9 @@ private enum EntryKind: Equatable {
     /// A ``CompactionEntry``.
     case compaction
 
+    /// A ``SessionMessageEntry``.
+    case sessionMessage
+
     /// An ``UnknownEntry``.
     case unknown
 
@@ -51,6 +54,7 @@ private enum EntryKind: Equatable {
         case .terminal: self = .terminal
         case .error: self = .error
         case .compaction: self = .compaction
+        case .sessionMessage: self = .sessionMessage
         case .unknown: self = .unknown
         }
     }
@@ -93,7 +97,7 @@ private enum PreviewFixtures {
     )
 
     /// The command that the preview agent advertises.
-    static let command = AvailableCommand(description: "Run the tests", name: "test")
+    static let command = AvailableCommand.command(Command(description: "Run the tests", name: "test"))
 
     /// The MCP server of the preview session.
     static let server = MCPServer.http(MCPServerHTTP(name: "docs", url: "https://example.com/mcp"))
@@ -135,7 +139,7 @@ extension TranscriptEntry {
         case .userMessage(let entry): content = entry.content
         case .agentMessage(let entry): content = entry.content
         case .thought(let entry): content = entry.content
-        case .toolCall, .plan, .terminal, .error, .compaction, .unknown: return nil
+        case .toolCall, .plan, .terminal, .error, .compaction, .sessionMessage, .unknown: return nil
         }
         return content.map { block in
             if case .text(let text) = block { text.text } else { "" }
@@ -169,6 +173,7 @@ extension TranscriptEntry {
         case .terminal(let entry): entry.timing
         case .error(let entry): entry.timing
         case .compaction(let entry): entry.timing
+        case .sessionMessage(let entry): entry.timing
         case .unknown(let entry): entry.timing
         }
     }

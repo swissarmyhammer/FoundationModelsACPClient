@@ -49,7 +49,7 @@ private enum TerminalAuthFixtures {
     ///   capability.
     static func terminalInitializeRequest() -> InitializeRequest {
         var request = makeInitializeRequest()
-        request.capabilities.auth = AuthCapabilities(terminal: TerminalAuthCapabilities())
+        request.capabilities.auth = ClientAuthCapabilities(terminal: TerminalAuthCapabilities())
         return request
     }
 

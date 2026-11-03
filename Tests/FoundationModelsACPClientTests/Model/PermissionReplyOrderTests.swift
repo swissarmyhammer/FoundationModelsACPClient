@@ -288,7 +288,7 @@ struct PermissionReplyOrderTests {
         // A request that is still pending has no answer, so the test fails
         // here and does not wait for the call.
         try #require(recorded.session.pendingPermissions.isEmpty)
-        #expect(try await call.value.outcome == .cancelled)
+        #expect(try await call.value.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     /// Runs ``roundCount`` permission rounds. Each round resolves the request

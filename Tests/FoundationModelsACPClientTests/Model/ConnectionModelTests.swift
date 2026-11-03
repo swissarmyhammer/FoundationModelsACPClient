@@ -260,7 +260,7 @@ struct ConnectionModelTests {
 
         let response = try await agentConnection.requestPermission(SessionModelFixtures.permissionRequest())
 
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test func theConnectionServesTheClientThatTheWrapReturns() async throws {
@@ -364,7 +364,7 @@ struct ConnectionModelTests {
         // so the test fails here and does not wait for the task.
         try #require(session.pendingPermissions.isEmpty)
         let response = await permission.value
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test func aDisconnectFlushesTheBufferedChunksOfEachOpenSession() async throws {
@@ -459,7 +459,7 @@ struct ConnectionModelTests {
         // A pending permission that stays is a request that is not cancelled,
         // so the test fails here and does not wait for the task.
         try #require(session.pendingPermissions.isEmpty)
-        #expect(await permission.value.outcome == .cancelled)
+        #expect(await permission.value.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test func disconnectClosesTheTransport() async throws {

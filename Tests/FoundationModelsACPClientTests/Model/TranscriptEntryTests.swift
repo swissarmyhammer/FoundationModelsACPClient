@@ -17,7 +17,7 @@ extension SessionMergeEngine.Change {
         case .entryAdded(_, let entry), .entryChanged(_, let entry):
             entry
         case .availableCommandsChanged, .configOptionsChanged, .usageChanged, .agentStateChanged, .sessionInfoChanged,
-            .notice:
+            .subagentChanged, .notice:
             nil
         }
     }

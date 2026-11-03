@@ -21,7 +21,7 @@ private let scriptedUsedTokens = 1_500
 private let scriptedPlanEntry = PlanEntry(content: "read the file", priority: .medium, status: .inProgress)
 
 /// The scripted command.
-private let scriptedCommand = AvailableCommand(description: "Makes a plan", name: "create_plan")
+private let scriptedCommand = AvailableCommand.command(Command(description: "Makes a plan", name: "create_plan"))
 
 /// The scripted configuration option.
 private let scriptedOption = SessionConfigOption(
@@ -149,7 +149,7 @@ struct AlphaSevenWireDecodeTests {
     /// The `availableCommands` member that holds the scripted command, as an
     /// agent writes it.
     private static let scriptedCommandsMember =
-        #""availableCommands":[{"description":"Makes a plan","name":"create_plan"}]"#
+        #""availableCommands":[{"type":"command","description":"Makes a plan","name":"create_plan"}]"#
 
     /// Decodes one wire value from the JSON text an agent writes.
     ///

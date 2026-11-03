@@ -26,7 +26,7 @@ struct PendingElicitationValidationTests {
     /// - Parameter nameProperty: The wire schema of the "name" property.
     /// - Returns: The pending elicitation.
     private func pendingForm(nameProperty: JSONValue) -> PendingElicitation {
-        let schema = ElicitationSchema(properties: .object(["name": nameProperty]), required: ["name"])
+        let schema = ElicitationSchema(properties: .object(["name": nameProperty]), type: .object, required: ["name"])
         let request = CreateElicitationRequest(
             message: ElicitationFixtures.formMessage,
             mode: .form(ElicitationFormMode(requestedSchema: schema, scope: .session(ElicitationFixtures.sessionScope)))

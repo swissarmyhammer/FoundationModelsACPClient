@@ -109,7 +109,7 @@ struct SessionModelPendingTests {
         task.cancel()
 
         let response = await task.value
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
         #expect(model.pendingPermissions.isEmpty)
     }
 
@@ -122,7 +122,7 @@ struct SessionModelPendingTests {
 
         try #require(model.pendingPermissions.isEmpty)
         let response = await task.value
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test func aSecondResolutionOfOnePermissionChangesNothing() async throws {
@@ -339,7 +339,7 @@ struct SessionModelPendingTests {
         try #require(model.pendingElicitations.isEmpty)
         #expect(entry.linkedElicitationIDs.isEmpty)
         let permissionResponse = await permissionTask.value
-        #expect(permissionResponse.outcome == .cancelled)
+        #expect(permissionResponse.outcome == .cancelled(CancelledPermissionOutcome()))
         let cancel: JSONValue = .object(["action": .string("cancel")])
         let formResponse = await formTask.value
         #expect(formResponse == cancel)
@@ -419,7 +419,7 @@ struct SessionModelPendingTests {
         #expect(arrivalFires)
         #expect(resolutionFires)
         try #require(model.pendingRequests.isEmpty)
-        #expect(await permissionTask?.value.outcome == .cancelled)
+        #expect(await permissionTask?.value.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     // MARK: - Cancel of the work
@@ -436,9 +436,9 @@ struct SessionModelPendingTests {
         // suspend for ever when a permission stays pending.
         try #require(model.pendingPermissions.isEmpty)
         let firstResponse = await firstTask.value
-        #expect(firstResponse.outcome == .cancelled)
+        #expect(firstResponse.outcome == .cancelled(CancelledPermissionOutcome()))
         let secondResponse = await secondTask.value
-        #expect(secondResponse.outcome == .cancelled)
+        #expect(secondResponse.outcome == .cancelled(CancelledPermissionOutcome()))
         #expect(sender.cancelNotifications.count == 1)
     }
 
@@ -472,7 +472,7 @@ struct SessionModelPendingTests {
         let cancelled = ElicitationResponseWire.cancelResponse(reason: ACPClient.clientCancelledReason)
         #expect(await formTask.value == cancelled)
         #expect(await urlTask.value == cancelled)
-        #expect(await permissionTask.value.outcome == .cancelled)
+        #expect(await permissionTask.value.outcome == .cancelled(CancelledPermissionOutcome()))
         #expect(sender.cancelNotifications.count == 1)
     }
 
@@ -519,7 +519,7 @@ struct SessionModelPendingTests {
         try #require(model.pendingPermissions.isEmpty)
         try #require(model.pendingElicitations.isEmpty)
         let response = await task.value
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
         #expect(await elicitationTask.value == ElicitationResponseWire.cancelResponse(reason: ACPClient.clientCancelledReason))
     }
 }

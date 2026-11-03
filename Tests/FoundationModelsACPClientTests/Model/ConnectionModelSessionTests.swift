@@ -106,7 +106,7 @@ private enum SessionFactoryFixtures {
     ]
 
     /// The command list that the agent answers `session/new` with.
-    static let commands = [AvailableCommand(description: "Make a plan", name: "plan")]
+    static let commands = [AvailableCommand.command(Command(description: "Make a plan", name: "plan"))]
 
     /// The request that changes the mode of the test session.
     static let setModeRequest = SetSessionConfigOptionRequest(

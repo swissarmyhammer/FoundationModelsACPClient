@@ -23,8 +23,9 @@ public struct PendingPermissionRequest: Identifiable, Hashable, Sendable {
     public let request: RequestPermissionRequest
 
     /// The response for a request that the user did not decide: the
-    /// `cancelled` outcome. It never selects an option for the user.
-    static let cancelledResponse = RequestPermissionResponse(outcome: .cancelled)
+    /// `cancelled` outcome with no `_meta`. It never selects an option for
+    /// the user.
+    static let cancelledResponse = RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
 
     /// Makes the response for a request that the user answered.
     ///
