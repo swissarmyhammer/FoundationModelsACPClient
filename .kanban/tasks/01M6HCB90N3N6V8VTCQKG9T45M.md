@@ -1,6 +1,14 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m6hva5c1dewrp1snbk5ny2pa
+  text: |-
+    ### finish — stuck
+    - evidence: The five tests are red on purpose. They need the agent package behavior for cancel, child requests, hot resume, restart and SIGTERM, and the elicit stub step. Not on agent origin/main yet.
+    - next: After the agent lands that work, update the pin in IntegrationTests/LiveAgentServer, run each test alone, and review. The tests must not change to become green.
+  timestamp: 2026-11-03T23:18:36.161790+00:00
 position_column: todo
 position_ordinal: '8380'
 title: More end-to-end acceptance tests of the sub-agent model against the real acp-agent

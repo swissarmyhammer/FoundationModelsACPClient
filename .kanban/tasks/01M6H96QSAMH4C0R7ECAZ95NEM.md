@@ -1,6 +1,14 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m6hva4np69xk4qshw33hwz8b
+  text: |-
+    ### finish — stuck
+    - evidence: The three tests are red on purpose. They need the agent package (scripted stub model, child traffic, agentRun.sessionId link). The stub commit 753dd02 is on agent main. Commit 5c17720 (child traffic and link) is not on agent origin/main.
+    - next: After the agent lands 5c17720, update the pin in IntegrationTests/LiveAgentServer, run the tests, and review. The tests must not change to become green.
+  timestamp: 2026-11-03T23:18:35.446572+00:00
 position_column: todo
 position_ordinal: '8280'
 title: End-to-end acceptance tests of the sub-agent model against the real acp-agent
