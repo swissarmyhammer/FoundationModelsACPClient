@@ -284,6 +284,12 @@ extension SessionModel {
         cancelAllPending()
         frontRequestID = nil
         clearNotices()
+        // A closed parent removes its children, at each level.
+        let closing = children
+        children.removeAll()
+        for child in closing {
+            child.markClosed()
+        }
         isClosed = true
     }
 }

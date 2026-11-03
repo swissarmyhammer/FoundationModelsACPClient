@@ -98,11 +98,11 @@ extension ConnectionModel {
     /// - Parameter sessionId: The id of the session.
     /// - Returns: The model, or `nil` when the session is not open.
     func openSession(waitingWhileOpening sessionId: SessionId) async -> SessionModel? {
-        if let open = session(for: sessionId) {
+        if let open = session(for: sessionId) ?? childSession(for: sessionId) {
             return open
         }
         await openingSessions.waitWhileOpening(sessionId)
-        return session(for: sessionId)
+        return session(for: sessionId) ?? childSession(for: sessionId)
     }
 
     // MARK: - Resume session
@@ -186,6 +186,7 @@ extension ConnectionModel {
     ///   the connection of the request is no longer the open connection; the
     ///   `RequestError` of the agent; or the error of the connection.
     private func resumeInTurn(_ request: ResumeSessionRequest) async throws -> SessionModel {
+        try refuseChild(request.sessionId, operation: ClientRequestSpan.Method.resumeSession)
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
         if let open = self.session(for: sent.sessionId) {
@@ -404,7 +405,7 @@ extension ConnectionModel {
     ///   - sessionId: The id of the session.
     ///   - connection: The connection of the session.
     /// - Returns: The model, not yet in ``openSessions``.
-    private func makeSubscribedSessionModel(sessionId: SessionId, over connection: ClientSideConnection) -> SessionModel {
+    func makeSubscribedSessionModel(sessionId: SessionId, over connection: ClientSideConnection) -> SessionModel {
         let subscription = connection.subscribe(to: sessionId)
         let session = makeSessionModel(
             sessionId: sessionId,
@@ -528,6 +529,7 @@ extension ConnectionModel {
     ///   ``canCloseSessions`` is `false`, `ConnectionError.closed` when no
     ///   connection is open, or the error of the agent or of the connection.
     public func close(_ session: SessionModel) async throws {
+        try refuseChild(session.sessionId, operation: ClientRequestSpan.Method.closeSession)
         try requireCapability(canCloseSessions, method: ClientRequestSpan.Method.closeSession)
         let connection = try openConnection()
         _ = try await sendRecordingAuth(CloseSessionRequest(sessionId: session.sessionId)) {

@@ -115,7 +115,18 @@ final class MailOrderStubAgent: Agent {
     /// - Parameter update: The update to send.
     /// - Throws: Whatever the connection threw.
     func send(_ update: SessionUpdate) async throws {
-        try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        try await send(update, to: testSession)
+    }
+
+    /// Sends one update for a session of the test's choice, for example a
+    /// child session.
+    ///
+    /// - Parameters:
+    ///   - update: The update to send.
+    ///   - sessionId: The session that the update names.
+    /// - Throws: Whatever the connection threw.
+    func send(_ update: SessionUpdate, to sessionId: SessionId) async throws {
+        try await connection.sessionUpdate(UpdateSessionNotification(sessionId: sessionId, update: update))
     }
 
     /// Sends each update in order.

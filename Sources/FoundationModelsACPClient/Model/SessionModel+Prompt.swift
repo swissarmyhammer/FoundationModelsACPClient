@@ -40,6 +40,7 @@ extension SessionModel {
     ///   `ConnectionError` on a disconnect or a timeout, or
     ///   `CancellationError` when the calling task is cancelled.
     public func prompt(_ content: [ContentBlock], meta: JSONValue? = nil) async throws -> PromptResponse {
+        try requireAllowedOnChild(ClientRequestSpan.Method.prompt) { _ in false }
         let entry = UserMessageEntry(content: content, meta: meta)
         addPendingPrompt(entry)
         do {
@@ -138,6 +139,7 @@ extension SessionModel {
     /// - Throws: The error of the sender: `ConnectionError` after a
     ///   disconnect.
     public func cancel(meta: JSONValue? = nil) async throws {
+        try requireAllowedOnChild(ClientRequestSpan.Method.cancelSession) { $0.cancel != nil }
         permissions.cancelAll()
         cancelPendingElicitations(reason: ACPClient.clientCancelledReason)
         awaitingURLCompletions.removeAll()
@@ -154,6 +156,7 @@ extension SessionModel {
     /// - Throws: The error of the sender: `RequestError` on a peer error, or
     ///   `ConnectionError` on a disconnect or a timeout.
     public func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws {
+        try requireAllowedOnChild(ClientRequestSpan.Method.setConfigOption) { _ in false }
         try await requestSender.setConfigOption(request)
     }
 

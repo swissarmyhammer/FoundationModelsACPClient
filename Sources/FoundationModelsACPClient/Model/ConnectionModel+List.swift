@@ -100,7 +100,9 @@ extension ConnectionModel {
         case .replace: page.sessions
         case .append: sessions + page.sessions
         }
-        sessions = merged.keepingLastOfEachID(in: "ConnectionModel.sessions", warningTo: connectionLogger)
+        // A child session is reached through its parent only.
+        sessions = merged.filter { childSession(for: $0.sessionId) == nil }
+            .keepingLastOfEachID(in: "ConnectionModel.sessions", warningTo: connectionLogger)
         sessionListCursor = page.nextCursor
     }
 
@@ -133,6 +135,7 @@ extension ConnectionModel {
     ///   the agent or of the connection. On an error, the item stays in
     ///   ``sessions``.
     public func deleteSession(_ sessionId: SessionId) async throws {
+        try refuseChild(sessionId, operation: ClientRequestSpan.Method.deleteSession)
         try requireCapability(canDeleteSessions, method: ClientRequestSpan.Method.deleteSession)
         let connection = try openConnection()
         if let open = session(for: sessionId) {

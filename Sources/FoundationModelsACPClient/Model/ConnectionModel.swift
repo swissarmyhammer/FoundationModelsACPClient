@@ -483,6 +483,9 @@ public final class ConnectionModel {
         model.sessionInfoDidChange = { [weak self] sessionId, info in
             self?.patchListedSession(sessionId, with: info)
         }
+        model.subagentDidChange = { [weak self] parent, announcement in
+            self?.applySubagent(announcement, under: parent)
+        }
         return model
     }
 

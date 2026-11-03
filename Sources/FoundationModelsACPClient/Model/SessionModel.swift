@@ -128,7 +128,7 @@ public final class SessionModel: Identifiable {
     /// The model keeps the last state and adds no turn rule of its own. A
     /// stop reason that this schema revision does not know stays raw in
     /// `StopReason.unknown`.
-    public private(set) var agentState: StateUpdate?
+    public internal(set) var agentState: StateUpdate?
 
     /// The session information, folded as a patch. A field that no update
     /// gave stays `.unchanged`.
@@ -219,6 +219,38 @@ public final class SessionModel: Identifiable {
 
     /// Whether the session is closed. A closed model changes no more.
     public internal(set) var isClosed = false
+
+    // MARK: - Child sessions
+
+    /// The session that announced this session as its child, or `nil` for a
+    /// root session. The link never changes for the life of the model.
+    @ObservationIgnored public internal(set) weak var parent: SessionModel?
+
+    /// The child sessions that this session announced, in announce order.
+    /// Each child is a session like this one, so it has children too, at each
+    /// level. A child is not in ``ConnectionModel/openSessions``: this list
+    /// reaches it.
+    public internal(set) var children: [SessionModel] = []
+
+    /// The display title that the parent gave the child, or `nil` when it gave
+    /// none. A root session has no title here: see ``sessionInfo``.
+    public internal(set) var title: String?
+
+    /// The description that the parent gave the role of the child, or `nil`.
+    public internal(set) var description: String?
+
+    /// The client-initiated operations that the agent allows on this child, or
+    /// `nil` when the agent gave none. A root session has none here.
+    public internal(set) var capabilities: SubagentSessionCapabilities?
+
+    /// The last state that the parent mirrored onto the child, so the model
+    /// writes a mirrored state one time and never over a later state of the
+    /// child itself.
+    @ObservationIgnored var mirroredState: PatchField<StateUpdate> = .unchanged
+
+    /// Tells the connection model that a `subagent_update` named a child of
+    /// this session, with the folded state of the child.
+    @ObservationIgnored var subagentDidChange: (@MainActor (SessionModel, SubagentUpdate) -> Void)?
 
     /// The replay of a `session/resume` request, while it runs.
     var replayPhase: ReplayPhase = .idle
@@ -604,15 +636,15 @@ public final class SessionModel: Identifiable {
         case .entryAdded(_, let entry): addEntry(entry)
         case .entryChanged(_, let entry): changeEntry(entry)
         case .availableCommandsChanged(let commands):
+            // The client offers no slash command of a child.
+            guard parent == nil else { break }
             availableCommands = commands.keepingLastOfEachID(in: "SessionModel.availableCommands", warningTo: logger)
         case .configOptionsChanged(let options):
             configOptions = options.keepingLastOfEachID(in: "SessionModel.configOptions", warningTo: logger)
         case .usageChanged(let report): usage = report
         case .agentStateChanged(let state): changeAgentState(state)
         case .sessionInfoChanged(let info): changeSessionInfo(info)
-        // The model of the child sessions is the work of the sub-agent
-        // cards. This change adds no state to the model before that work.
-        case .subagentChanged: break
+        case .subagentChanged(let child): subagentDidChange?(self, child)
         case .notice(let notice): notices.append(SessionNotice(notice: notice, arrivalTime: elapsedTime()))
         }
     }
@@ -621,7 +653,7 @@ public final class SessionModel: Identifiable {
     /// message, thought, or unknown entry.
     ///
     /// - Parameter state: The folded state of the agent.
-    private func changeAgentState(_ state: StateUpdate) {
+    func changeAgentState(_ state: StateUpdate) {
         agentState = state
         guard case .idle = state else { return }
         timekeeper.agentDidBecomeIdle()
