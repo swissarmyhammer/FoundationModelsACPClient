@@ -277,6 +277,25 @@ struct SubagentResumeTests {
         #expect(child.capabilities == nil)
     }
 
+    @Test func aCurrentSnapshotWithNoTitleKeepsTheTitleOfTheReplay() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        connected.agent.setReplay { connection in
+            let update = SessionUpdate.subagentUpdate(
+                SubagentUpdate(sessionId: firstChild, title: .value("Reviewer"))
+            )
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        }
+        _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
+        let child = try #require(childModel(firstChild, under: connected.root))
+
+        try await connected.agent.send(try snapshot(firstChild, state: .value(.running(RunningStateUpdate()))))
+        try await waitForObservation { child.isWorkStateConfirmed } orFailWhen: { connected.root.isClosed }
+
+        #expect(child.title == "Reviewer")
+        #expect(child.displayTitle == "Reviewer")
+    }
+
     @Test func aLiveStateUpdateOfTheChildDoesNotConfirmIt() async throws {
         let connected = try await ResumeConnection.make()
         defer { await connected.model.disconnect() }

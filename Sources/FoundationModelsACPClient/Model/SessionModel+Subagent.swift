@@ -62,11 +62,20 @@ extension SessionModel {
     ///   - announcement: The folded `subagent_update` of this child.
     ///   - isHistory: Whether the announcement is part of a replay.
     func applyAnnouncement(_ announcement: SubagentUpdate, isHistory: Bool) {
-        write(announcement.title.currentValue, to: \.title)
-        write(announcement.description.currentValue, to: \.description)
-        write(announcement.cwd.currentValue, to: \.cwd)
-        write(announcement.additionalDirectories.currentValue ?? [], to: \.additionalDirectories)
-        write(SAH.AgentRun.extract(from: announcement.meta.currentValue)?.toolCallId, to: \.startedByToolCallId)
+        // A description field that the snapshot did not give keeps its value:
+        // after a replay boundary the first current snapshot folds on a fresh
+        // base, and an omitted title is not a cleared title.
+        writeIfGiven(announcement.title, to: \.title)
+        writeIfGiven(announcement.description, to: \.description)
+        writeIfGiven(announcement.cwd, to: \.cwd)
+        switch announcement.additionalDirectories {
+        case .value(let directories): write(directories, to: \.additionalDirectories)
+        case .cleared: write([], to: \.additionalDirectories)
+        case .unchanged: break
+        }
+        if let toolCallId = SAH.AgentRun.extract(from: announcement.meta.currentValue)?.toolCallId {
+            write(toolCallId, to: \.startedByToolCallId)
+        }
         updateRestoreFailure(from: announcement, isHistory: isHistory)
         guard !isHistory else { return }
         write(announcement.capabilities.currentValue, to: \.capabilities)
@@ -152,6 +161,23 @@ extension SessionModel {
                 child.removeFromParent()
                 entry.setChild(nil)
             }
+        }
+    }
+
+    /// Writes a patch field that the update gave: a value replaces, `null`
+    /// clears, and an omitted field leaves the property as it is.
+    ///
+    /// - Parameters:
+    ///   - field: The folded patch field.
+    ///   - keyPath: The property to write.
+    private func writeIfGiven<Value: Equatable>(
+        _ field: PatchField<Value>,
+        to keyPath: ReferenceWritableKeyPath<SessionModel, Value?>
+    ) {
+        switch field {
+        case .value(let value): write(value, to: keyPath)
+        case .cleared: write(nil, to: keyPath)
+        case .unchanged: break
         }
     }
 
