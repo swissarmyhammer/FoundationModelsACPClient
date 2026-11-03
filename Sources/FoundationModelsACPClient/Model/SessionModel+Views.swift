@@ -30,6 +30,13 @@ public struct SessionPathEntry: Hashable, Sendable, Identifiable {
     /// ``SessionModel/needsAttention``.
     public let needsAttention: Bool
 
+    /// Whether the work state is current. A child is unconfirmed after a
+    /// resume until its first current snapshot.
+    public let isConfirmed: Bool
+
+    /// The reason that the session failed to restore, or `nil`.
+    public let restoreFailure: String?
+
     /// The id of the entry, which is the session id.
     public var id: SessionId { sessionId }
 }
@@ -53,9 +60,98 @@ extension SessionModel {
     /// deep in the tree shows on each ancestor, and each view gets the same
     /// answer.
     public var needsAttention: Bool {
+        ownNeedsAttention || children.contains { $0.needsAttention }
+    }
+
+    /// Whether this session itself waits for the user: its work state is
+    /// `requires_action`, or it has a pending request. A descendant does not
+    /// count. A closed session never waits.
+    public var ownNeedsAttention: Bool {
         guard !isClosed else { return false }
-        if workState == .requiresAction || pendingRequestCount > 0 { return true }
-        return children.contains { $0.needsAttention }
+        return workState == .requiresAction || pendingRequestCount > 0
+    }
+
+    /// The first session in this tree that waits itself, this session first,
+    /// then each descendant depth first, or `nil` when none waits.
+    public var firstWaitingSession: SessionModel? {
+        firstSession { $0.ownNeedsAttention }
+    }
+
+    /// The first session of this tree, this session first and then each
+    /// descendant depth first, for which a test holds.
+    ///
+    /// - Parameter matches: The test.
+    /// - Returns: The session, or `nil` when the test holds for none.
+    private func firstSession(where matches: (SessionModel) -> Bool) -> SessionModel? {
+        if matches(self) { return self }
+        for child in children {
+            if let found = child.firstSession(where: matches) { return found }
+        }
+        return nil
+    }
+
+    /// The count of the pending requests of this session and of each
+    /// descendant. A collapsed crumb shows it.
+    public var branchPendingRequestCount: Int {
+        pendingRequestCount + children.reduce(0) { $0 + $1.branchPendingRequestCount }
+    }
+
+    /// The root session of this tree: the session with no parent.
+    public var root: SessionModel {
+        parent?.root ?? self
+    }
+
+    /// The sessions from the root to this session, root first, this session
+    /// last.
+    public var path: [SessionModel] {
+        (parent?.path ?? []) + [self]
+    }
+
+    /// Finds a session in this tree, this session included.
+    ///
+    /// - Parameter sessionId: The id of the session.
+    /// - Returns: The model, or `nil` when no session of this tree has that id.
+    public func session(withId sessionId: SessionId) -> SessionModel? {
+        firstSession { $0.sessionId == sessionId }
+    }
+
+    /// The closest ancestor that is not closed, or `nil` when none is. A
+    /// view that shows a removed child falls back to it.
+    public var nearestOpenAncestor: SessionModel? {
+        var next = parent
+        while let session = next {
+            if !session.isClosed { return session }
+            next = session.parent
+        }
+        return nil
+    }
+
+    /// Why the work state of this session is what it is, so a view does not
+    /// have to guess among the causes of an unknown state.
+    public var status: SessionStatus {
+        if let restoreFailure { return .restoreFailed(reason: restoreFailure) }
+        if parent != nil, !isWorkStateConfirmed { return .unconfirmed }
+        return switch workState {
+        case .running: .running
+        case .requiresAction: .requiresAction
+        case .idle(let stopReason, let error): .idle(stopReason: stopReason, error: error)
+        case .unknown: .unknown
+        }
+    }
+
+    /// Whether a view can send a prompt to this session. Only an open root
+    /// session takes a prompt.
+    public var canPrompt: Bool {
+        !isClosed && parent == nil
+    }
+
+    /// Whether a view can cancel the work of this session. A root session can.
+    /// A child can when it is confirmed and its capabilities advertise the
+    /// cancel.
+    public var canCancel: Bool {
+        guard !isClosed else { return false }
+        guard parent != nil else { return true }
+        return isWorkStateConfirmed && restoreFailure == nil && capabilities?.cancel != nil
     }
 
     /// This session as one path entry.
@@ -66,7 +162,9 @@ extension SessionModel {
             path: pathTitles,
             workState: workState,
             pendingRequestCount: pendingRequestCount,
-            needsAttention: needsAttention
+            needsAttention: needsAttention,
+            isConfirmed: isWorkStateConfirmed,
+            restoreFailure: restoreFailure
         )
     }
 
@@ -100,6 +198,29 @@ extension SessionModel {
 
     /// The titles from the root session to this session, this session last.
     var pathTitles: [String] {
-        (parent?.pathTitles ?? []) + [displayTitle]
+        path.map(\.displayTitle)
     }
+}
+
+/// Why a session shows the state that it shows.
+public enum SessionStatus: Hashable, Sendable {
+    /// The agent works.
+    case running
+
+    /// The agent waits for an action of the user.
+    case requiresAction
+
+    /// The agent does not work.
+    case idle(stopReason: StopReason?, error: ACPError?)
+
+    /// A child waits for its first current snapshot after a resume. Its state
+    /// is not known, and it allows no operation.
+    case unconfirmed
+
+    /// The session failed to restore, for the given reason.
+    case restoreFailed(reason: String)
+
+    /// The agent reported no state, or a state that this schema revision does
+    /// not know.
+    case unknown
 }

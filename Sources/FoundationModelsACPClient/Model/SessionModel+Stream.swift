@@ -205,6 +205,7 @@ extension SessionModel {
     ///   result.
     func endReplay(succeeded: Bool) {
         flushPendingChunks()
+        replayEndCount += 1
         if let rollback = replayRollback {
             replayRollback = nil
             if succeeded {

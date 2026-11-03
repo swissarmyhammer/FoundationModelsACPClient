@@ -257,6 +257,10 @@ public final class SessionModel: Identifiable {
     /// later current snapshot with a state clears the reason.
     public internal(set) var restoreFailure: String?
 
+    /// The count of the replays that ended on this model, with success or
+    /// not. A view observes it to know that a resume ended.
+    public internal(set) var replayEndCount = 0
+
     /// The id of the tool call that started this child, from the
     /// `_meta.sah.agentRun` link of its `subagent_update`, or `nil` when the
     /// child has no link. The model removes a finished child when this tool

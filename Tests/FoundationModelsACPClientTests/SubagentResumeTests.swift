@@ -101,6 +101,14 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
         afterAnswer.withLock { $0 = work }
     }
 
+    /// Sends `session/request_permission`, and gives the task of the call.
+    ///
+    /// - Parameter request: The permission request to send.
+    /// - Returns: The task of the call.
+    func startPermission(_ request: RequestPermissionRequest) -> Task<RequestPermissionResponse, any Error> {
+        Task { [connection] in try await connection.requestPermission(request) }
+    }
+
     /// Sends one update.
     func send(_ update: SessionUpdate, to sessionId: SessionId = testSession) async throws {
         try await connection.sessionUpdate(UpdateSessionNotification(sessionId: sessionId, update: update))

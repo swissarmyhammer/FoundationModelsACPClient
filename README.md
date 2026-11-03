@@ -120,6 +120,24 @@ the same answer, and each one is `Observable`:
   shows on each ancestor.
 - Which session a window shows is view state. `ConnectionModel` has no
   selected session.
+- Queries for a view: `root`, `path` (the sessions from the root to this
+  session), `session(withId:)` (a session of this tree), and
+  `nearestOpenAncestor` (the fallback for a removed child).
+- `status` tells why a state is what it is: `.running`, `.requiresAction`,
+  `.idle`, `.unconfirmed` (a child waits for its first current snapshot),
+  `.restoreFailed(reason:)` or `.unknown`. `SessionPathEntry` also carries
+  `isConfirmed` and `restoreFailure`.
+- `ownNeedsAttention` is true when this session itself waits (a request or
+  `requires_action`). `firstWaitingSession` names the first session of the
+  tree that waits itself. `branchPendingRequestCount` counts the pending
+  requests of the whole branch.
+- `canPrompt` (only an open root session) and `canCancel` (a root session, or
+  a confirmed child whose capabilities advertise the cancel) tell the
+  controls of a view.
+- `replayEndCount` changes at the end of each resume, so a view can observe it.
+- `ToolCallEntry.childSession` is observable: a view of the agents call sees
+  the link arrive and go.
+- `children` never holds a closed session: a removed child leaves it at once.
 
 **Resume.** `resumeSession` with `replayFrom` replays the history of the whole
 tree before the response.

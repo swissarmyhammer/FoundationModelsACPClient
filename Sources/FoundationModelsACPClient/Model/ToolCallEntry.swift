@@ -49,9 +49,10 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
 
     /// The child session that this tool call started, from the
     /// `_meta.sah.agentRun` link of the tool call, or `nil` when the call has
-    /// no link or the child is gone. The reference is weak: the parent owns
-    /// its children.
-    @ObservationIgnored public internal(set) weak var childSession: SessionModel?
+    /// no link or the child was removed. The value is observable, so a view
+    /// of the agents call sees the link arrive and see it go. The parent owns
+    /// its children, and the model clears the link when it removes the child.
+    public internal(set) var childSession: SessionModel?
 
     /// Sets the child session of this tool call.
     ///
