@@ -13,14 +13,14 @@ import Testing
 // when its linked tool call reaches a final status.
 
 /// The ids of the child sessions of the tests.
-private let firstChild = SessionId(rawValue: "child-1")
-private let secondChild = SessionId(rawValue: "child-2")
+let firstChild = SessionId(rawValue: "child-1")
+let secondChild = SessionId(rawValue: "child-2")
 
 /// The tool call that started the first child.
-private let agentsCall = ToolCallId(rawValue: "agents-call-1")
+let agentsCall = ToolCallId(rawValue: "agents-call-1")
 
 /// The capabilities that allow a cancel of a child.
-private let cancelCapabilities = SubagentSessionCapabilities(cancel: SessionCancelCapabilities())
+let cancelCapabilities = SubagentSessionCapabilities(cancel: SessionCancelCapabilities())
 
 /// Makes a `subagent_update` snapshot of a child.
 ///
@@ -29,17 +29,19 @@ private let cancelCapabilities = SubagentSessionCapabilities(cancel: SessionCanc
 ///   - state: The state of the snapshot, or `.unchanged`.
 ///   - capabilities: The capabilities of the snapshot, or `.unchanged`.
 ///   - toolCall: The tool call that started the child, or `nil` for no link.
+///   - meta: The `_meta` of the snapshot when `toolCall` is `nil`.
 /// - Returns: The update.
-private func snapshot(
+func snapshot(
     _ child: SessionId,
     state: PatchField<StateUpdate> = .unchanged,
     capabilities: PatchField<SubagentSessionCapabilities> = .unchanged,
-    toolCall: ToolCallId? = nil
+    toolCall: ToolCallId? = nil,
+    meta: PatchField<JSONValue> = .unchanged
 ) throws -> SessionUpdate {
-    let meta: PatchField<JSONValue> =
-        if let toolCall { .value(try SAH.AgentRun(toolCallId: toolCall).inject(into: nil)) } else { .unchanged }
+    let linked: PatchField<JSONValue> =
+        if let toolCall { .value(try SAH.AgentRun(toolCallId: toolCall).inject(into: nil)) } else { meta }
     return .subagentUpdate(
-        SubagentUpdate(sessionId: child, capabilities: capabilities, state: state, meta: meta)
+        SubagentUpdate(sessionId: child, capabilities: capabilities, state: state, meta: linked)
     )
 }
 
@@ -120,7 +122,7 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
 /// A model that is connected to a resume stub agent, with one open root
 /// session.
 @MainActor
-private struct ResumeConnection {
+struct ResumeConnection {
     let connected: ConnectedStub<ResumeStubAgent>
 
     var model: ConnectionModel { connected.model }

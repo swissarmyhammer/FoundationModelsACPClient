@@ -250,6 +250,13 @@ public final class SessionModel: Identifiable {
     /// history and never confirms.
     public internal(set) var isWorkStateConfirmed = true
 
+    /// The short reason that this child failed to restore, from the
+    /// `_meta.sah.restoreFailure` of its `subagent_update`, or `nil` when the
+    /// child is fine. A child that failed to restore is in the tree as
+    /// unknown: its ``workState`` is unknown and it allows no operation. A
+    /// later current snapshot with a state clears the reason.
+    public internal(set) var restoreFailure: String?
+
     /// The id of the tool call that started this child, from the
     /// `_meta.sah.agentRun` link of its `subagent_update`, or `nil` when the
     /// child has no link. The model removes a finished child when this tool

@@ -13,8 +13,8 @@ comments:
   timestamp: 2026-11-03T15:20:22.239300+00:00
 depends_on:
 - 01M6GH6FH41C6VSFC3QRT8H1FS
-position_column: todo
-position_ordinal: '8280'
+position_column: done
+position_ordinal: ff9f80
 title: 'Sub-agent sessions 3/4: derived views (ancestors, siblings, descendants, needsAttention)'
 ---
 ## What

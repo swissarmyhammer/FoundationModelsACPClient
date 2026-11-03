@@ -18,8 +18,8 @@ comments:
   timestamp: 2026-11-03T15:16:18.287725+00:00
 depends_on:
 - 01M6GH6FH41C6VSFC3QRT8H1FS
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ffa080
 title: 'Sub-agent sessions 2/4: resume replay, confirmation, rebuild and removal'
 ---
 ## What

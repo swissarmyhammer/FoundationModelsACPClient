@@ -15,8 +15,6 @@ import Testing
 // is only the size of the tests.
 
 /// The ids of the child sessions of the tests.
-private let firstChild = SessionId(rawValue: "child-1")
-private let secondChild = SessionId(rawValue: "child-2")
 private let grandChild = SessionId(rawValue: "grandchild-1")
 
 /// A model that is connected to a mail-order stub agent, with one open root

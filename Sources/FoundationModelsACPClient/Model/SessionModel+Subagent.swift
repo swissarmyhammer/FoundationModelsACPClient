@@ -67,6 +67,7 @@ extension SessionModel {
         write(announcement.cwd.currentValue, to: \.cwd)
         write(announcement.additionalDirectories.currentValue ?? [], to: \.additionalDirectories)
         write(SAH.AgentRun.extract(from: announcement.meta.currentValue)?.toolCallId, to: \.startedByToolCallId)
+        updateRestoreFailure(from: announcement, isHistory: isHistory)
         guard !isHistory else { return }
         write(announcement.capabilities.currentValue, to: \.capabilities)
         if announcement.state != mirroredState {
@@ -80,12 +81,32 @@ extension SessionModel {
         write(true, to: \.isWorkStateConfirmed)
     }
 
+    /// Writes ``restoreFailure`` from an announcement.
+    ///
+    /// The reason is the explicit `_meta.sah.restoreFailure` that the agent
+    /// announces, in a replay or not: it tells why the child cannot be
+    /// restored, and it is no current activity. A current snapshot whose state
+    /// is known clears it. The model invents no failure of its own: a child
+    /// with no current snapshot is only unconfirmed.
+    ///
+    /// - Parameters:
+    ///   - announcement: The folded `subagent_update` of this child.
+    ///   - isHistory: Whether the announcement is part of a replay.
+    private func updateRestoreFailure(from announcement: SubagentUpdate, isHistory: Bool) {
+        if !isHistory, case .value(let state) = announcement.state, !state.isUnknown {
+            write(nil, to: \.restoreFailure)
+        } else if let failure = SAH.RestoreFailure.extract(from: announcement.meta.currentValue) {
+            write(failure.reason, to: \.restoreFailure)
+        }
+    }
+
     /// Forgets the current state of each descendant: a resume makes the cached
     /// work state and capabilities of each child stale. Each child is
     /// unconfirmed until its first current snapshot.
     func invalidateChildren() {
         for child in children {
             child.write(nil, to: \.capabilities)
+            child.write(nil, to: \.restoreFailure)
             child.mirroredState = .unchanged
             if child.agentState != nil { child.agentState = nil }
             child.write(false, to: \.isWorkStateConfirmed)
@@ -167,5 +188,13 @@ extension SessionModel {
         guard let capabilities, isAllowed(capabilities) else {
             throw SubagentSessionError.notPermitted(operation: operation)
         }
+    }
+}
+
+extension StateUpdate {
+    /// Whether this is a state that this schema revision does not know, which
+    /// the agent uses for a child that it lost.
+    fileprivate var isUnknown: Bool {
+        if case .unknown = self { true } else { false }
     }
 }
