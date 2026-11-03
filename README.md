@@ -107,7 +107,7 @@ for child in root.children {
 the same answer, and each one is `Observable`:
 
 - `ancestors`: the chain from the root to the parent, root first.
-- `siblings`: the choices of one crumb, in announce order. For a root session,
+- `siblingsIncludingSelf`: the choices of one crumb, in announce order. For a root session,
   they are the root sessions of the connection.
 - `descendants`: all sessions below, depth first, in announce order.
 - `SessionPathEntry`: one small `Hashable` value for each of these: `sessionId`,

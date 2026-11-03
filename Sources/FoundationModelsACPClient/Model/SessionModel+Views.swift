@@ -183,7 +183,7 @@ extension SessionModel {
     /// The choices of the crumb of this session, in announce order, this
     /// session included. For a root session, the choices are the root
     /// sessions of the connection.
-    public var siblings: [SessionPathEntry] {
+    public var siblingsIncludingSelf: [SessionPathEntry] {
         if let parent {
             return parent.children.map(\.pathEntry)
         }

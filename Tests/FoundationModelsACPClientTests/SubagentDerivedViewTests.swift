@@ -5,7 +5,7 @@ import Testing
 
 @testable import FoundationModelsACPClient
 
-// The tests of the derived views of the child tree: `ancestors`, `siblings`,
+// The tests of the derived views of the child tree: `ancestors`, `siblingsIncludingSelf`,
 // `descendants`, `SessionPathEntry` and `needsAttention`. Each value follows
 // one rule at every level: depth is not a case, and a chain of two or four
 // sessions is only the size of a test.
@@ -76,14 +76,14 @@ struct SubagentDerivedViewTests {
         try await connected.announce(announcement("second"), child: sessionId("second"))
         let first = try await connected.announce(announcement("first"), child: sessionId("first"))
 
-        #expect(first.siblings.map(\.sessionId) == [sessionId("second"), sessionId("first")])
+        #expect(first.siblingsIncludingSelf.map(\.sessionId) == [sessionId("second"), sessionId("first")])
     }
 
     @Test func theSiblingsOfARootSessionAreTheRootSessionsOfTheConnection() async throws {
         let connected = try await ConnectedStub.make { MailOrderStubAgent(connection: $0, messageIds: []) }
         defer { await connected.model.disconnect() }
 
-        #expect(connected.root.siblings.map(\.sessionId) == [testSession])
+        #expect(connected.root.siblingsIncludingSelf.map(\.sessionId) == [testSession])
     }
 
     // MARK: - Descendants
