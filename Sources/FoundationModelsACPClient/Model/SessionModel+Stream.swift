@@ -226,6 +226,11 @@ extension SessionModel {
         replayRequests = ReplayRequests()
         replaySucceeded = succeeded
         endChildReplays(succeeded: succeeded)
+        // The response is the replay boundary: the first current snapshot of a
+        // child folds onto a fresh base, so history never shows as current.
+        if succeeded {
+            markReplayBoundary()
+        }
         defer { resumeReplayEndWaiters() }
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
         history = .retained(replayFrom: replayFrom)

@@ -645,6 +645,13 @@ public final class SessionModel: Identifiable {
         sessionInfo = SessionInfoUpdate()
     }
 
+    /// Tells the merge engine that the replay of a resume ended. The first
+    /// current `subagent_update` of each child then folds onto a fresh base,
+    /// so a value of the history never shows as current.
+    func markReplayBoundary() {
+        engine.markReplayBoundary()
+    }
+
     /// Writes one engine change into the model.
     ///
     /// - Parameter change: The change that the engine returned.

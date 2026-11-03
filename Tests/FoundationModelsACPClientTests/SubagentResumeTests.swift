@@ -254,6 +254,27 @@ struct SubagentResumeTests {
         #expect(child.capabilities == cancelCapabilities)
     }
 
+    @Test func aCurrentSnapshotThatOmitsTheStateDoesNotShowTheHistoryState() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        connected.agent.setReplay { connection in
+            let update = try snapshot(
+                firstChild,
+                state: .value(.running(RunningStateUpdate())),
+                capabilities: .value(cancelCapabilities)
+            )
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        }
+        _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
+        let child = try #require(childModel(firstChild, under: connected.root))
+
+        try await connected.agent.send(try snapshot(firstChild))
+        try await waitForObservation { child.isWorkStateConfirmed } orFailWhen: { connected.root.isClosed }
+
+        #expect(child.workState == .unknown)
+        #expect(child.capabilities == nil)
+    }
+
     @Test func aLiveStateUpdateOfTheChildDoesNotConfirmIt() async throws {
         let connected = try await ResumeConnection.make()
         defer { await connected.model.disconnect() }

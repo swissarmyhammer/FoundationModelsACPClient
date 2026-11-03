@@ -424,7 +424,7 @@ extension SubagentTreeTests {
         defer { await connected.model.disconnect() }
 
         let fired = await observationFiresAsync(reading: { _ = connected.root.children }, during: {
-            try? await connected.announce(SubagentUpdate(sessionId: firstChild))
+            _ = try? await connected.announce(SubagentUpdate(sessionId: firstChild))
         })
 
         #expect(fired)
