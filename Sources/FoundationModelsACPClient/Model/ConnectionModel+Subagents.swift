@@ -13,17 +13,7 @@ extension ConnectionModel {
     /// - Parameter sessionId: The id of the child.
     /// - Returns: The model, or `nil` when no announced child has that id.
     func childSession(for sessionId: SessionId) -> SessionModel? {
-        func find(in session: SessionModel) -> SessionModel? {
-            for child in session.children {
-                if child.sessionId == sessionId { return child }
-                if let found = find(in: child) { return found }
-            }
-            return nil
-        }
-        for root in openSessions {
-            if let found = find(in: root) { return found }
-        }
-        return nil
+        childModels[sessionId]
     }
 
     /// Makes or changes the child that a `subagent_update` announced.
@@ -59,8 +49,32 @@ extension ConnectionModel {
         }
         parent.addChild(child)
         child.applyAnnouncement(announcement, isHistory: parent.isReplayingHistory)
+        childModels[child.sessionId] = child
         attachToEvents(child)
         parent.refreshChildLinks()
+    }
+
+    /// Takes child models out of the index, at each level, for a replay that
+    /// rebuilds the tree. The models stay open.
+    ///
+    /// - Parameter children: The child models to forget.
+    func forgetChildren(_ children: [SessionModel]) {
+        for child in children {
+            removeFromIndex(child)
+            forgetChildren(child.children)
+        }
+    }
+
+    /// Puts child models back into the index, at each level, after a failed
+    /// replay.
+    ///
+    /// - Parameter children: The child models to index again.
+    func reviveChildren(_ children: [SessionModel]) {
+        for child in children {
+            childModels[child.sessionId] = child
+            closedSessionIds.remove(child.sessionId)
+            reviveChildren(child.children)
+        }
     }
 
     /// Throws when a session id names a child, because the client sends no

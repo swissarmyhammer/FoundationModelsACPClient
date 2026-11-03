@@ -306,6 +306,10 @@ public final class SessionModel: Identifiable {
     /// The merge engine that holds the merge rules and the merged state.
     @ObservationIgnored private var engine = SessionMergeEngine()
 
+    /// The state that the running replay with history cleared, or `nil` when
+    /// no such replay runs.
+    @ObservationIgnored var replayRollback: ReplayRollback?
+
     /// The object of each wire entry, keyed by its engine identity.
     ///
     /// The model finds the object of a changed entry by identity and not by
@@ -635,6 +639,73 @@ public final class SessionModel: Identifiable {
     /// object. The local prompts lose their link state. A pending elicitation
     /// keeps its tool-call link: the link waits for the replayed entry of its
     /// tool call.
+    /// The state that a replay with history clears, kept aside until the
+    /// outcome of the resume is known. A failed resume gives it back.
+    struct ReplayRollback {
+        fileprivate var transcript: [TranscriptEntry]
+        fileprivate var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry]
+        fileprivate var heldEchoes: Set<FoundationModelsACP.SessionEntry.ID>
+        fileprivate var unlinkedPrompts: [TranscriptEntry.ID: UserMessageEntry]
+        fileprivate var engine: SessionMergeEngine
+        fileprivate var promptCorrelator: PendingPromptCorrelator<TranscriptEntry.ID>
+        fileprivate var availableCommands: [AvailableCommand]?
+        fileprivate var configOptions: [SessionConfigOption]?
+        fileprivate var usage: UsageUpdate?
+        fileprivate var agentState: StateUpdate?
+        fileprivate var sessionInfo: SessionInfoUpdate
+        fileprivate var history: SessionHistory
+        fileprivate var hasMissedUpdates: Bool
+
+        /// The child models of the session, kept open while the replay
+        /// rebuilds the tree.
+        var children: [SessionModel]
+    }
+
+    /// Keeps the state that a replay with history clears, and sets the child
+    /// models aside.
+    ///
+    /// - Returns: The kept state.
+    func makeReplayRollback() -> ReplayRollback {
+        ReplayRollback(
+            transcript: transcript,
+            wireEntries: wireEntries,
+            heldEchoes: heldEchoes,
+            unlinkedPrompts: unlinkedPrompts,
+            engine: engine,
+            promptCorrelator: promptCorrelator,
+            availableCommands: availableCommands,
+            configOptions: configOptions,
+            usage: usage,
+            agentState: agentState,
+            sessionInfo: sessionInfo,
+            history: history,
+            hasMissedUpdates: hasMissedUpdates,
+            children: children
+        )
+    }
+
+    /// Gives back the state that a failed replay cleared.
+    ///
+    /// - Parameter rollback: The state that ``makeReplayRollback()`` kept.
+    func restore(_ rollback: ReplayRollback) {
+        transcript = rollback.transcript
+        wireEntries = rollback.wireEntries
+        heldEchoes = rollback.heldEchoes
+        unlinkedPrompts = rollback.unlinkedPrompts
+        engine = rollback.engine
+        promptCorrelator = rollback.promptCorrelator
+        availableCommands = rollback.availableCommands
+        configOptions = rollback.configOptions
+        usage = rollback.usage
+        agentState = rollback.agentState
+        sessionInfo = rollback.sessionInfo
+        history = rollback.history
+        hasMissedUpdates = rollback.hasMissedUpdates
+        for entry in transcript {
+            attachUnresolvedElicitationLinks(to: entry)
+        }
+    }
+
     func resetTranscript() {
         detachElicitationLinksFromToolCalls()
         engine.reset()

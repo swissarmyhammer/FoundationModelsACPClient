@@ -194,11 +194,25 @@ public final class ConnectionModel {
     /// The sessions with a model that closed. The consumer drops each event
     /// of these, so no traffic reaches a removed child. A new model of the
     /// same session id takes the id out of the set.
-    @ObservationIgnored var closedSessionIds: Set<SessionId> = []
+    @ObservationIgnored var closedSessionIds = BoundedIDSet<SessionId>(limit: ConnectionModel.closedSessionLimit)
 
     /// The sessions of which the connection discarded events before the
     /// consumer attached. Their models set ``SessionModel/hasMissedUpdates``.
-    @ObservationIgnored private var sessionsWithMissedEvents: Set<SessionId> = []
+    @ObservationIgnored private var sessionsWithMissedEvents = BoundedIDSet<SessionId>(
+        limit: ConnectionModel.closedSessionLimit
+    )
+
+    /// The sessions that have pending events, oldest first. The oldest
+    /// session leaves first when the table is over its limit.
+    @ObservationIgnored private var pendingOrder: [SessionId] = []
+
+    /// The most closed sessions and missed sessions that the connection model
+    /// remembers.
+    static let closedSessionLimit = 1024
+
+    /// The model of each child session, by session id. The tree holds the same
+    /// models. This index finds a child at once.
+    @ObservationIgnored var childModels: [SessionId: SessionModel] = [:]
 
     /// The limits on the events that the consumer keeps for sessions with no
     /// model yet. Past a limit, it discards the events of the session and
@@ -218,7 +232,7 @@ public final class ConnectionModel {
     @ObservationIgnored private(set) var appliedSequence: UInt64?
 
     /// The callers that wait for the consumer to apply a sequence.
-    @ObservationIgnored private var sequenceWaiters: [(sequence: UInt64, waiter: CheckedContinuation<Void, Never>)] = []
+    @ObservationIgnored private var sequenceWaiters: [(id: UUID, sequence: UInt64, waiter: CheckedContinuation<Void, Never>)] = []
 
     /// The queue that runs the `session/resume` calls of one session one
     /// after the other, keyed by session id. Two resumes of one session that
@@ -455,11 +469,14 @@ public final class ConnectionModel {
     /// - Parameter connection: The connection whose sessions to follow.
     private func startEventConsumer(on connection: ClientSideConnection) {
         eventConsumer?.cancel()
-        pendingEvents.removeAll()
+        clearPendingState()
         closedSessionIds.removeAll()
         appliedSequence = nil
         let subscription = connection.subscribeToAllSessions()
-        sessionsWithMissedEvents = subscription.sessionsWithMissedEvents
+        sessionsWithMissedEvents.removeAll()
+        for id in subscription.sessionsWithMissedEvents {
+            sessionsWithMissedEvents.insert(id)
+        }
         let events = subscription.events
         eventConsumer = Task { @MainActor [weak self] in
             for await event in events {
@@ -472,11 +489,28 @@ public final class ConnectionModel {
         }
     }
 
+    /// Forgets the events of sessions with no model, and the index of the
+    /// child models.
+    private func clearPendingState() {
+        pendingEvents.removeAll()
+        pendingOrder.removeAll()
+        childModels.removeAll()
+    }
+
+    /// Takes a child model out of the index, when the index holds that model.
+    ///
+    /// - Parameter model: The model to take out.
+    func removeFromIndex(_ model: SessionModel) {
+        if childModels[model.sessionId] === model {
+            childModels[model.sessionId] = nil
+        }
+    }
+
     /// Stops the consumer, and lets each waiter go.
     private func stopEventConsumer() {
         eventConsumer?.cancel()
         eventConsumer = nil
-        pendingEvents.removeAll()
+        clearPendingState()
         releaseSequenceWaiters()
     }
 
@@ -504,14 +538,20 @@ public final class ConnectionModel {
     ///   - event: The event.
     ///   - sessionId: The session of the event.
     private func keepPending(_ event: SessionStreamEvent, of sessionId: SessionId) {
-        let isNewSession = pendingEvents[sessionId] == nil
-        if isNewSession, pendingEvents.count >= pendingLimits.maximumSessions {
-            sessionsWithMissedEvents.insert(sessionId)
-            return
+        if pendingEvents[sessionId] == nil {
+            // The oldest session leaves first, because a session that gets a
+            // model soon is one of the newest.
+            while pendingOrder.count >= pendingLimits.maximumSessions, let oldest = pendingOrder.first {
+                pendingOrder.removeFirst()
+                pendingEvents[oldest] = nil
+                sessionsWithMissedEvents.insert(oldest)
+            }
+            pendingOrder.append(sessionId)
         }
         pendingEvents[sessionId, default: []].append(event)
         if pendingEvents[sessionId, default: []].count > pendingLimits.maximumUpdatesPerSession {
             pendingEvents[sessionId] = nil
+            pendingOrder.removeAll { $0 == sessionId }
             sessionsWithMissedEvents.insert(sessionId)
         }
     }
@@ -519,6 +559,7 @@ public final class ConnectionModel {
     /// Ends the replay and the taps of each open model when the connection
     /// ended the event stream, and lets each waiter go.
     private func eventStreamDidEnd() {
+        eventConsumer = nil
         for session in openSessions {
             session.eventStreamDidEnd()
         }
@@ -532,33 +573,59 @@ public final class ConnectionModel {
     func attachToEvents(_ model: SessionModel) {
         model.isStreamAttached = true
         closedSessionIds.remove(model.sessionId)
-        if sessionsWithMissedEvents.remove(model.sessionId) != nil {
+        if sessionsWithMissedEvents.remove(model.sessionId) {
             model.hasMissedUpdates = true
         }
+        pendingOrder.removeAll { $0 == model.sessionId }
         for event in pendingEvents.removeValue(forKey: model.sessionId) ?? [] {
             model.receive(event)
         }
     }
 
     /// Records that the model of a session closed, so its later events drop.
+    /// A newer model of the same session id keeps the id live.
     ///
-    /// - Parameter sessionId: The id of the closed session.
-    func sessionDidClose(_ sessionId: SessionId) {
-        closedSessionIds.insert(sessionId)
+    /// - Parameter model: The closed model.
+    func sessionDidClose(_ model: SessionModel) {
+        let sessionId = model.sessionId
+        removeFromIndex(model)
         pendingEvents[sessionId] = nil
+        pendingOrder.removeAll { $0 == sessionId }
+        // A newer model of the same session takes over the events.
+        guard childModels[sessionId] == nil, session(for: sessionId) == nil else { return }
+        closedSessionIds.insert(sessionId)
     }
 
     /// Waits until the consumer applied the events of the wire up to a
-    /// sequence. It returns at once when the consumer already did, and when
-    /// the consumer stopped.
+    /// sequence. It returns at once when the consumer already did, when the
+    /// consumer ended, and when the calling task is cancelled.
     ///
     /// - Parameter sequence: The sequence to wait for.
     func waitUntilApplied(_ sequence: UInt64) async {
         guard eventConsumer != nil, appliedSequence.map({ $0 < sequence }) ?? true else { return }
-        didStartWaitingForEvents?()
-        await withCheckedContinuation { waiter in
-            sequenceWaiters.append((sequence, waiter))
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter in
+                // A cancel that came first, for example `$/cancel_request` of
+                // the request, ends the wait at once.
+                guard !Task.isCancelled else {
+                    waiter.resume()
+                    return
+                }
+                sequenceWaiters.append((id, sequence, waiter))
+                didStartWaitingForEvents?()
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancelSequenceWaiter(id) }
         }
+    }
+
+    /// Lets one waiter go, because its task was cancelled.
+    ///
+    /// - Parameter id: The id of the waiter.
+    private func cancelSequenceWaiter(_ id: UUID) {
+        guard let index = sequenceWaiters.firstIndex(where: { $0.id == id }) else { return }
+        sequenceWaiters.remove(at: index).waiter.resume()
     }
 
     /// Lets each waiter go whose sequence the consumer applied.

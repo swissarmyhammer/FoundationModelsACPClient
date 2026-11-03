@@ -146,8 +146,8 @@ struct ResumeConnection {
     /// Connects the model and opens the root session.
     ///
     /// - Throws: The error of `initialize` or of `session/new`.
-    static func make() async throws -> Self {
-        Self(connected: try await ConnectedStub.make { ResumeStubAgent(connection: $0) })
+    static func make(bufferLimits: SessionUpdateBufferLimits = .default) async throws -> Self {
+        Self(connected: try await ConnectedStub.make(bufferLimits: bufferLimits) { ResumeStubAgent(connection: $0) })
     }
 
     /// Sends a live snapshot and waits until the model made the child.
@@ -308,6 +308,81 @@ struct SubagentResumeTests {
 
         #expect(child.title == "Reviewer")
         #expect(child.displayTitle == "Reviewer")
+    }
+
+    @Test func aSnapshotBeforeTheResponseOfAResumeWithNoReplayIsCurrent() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        connected.agent.setReplay { connection in
+            let update = try snapshot(
+                firstChild,
+                state: .value(.running(RunningStateUpdate())),
+                capabilities: .value(cancelCapabilities)
+            )
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        }
+
+        _ = try await connected.resume(replayFrom: nil)
+
+        let child = try #require(childModel(firstChild, under: connected.root))
+        #expect(child.isWorkStateConfirmed)
+        #expect(child.workState == .running)
+        #expect(child.capabilities == cancelCapabilities)
+    }
+
+    @Test func aResumeWithNoReplayRemovesAStaleChildWhoseToolCallIsFinal() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        model.apply(toolCallStatus(id: agentsCall.rawValue, .completed))
+        let stale = SessionModelFixtures.immediateModel()
+        stale.startedByToolCallId = agentsCall
+        model.addChild(stale)
+
+        model.beginReplay(replayFrom: nil)
+        model.endReplay(succeeded: true)
+
+        #expect(model.children.isEmpty)
+        #expect(stale.isClosed)
+    }
+
+    @Test func aResumeWithNoReplayKeepsAStaleChildWhoseToolCallIsNotFinal() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        model.apply(toolCallStatus(id: agentsCall.rawValue, .inProgress))
+        let stale = SessionModelFixtures.immediateModel()
+        stale.startedByToolCallId = agentsCall
+        model.addChild(stale)
+
+        model.beginReplay(replayFrom: nil)
+        model.endReplay(succeeded: true)
+
+        #expect(model.children.count == 1)
+        #expect(!stale.isClosed)
+        #expect(!stale.isWorkStateConfirmed)
+    }
+
+    @Test func aFailedResumeOfAnOpenSessionRestoresTheTranscriptAndTheChildren() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        try await connected.agent.send(agentChunk(text: "before", message: "root-before"))
+        let child = try await connected.announce(try snapshot(firstChild), child: firstChild)
+        try await waitForObservation { !connected.root.transcript.isEmpty } orFailWhen: { connected.root.isClosed }
+        let transcriptBefore = connected.root.transcript.map(\.id)
+        connected.agent.setReplay { connection in
+            let update = agentChunk(text: "replayed", message: "root-replayed")
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        }
+        connected.agent.setResumeError(RequestError.internalError(detail: "no"))
+
+        await #expect(throws: (any Error).self) {
+            _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
+        }
+
+        #expect(connected.root.transcript.map(\.id) == transcriptBefore)
+        #expect(connected.root.children.first === child)
+        #expect(!child.isClosed)
+        #expect(childModel(firstChild, under: connected.root) === child)
+        // The old child still gets its events.
+        try await connected.agent.send(agentChunk(text: "after", message: "child-after"), to: firstChild)
+        try await waitForObservation { !child.transcript.isEmpty } orFailWhen: { connected.root.isClosed }
     }
 
     @Test func aLiveStateUpdateOfTheChildDoesNotConfirmIt() async throws {
@@ -500,20 +575,25 @@ struct SubagentResumeTests {
 
     // MARK: - Failure
 
-    @Test func aFailedRootReplayEndsTheReplayOfEachChild() async throws {
+    @Test func aFailedRootReplayEndsTheReplayOfEachChildAndDropsThem() async throws {
         let connected = try await ResumeConnection.make()
         defer { await connected.model.disconnect() }
+        let gate = UpdateGate()
+        connected.agent.setGate(gate)
         connected.agent.setReplay { connection in
             let update = try snapshot(firstChild)
             try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
         }
         connected.agent.setResumeError(RequestError.internalError(detail: "no"))
+        let resume = Task { try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart) }
+        let child = try await waitForChild(firstChild, under: connected.root)
 
-        await #expect(throws: (any Error).self) {
-            _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
-        }
+        gate.open()
+        await #expect(throws: (any Error).self) { _ = try await resume.value }
 
-        let child = try #require(childModel(firstChild, under: connected.root))
+        // The child of the failed replay is gone, as the whole replay is.
         #expect(!child.isReplaying)
+        #expect(child.isClosed)
+        #expect(connected.root.children.isEmpty)
     }
 }

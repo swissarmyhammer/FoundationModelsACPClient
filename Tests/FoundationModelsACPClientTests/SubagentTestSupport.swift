@@ -92,10 +92,16 @@ struct ConnectedStub<Stub: Agent & Sendable> {
     /// and opens the root session. The connect, the initialize and the open
     /// are network work, so a factory does them and no initializer does.
     ///
-    /// - Parameter makeStub: Builds the stub from its connection.
+    /// - Parameters:
+    ///   - bufferLimits: The limits on the events that the connection keeps
+    ///     for a session with no model.
+    ///   - makeStub: Builds the stub from its connection.
     /// - Returns: The connected stub.
     /// - Throws: The error of `initialize` or of `session/new`.
-    static func make(makeStub: @escaping @Sendable (AgentSideConnection) -> Stub) async throws -> Self {
+    static func make(
+        bufferLimits: SessionUpdateBufferLimits = .default,
+        makeStub: @escaping @Sendable (AgentSideConnection) -> Stub
+    ) async throws -> Self {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let built = Mutex<Stub?>(nil)
         let agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
@@ -104,7 +110,7 @@ struct ConnectedStub<Stub: Agent & Sendable> {
             return stub
         }
         let model = ConnectionModel(coalescingCadence: .zero)
-        _ = await model.connect(over: clientEnd)
+        _ = await model.connect(over: clientEnd, bufferLimits: bufferLimits)
         _ = try await model.initialize(makeInitializeRequest())
         let root = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
         let agent = try #require(built.withLock { $0 })

@@ -167,15 +167,22 @@ extension SessionModel {
         // `elicitation/complete` can come for these items. The agent already
         // has each answer, so nothing goes to the agent.
         awaitingURLCompletions.removeAll()
-        if replayFrom != nil, !transcript.isEmpty {
+        replayRollback = nil
+        if replayFrom != nil {
             flushPendingChunks()
-            resetTranscript()
+            // The old state stays aside until the resume gives its outcome. A
+            // failed resume gives it back; a successful one drops it.
+            replayRollback = makeReplayRollback()
+            if !transcript.isEmpty {
+                resetTranscript()
+            }
         }
         // A replay with history rebuilds the child models from the replayed
-        // announcements. A resume with no history keeps them, and each one
-        // waits for a current snapshot.
+        // announcements. The old child models stay open and aside until the
+        // outcome is known. A resume with no history keeps the child models,
+        // and each one waits for a current snapshot.
         if replayFrom != nil {
-            closeChildren()
+            setChildrenAside()
         } else {
             invalidateChildren()
         }
@@ -198,6 +205,21 @@ extension SessionModel {
     ///   result.
     func endReplay(succeeded: Bool) {
         flushPendingChunks()
+        if let rollback = replayRollback {
+            replayRollback = nil
+            if succeeded {
+                // The rebuilt tree replaces the old child models.
+                for child in rollback.children {
+                    child.markClosed()
+                }
+            } else {
+                // The resume failed: the new child models go, and the old
+                // state comes back.
+                closeChildren()
+                restore(rollback)
+                reviveChildren(rollback.children)
+            }
+        }
         let phase = replayPhase
         replayPhase = .idle
         replayRequests = ReplayRequests()
@@ -207,6 +229,11 @@ extension SessionModel {
         // child folds onto a fresh base, so history never shows as current.
         if succeeded {
             markReplayBoundary()
+            // A child that the resume did not announce again, and whose tool
+            // call is already final in the retained transcript, is gone. A
+            // child with no final tool call stays unknown: the agent may
+            // still announce it, and the model invents no removal.
+            refreshChildLinks()
         }
         defer { resumeReplayEndWaiters() }
         guard succeeded, case .replaying(from: let replayFrom?) = phase else { return }
@@ -270,7 +297,7 @@ extension SessionModel {
         endRunningReplayAsFailure()
         flushPendingChunks()
         isStreamAttached = false
-        owner?.sessionDidClose(sessionId)
+        owner?.sessionDidClose(self)
         finishUpdateTaps()
         cancelAllPending()
         frontRequestID = nil

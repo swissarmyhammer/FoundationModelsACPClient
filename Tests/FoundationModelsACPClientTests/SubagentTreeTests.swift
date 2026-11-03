@@ -205,6 +205,40 @@ struct SubagentTreeTests {
         #expect(child.workState == .running)
     }
 
+    @Test func anAnnouncementThatOmitsTheStateDoesNotOverwriteALaterOwnState() async throws {
+        let connected = try await SubagentConnection.make()
+        defer { await connected.model.disconnect() }
+        let child = try await connected.announce(
+            SubagentUpdate(sessionId: firstChild, state: .value(.running(RunningStateUpdate())))
+        )
+        try await connected.agent.send(.stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))), to: firstChild)
+        try await waitForObservation { child.workState == .idle(stopReason: .endTurn, error: nil) } orFailWhen: {
+            connected.root.isClosed
+        }
+
+        try await connected.agent.send(.subagentUpdate(SubagentUpdate(sessionId: firstChild, title: .value("Late"))))
+        try await waitForObservation { child.title == "Late" } orFailWhen: { connected.root.isClosed }
+
+        #expect(child.workState == .idle(stopReason: .endTurn, error: nil))
+    }
+
+    @Test func aLaterAnnouncementWithANewStateReplacesTheOwnStateOfTheChild() async throws {
+        let connected = try await SubagentConnection.make()
+        defer { await connected.model.disconnect() }
+        let child = try await connected.announce(
+            SubagentUpdate(sessionId: firstChild, state: .value(.running(RunningStateUpdate())))
+        )
+        try await connected.agent.send(.stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))), to: firstChild)
+        try await waitForObservation { child.workState == .idle(stopReason: .endTurn, error: nil) } orFailWhen: {
+            connected.root.isClosed
+        }
+
+        try await connected.agent.send(
+            .subagentUpdate(SubagentUpdate(sessionId: firstChild, state: .value(.requiresAction(RequiresActionStateUpdate()))))
+        )
+        try await waitForObservation { child.workState == .requiresAction } orFailWhen: { connected.root.isClosed }
+    }
+
     // MARK: - Routing
 
     @Test func anUpdateWithTheChildIdReachesOnlyTheChild() async throws {

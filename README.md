@@ -98,6 +98,10 @@ for child in root.children {
   (`completed`, `failed` or `cancelled`). The link is `_meta.sah.agentRun`:
   `startedByToolCallId` on the child, and `ToolCallEntry.childSession` on the
   tool call. A closed model has `isClosed == true`.
+  A child with no `agentRun` link is not removed by a tool call: it stays until
+  its parent closes. After a resume with no `replayFrom`, a child that the agent
+  does not announce again stays with an unknown state, unless its linked tool
+  call is already final in the retained transcript: then the model removes it.
 
 **Views for a breadcrumb bar.** These values are computed, so each view gets
 the same answer, and each one is `Observable`:
@@ -123,8 +127,10 @@ tree before the response.
 - The model drops the child models of the session before the replay, and
   rebuilds them from the replayed announcements. A resume with no `replayFrom`
   keeps the child models.
-- A snapshot before the response is history. It sets the description of the
-  child, and it confirms nothing. The response ends the replay of every
+- A snapshot before the response is history only in a resume WITH
+  `replayFrom`. In a resume with no `replayFrom`, a snapshot before the
+  response is current. History sets the description of the child, and it
+  confirms nothing. The response ends the replay of every
   model.
 - After the response, a child is **unconfirmed**: `isWorkStateConfirmed` is
   false, `workState` is `.unknown`, it has no capabilities, and `cancel()` is
@@ -132,6 +138,8 @@ tree before the response.
   child does not confirm it. A current snapshot that omits `state` gives an
   unknown state: history never shows as current.
 - Replayed content raises no `needsAttention`.
+- A failed resume of an open session gives back its transcript, its state and
+  its child models: the model keeps the old state aside until the response.
 
 **A child that failed to restore.** The agent announces it with the state
 `unknown` and a reason in `_meta.sah.restoreFailure`. The model keeps it in

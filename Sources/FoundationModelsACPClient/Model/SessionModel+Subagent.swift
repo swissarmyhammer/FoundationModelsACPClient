@@ -92,17 +92,17 @@ extension SessionModel {
 
     /// Writes ``restoreFailure`` from an announcement.
     ///
-    /// The reason is the explicit `_meta.sah.restoreFailure` that the agent
-    /// announces, in a replay or not: it tells why the child cannot be
-    /// restored, and it is no current activity. A current snapshot whose state
-    /// is known clears it. The model invents no failure of its own: a child
+    /// The reason is the explicit `_meta.sah.restoreFailure` of a CURRENT
+    /// snapshot. A snapshot of a replay is history and sets nothing. A current
+    /// snapshot whose state is known clears it. The model invents no failure of its own: a child
     /// with no current snapshot is only unconfirmed.
     ///
     /// - Parameters:
     ///   - announcement: The folded `subagent_update` of this child.
     ///   - isHistory: Whether the announcement is part of a replay.
     private func updateRestoreFailure(from announcement: SubagentUpdate, isHistory: Bool) {
-        if !isHistory, case .value(let state) = announcement.state, !state.isUnknown {
+        guard !isHistory else { return }
+        if case .value(let state) = announcement.state, !state.isUnknown {
             write(nil, to: \.restoreFailure)
         } else if let failure = SAH.RestoreFailure.extract(from: announcement.meta.currentValue) {
             write(failure.reason, to: \.restoreFailure)
@@ -121,6 +121,23 @@ extension SessionModel {
             child.write(false, to: \.isWorkStateConfirmed)
             child.invalidateChildren()
         }
+    }
+
+    /// Removes each child from the tree without closing it, and from the
+    /// index of the connection model, so the replay can make new child models
+    /// with the same ids. ``replayRollback`` keeps the old models.
+    func setChildrenAside() {
+        owner?.forgetChildren(children)
+        children.removeAll()
+    }
+
+    /// Puts the child models that a failed replay set aside back into the tree
+    /// and into the index of the connection model.
+    ///
+    /// - Parameter old: The child models that ``setChildrenAside()`` removed.
+    func reviveChildren(_ old: [SessionModel]) {
+        children = old
+        owner?.reviveChildren(old)
     }
 
     /// Closes and removes each child, at each level.

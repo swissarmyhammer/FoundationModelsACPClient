@@ -40,18 +40,46 @@ private func failedSnapshot(_ child: SessionId, reason: String) throws -> Sessio
 /// SubagentRestoreFailureTests` selects them.
 @MainActor
 struct SubagentRestoreFailureTests {
-    /// Resumes a session whose replay announces a failed child.
+    /// Resumes a session whose replay announces a child, and whose current
+    /// snapshot after the response says that the child failed to restore.
     ///
     /// - Returns: The connection, and the failed child.
     private func resumeWithFailedChild() async throws -> (ResumeConnection, SessionModel) {
         let connected = try await ResumeConnection.make()
         connected.agent.setReplay { connection in
             try await connection.sessionUpdate(
-                UpdateSessionNotification(sessionId: testSession, update: try failedSnapshot(firstChild, reason: missingTool))
+                UpdateSessionNotification(sessionId: testSession, update: try snapshot(firstChild))
             )
         }
+        connected.agent.setAfterAnswer { connection in
+            // The failure comes with the current snapshots, after the response.
+            let failed = try? failedSnapshot(firstChild, reason: missingTool)
+            if let failed {
+                try? await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: failed))
+            }
+        }
         _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
-        return (connected, try #require(childModel(firstChild, under: connected.root)))
+        let child = try await waitForChild(firstChild, under: connected.root)
+        try await waitForObservation { child.restoreFailure != nil } orFailWhen: { connected.root.isClosed }
+        return (connected, child)
+    }
+
+    @Test func aFailureInTheHistoryOfAReplayIsNotARestoreFailure() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        connected.agent.setReplay { connection in
+            try await connection.sessionUpdate(
+                UpdateSessionNotification(
+                    sessionId: testSession,
+                    update: try failedSnapshot(firstChild, reason: missingTool)
+                )
+            )
+        }
+
+        _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
+
+        let child = try #require(childModel(firstChild, under: connected.root))
+        #expect(child.restoreFailure == nil)
     }
 
     @Test func aChildThatFailedToRestoreIsUnknownWithItsReason() async throws {
@@ -102,9 +130,9 @@ struct SubagentRestoreFailureTests {
 
         _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
 
-        let again = try #require(childModel(firstChild, under: connected.root))
+        let again = try await waitForChild(firstChild, under: connected.root)
+        try await waitForObservation { again.restoreFailure == missingTool } orFailWhen: { connected.root.isClosed }
         #expect(again.id == firstChild)
-        #expect(again.restoreFailure == missingTool)
         #expect(connected.root.children.count == 1)
     }
 
@@ -112,6 +140,7 @@ struct SubagentRestoreFailureTests {
         let (connected, child) = try await resumeWithFailedChild()
         defer { await connected.model.disconnect() }
         connected.agent.setReplay { _ in }
+        connected.agent.setAfterAnswer { _ in }
 
         _ = try await connected.resume(replayFrom: nil)
 
