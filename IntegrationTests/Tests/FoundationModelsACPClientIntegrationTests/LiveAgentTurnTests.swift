@@ -47,12 +47,10 @@ struct LiveAgentTurnTests {
         // the reap at the end of the body, it does nothing.
         defer { agentProcess.shutdown() }
 
-        let model = ConnectionModel(coalescingCadence: .zero)
-        _ = await model.connect(over: agentProcess.transport)
+        let model = try await connectedModel(over: agentProcess, clientName: Self.clientName)
         // The disconnect of the body is the behavior under test. This one
         // closes the connection also when the body throws first.
         defer { await model.disconnect() }
-        _ = try await model.initialize(.integrationTest(clientName: Self.clientName))
         #expect(model.state == .connected)
 
         let session = try await model.newSession(
@@ -71,7 +69,7 @@ struct LiveAgentTurnTests {
             await Self.firstIdleAfterTheEcho(of: response.messageId, in: updates),
             "the update tap ended before the idle of the prompt")
         #expect(idle.stopReason == .endTurn)
-        #expect(!Self.agentText(in: session).isEmpty, "the transcript holds no agent message with text")
+        #expect(!agentText(in: session).isEmpty, "the transcript holds no agent message with text")
 
         await model.disconnect()
         #expect(model.openSessions.isEmpty)
@@ -129,24 +127,5 @@ struct LiveAgentTurnTests {
             }
         }
         return nil
-    }
-
-    /// Gives the text of each agent message of the transcript of `session`,
-    /// joined in transcript order.
-    ///
-    /// - Parameter session: The session model.
-    /// - Returns: The joined text.
-    @MainActor
-    private static func agentText(in session: SessionModel) -> String {
-        session.transcript
-            .flatMap { entry -> [ContentBlock] in
-                guard case .agentMessage(let message) = entry else { return [] }
-                return message.content
-            }
-            .compactMap { block -> String? in
-                guard case .text(let content) = block else { return nil }
-                return content.text
-            }
-            .joined()
     }
 }

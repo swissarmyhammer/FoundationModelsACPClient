@@ -72,6 +72,10 @@ struct LiveAgentServerBuild {
         try await startExecutable(productName, arguments: [rootDirectory.path, workspace.path])
     }
 
+    /// The executable of the real agent of FoundationModelsACPAgent. With the
+    /// variable `ACP_AGENT_STUB_SCRIPT` it plays a scripted stub model.
+    static let acpAgent = "acp-agent"
+
     /// The executable of the ACP test agent of the wire package, which plays
     /// the nested sub-agent scenario.
     static let acpTestAgent = "acp-test-agent"
@@ -83,11 +87,24 @@ struct LiveAgentServerBuild {
     /// - Parameters:
     ///   - productName: The executable product, for example ``acpTestAgent``.
     ///   - arguments: The launch arguments of the process.
+    ///   - environment: The whole environment of the process, or `nil` for the
+    ///     environment of the test.
+    ///   - currentDirectory: The working directory of the process, or `nil`.
     /// - Returns: The agent process. Its transport carries the connection.
     /// - Throws: The error of the build or of the start of the process.
-    func startExecutable(_ productName: String, arguments: [String]) async throws -> AgentProcess {
+    func startExecutable(
+        _ productName: String,
+        arguments: [String],
+        environment: [String: String]? = nil,
+        currentDirectory: URL? = nil
+    ) async throws -> AgentProcess {
         let executable = try await makeExecutable(productName)
-        return try AgentProcess(command: executable, arguments: arguments)
+        return try AgentProcess(
+            command: executable,
+            arguments: arguments,
+            environment: environment,
+            currentDirectory: currentDirectory?.path
+        )
     }
 
     /// Builds an executable, and gives its absolute path.

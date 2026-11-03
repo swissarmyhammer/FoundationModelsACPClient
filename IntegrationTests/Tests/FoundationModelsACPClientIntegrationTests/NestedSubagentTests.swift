@@ -26,32 +26,6 @@ private let grandchildId = SessionId(rawValue: "grandchild-1")
 private let failedChildId = SessionId(rawValue: "child-2")
 private let failedGrandchildId = SessionId(rawValue: "grandchild-2")
 
-/// Waits until a condition on observable state is true, or until its failure
-/// event is true. It reads no clock.
-///
-/// - Parameters:
-///   - condition: The condition to wait for.
-///   - failure: The failure event, for example the close of the connection.
-/// - Throws: An error when the failure event came first.
-@MainActor
-private func waitUntil(
-    _ condition: @escaping @MainActor () -> Bool,
-    orFailWhen failure: @escaping @MainActor () -> Bool
-) async throws {
-    struct EndedOnFailure: Error {}
-    let ended: @MainActor () -> Bool = { condition() || failure() }
-    while !ended() {
-        await withCheckedContinuation { (changed: CheckedContinuation<Void, Never>) in
-            withObservationTracking {
-                _ = ended()
-            } onChange: {
-                changed.resume()
-            }
-        }
-    }
-    guard condition() else { throw EndedOnFailure() }
-}
-
 /// Finds a session in the tree under a root session.
 ///
 /// - Parameters:
