@@ -199,6 +199,22 @@ struct SubagentResumeTests {
         _ = try await resume.value
     }
 
+    @Test func replayedHistoryRaisesNoNeedsAttention() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        connected.agent.setReplay { connection in
+            let update = try snapshot(firstChild, state: .value(.requiresAction(RequiresActionStateUpdate())))
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: update))
+        }
+
+        _ = try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart)
+        let child = try #require(childModel(firstChild, under: connected.root))
+
+        #expect(!child.needsAttention)
+        #expect(!connected.root.needsAttention)
+        #expect(connected.root.notices.isEmpty)
+    }
+
     // MARK: - Confirmation
 
     @Test func aChildIsUnconfirmedAfterTheResponseUntilItsFirstCurrentSnapshot() async throws {
