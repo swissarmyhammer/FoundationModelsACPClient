@@ -61,6 +61,93 @@ let model = await InProcessAgent.makeConnection { connection in
 process. When the agent closes its side first, the state of the model becomes
 `.disconnected`.
 
+## Sub-agent sessions
+
+An agent can start sub-agents. ACP v2 (the Subagent Sessions draft) shows each
+sub-agent as a child session. The model is parent and child all the way down:
+every session is a `SessionModel`, and each rule below holds at each level.
+Depth is not a case.
+
+```swift
+let root = try await model.newSession(request)
+
+// The agent announces a child with a `subagent_update`. The model makes the
+// child, and adds it to the children of its parent, in announce order.
+for child in root.children {
+    print(child.displayTitle, child.workState, child.needsAttention)
+}
+```
+
+**The tree.**
+
+- `parent` is the session that announced this session. It is `nil` for a root
+  session. `children` are the sessions that this session announced.
+- A child is not in `ConnectionModel.openSessions` or in `sessions` (the list
+  of `session/list`). You reach it through its parent.
+- `title`, `description`, `cwd`, `additionalDirectories` and `capabilities`
+  come from the announcement. An omitted field is unchanged, `null` clears
+  it, and a value replaces it. `capabilities` replace as a whole.
+- Updates and requests (permission, elicitation) that name a child go to the
+  child model, and stay attributed to it.
+- The client allows on a child only what its `capabilities` advertise. Today
+  that is `cancel()`. `prompt`, set config option, close, resume and delete
+  throw `SubagentSessionError.notPermitted` with no request. A child offers no
+  slash commands.
+- Closing a parent closes and removes its children. A child is also removed
+  when the `agents` tool call that started it reaches a final status
+  (`completed`, `failed` or `cancelled`). The link is `_meta.sah.agentRun`:
+  `startedByToolCallId` on the child, and `ToolCallEntry.childSession` on the
+  tool call. A closed model has `isClosed == true`.
+
+**Views for a breadcrumb bar.** These values are computed, so each view gets
+the same answer, and each one is `Observable`:
+
+- `ancestors`: the chain from the root to the parent, root first.
+- `siblings`: the choices of one crumb, in announce order. For a root session,
+  they are the root sessions of the connection.
+- `descendants`: all sessions below, depth first, in announce order.
+- `SessionPathEntry`: one small `Hashable` value for each of these: `sessionId`,
+  `title`, `path` (the titles from the root), `workState`,
+  `pendingRequestCount` and `needsAttention`. `pathEntry` is this session as
+  one entry, and `displayTitle` is its title (the child title, else the
+  session title, else the session id).
+- `needsAttention`: true when this session or any descendant is
+  `requires_action` or has a pending request. A question deep in the tree
+  shows on each ancestor.
+- Which session a window shows is view state. `ConnectionModel` has no
+  selected session.
+
+**Resume.** `resumeSession` with `replayFrom` replays the history of the whole
+tree before the response.
+
+- The model drops the child models of the session before the replay, and
+  rebuilds them from the replayed announcements. A resume with no `replayFrom`
+  keeps the child models.
+- A snapshot before the response is history. It sets the description of the
+  child, and it confirms nothing. The response ends the replay of every
+  model.
+- After the response, a child is **unconfirmed**: `isWorkStateConfirmed` is
+  false, `workState` is `.unknown`, it has no capabilities, and `cancel()` is
+  refused, until its first current snapshot. A live `state_update` of the
+  child does not confirm it. A current snapshot that omits `state` gives an
+  unknown state: history never shows as current.
+- Replayed content raises no `needsAttention`.
+
+**A child that failed to restore.** The agent announces it with the state
+`unknown` and a reason in `_meta.sah.restoreFailure`. The model keeps it in
+the tree: `restoreFailure` holds the reason, `workState` is `.unknown`, and it
+allows no prompt and no cancel. A later current snapshot with a known state
+clears `restoreFailure`. A child that only has no current snapshot is
+unconfirmed, and has no `restoreFailure`: the model invents no failure.
+
+**One ordered consumer.** `ConnectionModel` runs one consumer of the ordered
+event stream of the connection (`subscribeToAllSessions()` of the wire). It
+applies each event to the model of its session in wire order, so the model of
+a child always exists before its events and before a request that names it.
+A request handler reads the highest event sequence first, and waits until
+the consumer applied it. The resume marker is read one time, and it ends the
+replay of every model at that position.
+
 ## Previews
 
 A SwiftUI `#Preview` or a test of your app can make a populated model with
@@ -155,6 +242,10 @@ Add the package to the dependencies in your `Package.swift`:
   agent, and an `idle` can have no stop reason. After `cancel(meta:)`, the
   idle with the `cancelled` stop reason can come later. `agentState` keeps
   the last state that the agent sent, and the transcript keeps each update.
+- **One consumer applies the events of all sessions.** The updates of
+  different sessions have no order between their own streams. The connection
+  model reads the one ordered stream, so a child, a request for it, and the end
+  of a replay always meet in wire order.
 - **Token-rate chunks are coalesced.** A `SessionModel` applies the chunks
   at a display rate, so a SwiftUI view does not redraw for each token. A
   test measures this.
