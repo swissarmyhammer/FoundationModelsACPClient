@@ -631,18 +631,24 @@ public final class ConnectionModel {
     /// Lets each waiter go whose sequence the consumer applied.
     private func resumeSequenceWaiters() {
         guard let applied = appliedSequence else { return }
-        let ready = sequenceWaiters.filter { $0.sequence <= applied }
-        sequenceWaiters.removeAll { $0.sequence <= applied }
-        for entry in ready {
-            entry.waiter.resume()
-        }
+        resumeSequenceWaiters { $0.sequence <= applied }
     }
 
     /// Lets each waiter go, because no event comes any more.
     private func releaseSequenceWaiters() {
-        let all = sequenceWaiters
-        sequenceWaiters.removeAll()
-        for entry in all {
+        resumeSequenceWaiters { _ in true }
+    }
+
+    /// Takes each waiter out of the list that the predicate accepts, and lets
+    /// it go.
+    ///
+    /// - Parameter shouldResume: Tells if a waiter must go.
+    private func resumeSequenceWaiters(
+        where shouldResume: (_ entry: (id: UUID, sequence: UInt64, waiter: CheckedContinuation<Void, Never>)) -> Bool
+    ) {
+        let ready = sequenceWaiters.filter(shouldResume)
+        sequenceWaiters.removeAll(where: shouldResume)
+        for entry in ready {
             entry.waiter.resume()
         }
     }
