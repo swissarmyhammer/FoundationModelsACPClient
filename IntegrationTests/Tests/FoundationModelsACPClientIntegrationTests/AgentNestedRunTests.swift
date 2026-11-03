@@ -34,21 +34,6 @@ import Testing
 //  9. The interrupted runs continue when the gate opens.
 // 10. The original agents call completes, and the children are removed.
 
-/// The prefix of the name of the temporary directory of each test.
-private let temporaryDirectoryPrefix = "acp-client-agent-nested-integration"
-
-/// The client name that each test gives in `initialize`.
-private let clientName = "acp-client-agent-nested-integration-test"
-
-/// The markers that select the scripted pass of each session by its first
-/// prompt.
-private let rootMarker = "ROOT-MARKER"
-private let childMarker = "CHILD-MARKER"
-private let grandchildMarker = "GRANDCHILD-MARKER"
-
-/// The environment variable that gives the stub script to `acp-agent`.
-private let stubScriptVariable = "ACP_AGENT_STUB_SCRIPT"
-
 /// A client that declines each request. The trace test reads the wire only.
 private final class DecliningClient: Client {
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
@@ -66,91 +51,6 @@ private final class DecliningClient: Client {
     var extensionHandlers: ExtensionHandlers { ExtensionHandlers() }
 }
 
-/// The files and the processes of one nested run.
-private struct NestedRun {
-    /// The temporary directory of the test.
-    let root: URL
-
-    /// The working directory of the sessions. It holds the agent definitions.
-    let workspace: URL
-
-    /// The gate of the grandchild: the pass waits until this file exists.
-    let gate: URL
-
-    /// The environment of the agent process.
-    let environment: [String: String]
-
-    /// Makes the directories, the agent definitions and the stub script.
-    ///
-    /// - Returns: The run.
-    /// - Throws: The error of a file write.
-    static func make() throws -> NestedRun {
-        let root = try IntegrationTemporaryDirectory.make(prefix: temporaryDirectoryPrefix)
-        let workspace = try IntegrationTemporaryDirectory.makeWorkspace(in: root)
-        let home = root.appendingPathComponent("home", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let gate = root.appendingPathComponent("grandchild.gate")
-        for name in ["researcher", "reviewer"] {
-            let folder = workspace.appendingPathComponent(".agents/agents/\(name)", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try "---\nname: \(name)\ndescription: The \(name) test agent.\n---\n\nDo the task.\n"
-                .write(to: folder.appendingPathComponent("AGENT.md"), atomically: true, encoding: .utf8)
-        }
-        let script = """
-            {"sessions": [
-              {"match": {"promptContains": "\(rootMarker)"}, "passes": [
-                [{"toolCall": {"name": "agents", "arguments": {"op": "start agent", "name": "researcher", "prompt": "\(childMarker) research"}}}],
-                [{"text": "root done"}]]},
-              {"match": {"promptContains": "\(childMarker)"}, "passes": [
-                [{"toolCall": {"name": "agents", "arguments": {"op": "start agent", "name": "reviewer", "prompt": "\(grandchildMarker) review"}}}],
-                [{"text": "child done"}]]},
-              {"match": {"promptContains": "\(grandchildMarker)"}, "passes": [
-                [{"gate": "\(gate.path)"}, {"text": "grandchild done"}]]}
-            ]}
-            """
-        let scriptFile = root.appendingPathComponent("stub-script.json")
-        try script.write(to: scriptFile, atomically: true, encoding: .utf8)
-        var environment = ProcessInfo.processInfo.environment
-        environment[stubScriptVariable] = scriptFile.path
-        // The stub path does not load a model. The script variable implies it
-        // once the agent package lands it; the plain variable keeps the agent
-        // from a model download before.
-        environment["ACP_AGENT_STUB_MODEL"] = "1"
-        environment["ACP_AGENT_HOME"] = home.path
-        return NestedRun(root: root, workspace: workspace, gate: gate, environment: environment)
-    }
-
-    /// Starts a new `acp-agent acp` process over stdio.
-    ///
-    /// - Returns: The agent process.
-    /// - Throws: The error of the build or of the start.
-    func startAgent() async throws -> AgentProcess {
-        try await LiveAgentServerBuild(rootDirectory: root).startExecutable(
-            LiveAgentServerBuild.acpAgent,
-            arguments: ["acp"],
-            environment: environment,
-            currentDirectory: workspace
-        )
-    }
-
-    /// Starts a connection model over an agent process and initializes it.
-    ///
-    /// - Parameter process: The agent process.
-    /// - Returns: The connected model, after `initialize`.
-    /// - Throws: The error of `initialize`.
-    @MainActor
-    func connect(over process: AgentProcess) async throws -> ConnectionModel {
-        try await connectedModel(over: process, clientName: clientName)
-    }
-
-    /// Opens the gate of the grandchild.
-    ///
-    /// - Throws: The error of the file write.
-    func openGate() throws {
-        try Data().write(to: gate)
-    }
-}
-
 /// The failure event of each wait: the root session closed, or its work ended
 /// with no run to wait for (an agent that plays no script answers the prompt
 /// and goes idle).
@@ -158,7 +58,7 @@ private struct NestedRun {
 /// - Parameter session: The root session.
 /// - Returns: `true` when the wait must end.
 @MainActor
-private func sessionEnded(_ session: SessionModel) -> Bool {
+func sessionEnded(_ session: SessionModel) -> Bool {
     if session.isClosed { return true }
     if case .idle = session.workState { return true }
     return false
@@ -279,7 +179,7 @@ struct AgentNestedRunTests {
             defer { agentProcess.shutdown() }
             let connection = await ClientSideConnection(stream: agentProcess.transport) { _ in DecliningClient() }
             let all = connection.subscribeToAllSessions()
-            _ = try await connection.initialize(.integrationTest(clientName: clientName))
+            _ = try await connection.initialize(.integrationTest(clientName: nestedClientName))
             let created = try await connection.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
             _ = try await connection.prompt(
                 PromptRequest(prompt: [.text(TextContent(text: rootMarker))], sessionId: created.sessionId))

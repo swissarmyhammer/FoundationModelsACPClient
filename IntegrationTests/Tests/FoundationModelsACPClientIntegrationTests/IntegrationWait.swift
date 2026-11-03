@@ -50,18 +50,19 @@ func agentText(in session: SessionModel) -> String {
         .joined()
 }
 
-/// Connects a new model over an agent process and initializes it. When
+/// Connects a new model over a transport and initializes it. When
 /// `initialize` throws, the helper closes the connection first.
 ///
 /// - Parameters:
-///   - process: The agent process.
+///   - transport: The transport of the agent, for example the transport of an
+///     agent process, or a wrapper of it.
 ///   - clientName: The client name that `initialize` gives.
 /// - Returns: The connected model, after `initialize`.
 /// - Throws: The error of `initialize`.
 @MainActor
-func connectedModel(over process: AgentProcess, clientName: String) async throws -> ConnectionModel {
+func connectedModel(over transport: any ACPTransport, clientName: String) async throws -> ConnectionModel {
     let model = ConnectionModel(coalescingCadence: .zero)
-    _ = await model.connect(over: process.transport)
+    _ = await model.connect(over: transport)
     do {
         _ = try await model.initialize(.integrationTest(clientName: clientName))
     } catch {

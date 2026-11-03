@@ -47,7 +47,7 @@ struct LiveAgentTurnTests {
         // the reap at the end of the body, it does nothing.
         defer { agentProcess.shutdown() }
 
-        let model = try await connectedModel(over: agentProcess, clientName: Self.clientName)
+        let model = try await connectedModel(over: agentProcess.transport, clientName: Self.clientName)
         // The disconnect of the body is the behavior under test. This one
         // closes the connection also when the body throws first.
         defer { await model.disconnect() }
