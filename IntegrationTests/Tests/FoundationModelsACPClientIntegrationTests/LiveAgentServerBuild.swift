@@ -69,8 +69,25 @@ struct LiveAgentServerBuild {
     /// - Returns: The agent process. Its transport carries the connection.
     /// - Throws: The error of the build or of the start of the process.
     func startServer(_ productName: String, workspace: URL) async throws -> AgentProcess {
+        try await startExecutable(productName, arguments: [rootDirectory.path, workspace.path])
+    }
+
+    /// The executable of the ACP test agent of the wire package, which plays
+    /// the nested sub-agent scenario.
+    static let acpTestAgent = "acp-test-agent"
+
+    /// Builds an executable, and starts it as an external agent over stdio
+    /// with the arguments that the caller gives. Use it for an executable
+    /// that takes no root directory and no workspace.
+    ///
+    /// - Parameters:
+    ///   - productName: The executable product, for example ``acpTestAgent``.
+    ///   - arguments: The launch arguments of the process.
+    /// - Returns: The agent process. Its transport carries the connection.
+    /// - Throws: The error of the build or of the start of the process.
+    func startExecutable(_ productName: String, arguments: [String]) async throws -> AgentProcess {
         let executable = try await makeExecutable(productName)
-        return try AgentProcess(command: executable, arguments: [rootDirectory.path, workspace.path])
+        return try AgentProcess(command: executable, arguments: arguments)
     }
 
     /// Builds an executable, and gives its absolute path.
