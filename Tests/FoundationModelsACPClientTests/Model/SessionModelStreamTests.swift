@@ -588,39 +588,6 @@ struct SessionModelStreamTests {
         #expect(await tap.next() == nil)
     }
 
-    @Test func closeCancelsTheStreamTask() async throws {
-        let model = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
-        let termination = TerminationProbe()
-        continuation.onTermination = { reason in termination.record(reason) }
-        model.attach(subscription)
-        // The cancel of the stream task terminates the stream before the
-        // task ends. A task that ended with no cancel of the stream fails the
-        // wait. A model that does not cancel the task gives no event, and
-        // the wait then hangs: a known limit of rule T1.
-        let streamEnd = TaskEnd(of: try #require(model.streamTask))
-
-        model.markClosed()
-
-        try await waitUntil { termination.wasCancelled } orFailWhen: { streamEnd.hasEnded }
-    }
-
-    @Test func releasingTheModelCancelsTheStreamTask() async throws {
-        var model: SessionModel? = SessionModelFixtures.immediateModel()
-        let (subscription, continuation) = SessionModelFixtures.handMadeSubscription()
-        let termination = TerminationProbe()
-        continuation.onTermination = { reason in termination.record(reason) }
-        try #require(model).attach(subscription)
-        // The same failure event and the same limit as in
-        // `closeCancelsTheStreamTask`. The watch holds the task, not the
-        // model, so the release of the model still occurs.
-        let streamEnd = TaskEnd(of: try #require(model?.streamTask))
-
-        model = nil
-
-        try await waitUntil { termination.wasCancelled } orFailWhen: { streamEnd.hasEnded }
-    }
-
     @Test func anUpdateAfterCloseChangesNothing() {
         let model = SessionModelFixtures.immediateModel()
         model.apply(agentChunk(text: "before"))
@@ -632,25 +599,5 @@ struct SessionModelStreamTests {
         #expect(model.transcript.count == 1)
         #expect(model.transcript.first?.agentMessage?.content.joinedText == "before")
         #expect(model.agentState == nil)
-    }
-}
-
-/// Records how an `AsyncStream` terminated, across isolation domains.
-private final class TerminationProbe: Sendable {
-    /// Whether the stream terminated by cancellation.
-    private let cancelled = Mutex(false)
-
-    /// Whether the stream terminated by cancellation.
-    var wasCancelled: Bool {
-        cancelled.withLock { $0 }
-    }
-
-    /// Records one termination.
-    ///
-    /// - Parameter reason: The reason that the stream gave.
-    func record(_ reason: AsyncStream<SessionStreamEvent>.Continuation.Termination) {
-        guard case .cancelled = reason else { return }
-        cancelled.withLock { $0 = true }
-        TestChangeSignal.post()
     }
 }

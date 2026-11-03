@@ -298,9 +298,10 @@ public final class SessionModel: Identifiable {
     /// the replay resumes each one with its result.
     @ObservationIgnored var replayEndWaiters: [CheckedContinuation<Bool, Never>] = []
 
-    /// The task that folds the updates of the attached subscription, or `nil`
-    /// when no subscription is attached.
-    @ObservationIgnored var streamTask: Task<Void, Never>?
+    /// Whether the connection model feeds this model from the event stream of
+    /// its connection. A model that nothing feeds gets no replay marker, so
+    /// its replay ends as a failure at once.
+    @ObservationIgnored var isStreamAttached = false
 
     /// The merge engine that holds the merge rules and the merged state.
     @ObservationIgnored private var engine = SessionMergeEngine()
@@ -467,10 +468,8 @@ public final class SessionModel: Identifiable {
     }
 
     deinit {
-        // A released model must not leave a tap consumer suspended, or a
-        // stream task that waits on the subscription. The coalescer cancels
-        // its own scheduled flush when it is released.
-        streamTask?.cancel()
+        // A released model must not leave a tap consumer suspended. The
+        // coalescer cancels its own scheduled flush when it is released.
         for tap in updateTaps.values {
             tap.finish()
         }

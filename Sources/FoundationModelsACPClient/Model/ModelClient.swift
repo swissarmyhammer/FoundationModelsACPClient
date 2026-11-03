@@ -1,4 +1,5 @@
 import FoundationModelsACP
+import Synchronization
 
 /// The `Client` that a ``ConnectionModel`` serves.
 ///
@@ -44,6 +45,26 @@ import FoundationModelsACP
 /// title, a description, an option name, a message, a URL or form content. A
 /// `session/update` gets no span, because a span for each update makes too
 /// many spans.
+/// Holds the open connection for the router, so a handler can read the
+/// highest sequence of the ordered event stream before its first suspension.
+final class ConnectionBox: Sendable {
+    /// The connection, or `nil` before the model set it.
+    private let connection = Mutex<ClientSideConnection?>(nil)
+
+    /// Sets the open connection.
+    ///
+    /// - Parameter connection: The connection that this router serves.
+    func set(_ connection: ClientSideConnection) {
+        self.connection.withLock { $0 = connection }
+    }
+
+    /// The highest sequence that the connection gave to the ordered event
+    /// stream so far, or `nil` when it gave none or no connection is set.
+    var latestEventSequence: UInt64? {
+        connection.withLock { $0 }?.latestEventSequence
+    }
+}
+
 struct ModelClient: Client {
     /// The text that starts each warning of the router.
     private static let logPrefix = "ModelClient: "
@@ -61,16 +82,28 @@ struct ModelClient: Client {
     /// of the agent to this table.
     private let graphQLSubscriptions: SAHGraphQLSubscriptions
 
+    /// The open connection, for the highest event sequence at the start of a
+    /// handler.
+    private let connectionBox: ConnectionBox
+
     /// Makes the router of a model.
     ///
     /// - Parameters:
     ///   - model: The model that this router serves.
     ///   - logger: The diagnostic sink of the connection; never stdout.
     ///   - graphQLSubscriptions: The GraphQL subscriptions of the connection.
-    init(model: ConnectionModel, logger: ACPLogger, graphQLSubscriptions: SAHGraphQLSubscriptions) {
+    ///   - connectionBox: Holds the open connection. A router with no
+    ///     connection waits for no event.
+    init(
+        model: ConnectionModel,
+        logger: ACPLogger,
+        graphQLSubscriptions: SAHGraphQLSubscriptions,
+        connectionBox: ConnectionBox = ConnectionBox()
+    ) {
         self.model = model
         self.logger = logger
         self.graphQLSubscriptions = graphQLSubscriptions
+        self.connectionBox = connectionBox
     }
 
     /// The handlers of the `_sah/graphql/next`, `_sah/graphql/complete` and
@@ -100,13 +133,14 @@ struct ModelClient: Client {
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
         // Read before the first suspension; see `wireArrival`.
         let arrival = Self.wireArrival
+        let latestEvent = connectionBox.latestEventSequence
         return try await traceRequest(
             ClientRequestSpan.Method.requestPermission,
             sessionId: params.sessionId,
             meta: params.meta,
             fallback: PendingPermissionRequest.cancelledResponse,
             outcome: { Self.permissionOutcome(of: $0.outcome) },
-            route: { await routePermission(params, arrival: arrival) }
+            route: { await routePermission(params, arrival: arrival, latestEvent: latestEvent) }
         )
     }
 
@@ -124,6 +158,7 @@ struct ModelClient: Client {
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
         // Read before the first suspension; see `wireArrival`.
         let arrival = Self.wireArrival
+        let latestEvent = connectionBox.latestEventSequence
         let refusal = await model?.refusedElicitationReason(for: params)
         if let refusal {
             logger.log(Self.logPrefix + "answered cancel to an elicitation that the client did not advertise: \(refusal)")
@@ -134,7 +169,7 @@ struct ModelClient: Client {
             meta: params.meta,
             fallback: refusal.map(ElicitationResponseWire.cancelResponse(reason:)) ?? ElicitationResponseWire.cancelResponse,
             outcome: Self.elicitationOutcome(of:),
-            route: { refusal == nil ? await routeElicitation(params, arrival: arrival) : nil }
+            route: { refusal == nil ? await routeElicitation(params, arrival: arrival, latestEvent: latestEvent) : nil }
         )
     }
 
@@ -214,11 +249,16 @@ struct ModelClient: Client {
     /// - Parameters:
     ///   - params: The permission request.
     ///   - arrival: The wire arrival number of the request.
+    ///   - latestEvent: The highest event sequence when the request arrived.
     /// - Returns: The user's decision, or `nil` when the session is not open.
     private func routePermission(
         _ params: RequestPermissionRequest,
-        arrival: UInt64?
+        arrival: UInt64?,
+        latestEvent: UInt64?
     ) async -> RequestPermissionResponse? {
+        // Each event that the connection read before the request is applied
+        // first, so the model of a child that those events announce exists.
+        if let latestEvent { await model?.waitUntilApplied(latestEvent) }
         guard let model, let session = await model.openSession(waitingWhileOpening: params.sessionId) else {
             let warning = Self.closedSessionWarning(
                 answer: "cancelled",
@@ -243,10 +283,12 @@ struct ModelClient: Client {
     ///   elicitation.
     private func routeElicitation(
         _ params: CreateElicitationRequest,
-        arrival: UInt64?
+        arrival: UInt64?,
+        latestEvent: UInt64?
     ) async -> CreateElicitationResponse? {
         switch params.elicitationScope {
         case .session(let scope):
+            if let latestEvent { await model?.waitUntilApplied(latestEvent) }
             return await awaitSessionElicitation(params, sessionId: scope.sessionId, arrival: arrival)
         case .request(let scope):
             return await awaitRequestElicitation(params, requestId: scope.requestId, arrival: arrival)

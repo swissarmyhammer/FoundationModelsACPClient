@@ -4,6 +4,7 @@
 // subscription by hand.
 import Foundation
 @testable import FoundationModelsACP
+import Synchronization
 import Testing
 @testable import FoundationModelsACPClient
 
@@ -228,5 +229,40 @@ extension [ContentBlock] {
             return text.text
         }
         .joined()
+    }
+}
+
+// MARK: - A test feed for a hand-made subscription
+
+/// The test feed task of each model, so a later `attach` replaces the earlier
+/// one. Production code has no such task: the connection model runs one
+/// consumer of the ordered event stream and gives each event to its model.
+private let testFeedTasks = Mutex<[ObjectIdentifier: Task<Void, Never>]>([:])
+
+extension SessionModel {
+    /// The test feed task of this model, or `nil` when none is attached.
+    var streamTask: Task<Void, Never>? {
+        testFeedTasks.withLock { $0[ObjectIdentifier(self)] }
+    }
+
+    /// Feeds this model from a hand-made subscription, in order, as the
+    /// connection model feeds it from the ordered stream. A later call
+    /// replaces the earlier feed.
+    ///
+    /// - Parameter subscription: The hand-made subscription.
+    func attach(_ subscription: SessionUpdateSubscription) {
+        if subscription.hasMissedUpdates {
+            hasMissedUpdates = true
+        }
+        isStreamAttached = true
+        let events = subscription.updates
+        let task = Task { @MainActor [weak self] in
+            for await event in events {
+                self?.receive(event)
+            }
+            guard !Task.isCancelled else { return }
+            self?.eventStreamDidEnd()
+        }
+        testFeedTasks.withLock { $0.updateValue(task, forKey: ObjectIdentifier(self))?.cancel() }
     }
 }

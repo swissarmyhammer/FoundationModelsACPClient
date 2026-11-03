@@ -59,6 +59,7 @@ extension ConnectionModel {
         }
         parent.addChild(child)
         child.applyAnnouncement(announcement, isHistory: parent.isReplayingHistory)
+        attachToEvents(child)
         parent.refreshChildLinks()
     }
 

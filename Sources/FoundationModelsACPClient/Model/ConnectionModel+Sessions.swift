@@ -82,6 +82,7 @@ extension ConnectionModel {
         if let beforeRegisteringNewSession {
             await beforeRegisteringNewSession(response.sessionId)
         }
+        attachToEvents(session)
         try register(session, openedOver: connection)
         return session
     }
@@ -199,6 +200,7 @@ extension ConnectionModel {
         // holds the question as pending.
         let session = makeSubscribedSessionModel(sessionId: sent.sessionId, over: connection)
         register(session)
+        attachToEvents(session)
         do {
             try await replay(sent, into: session, over: connection)
         } catch {
@@ -394,26 +396,21 @@ extension ConnectionModel {
         _ = await session.waitForReplayEnd()
     }
 
-    /// Makes the model of a session, attached to a new subscription of the
-    /// session on a connection.
-    ///
-    /// The model sends the requests of the session over the same connection.
-    /// The first subscription to a session gets each update that the
-    /// connection kept for it, and the overflow mark.
+    /// Makes the model of a session that sends its requests over a
+    /// connection. The caller calls ``attachToEvents(_:)`` when the model is
+    /// ready to fold the events that the consumer kept for its session.
     ///
     /// - Parameters:
     ///   - sessionId: The id of the session.
     ///   - connection: The connection of the session.
     /// - Returns: The model, not yet in ``openSessions``.
     func makeSubscribedSessionModel(sessionId: SessionId, over connection: ClientSideConnection) -> SessionModel {
-        let subscription = connection.subscribe(to: sessionId)
         let session = makeSessionModel(
             sessionId: sessionId,
             requestSender: ConnectionSessionRequestSender(connection: connection) { [weak self] error in
                 self?.recordAuthRequired(ifThrownBy: error, over: connection)
             }
         )
-        session.attach(subscription)
         return session
     }
 

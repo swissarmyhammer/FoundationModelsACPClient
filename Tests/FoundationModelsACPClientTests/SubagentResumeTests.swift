@@ -62,6 +62,10 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
     /// The error that the stub answers `session/resume` with, or `nil`.
     private let resumeError: Mutex<RequestError?>
 
+    /// What the stub does at once after the answer of `session/resume`, or
+    /// `nil`.
+    private let afterAnswer: Mutex<(@Sendable (AgentSideConnection) async -> Void)?>
+
     /// The input side of ``cancels``.
     private let cancelInput: AsyncStream<CancelSessionNotification>.Continuation
 
@@ -73,6 +77,7 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
         replay = Mutex { _ in }
         beforeAnswer = Mutex(nil)
         resumeError = Mutex(nil)
+        afterAnswer = Mutex(nil)
         (cancels, cancelInput) = AsyncStream.makeStream()
     }
 
@@ -91,6 +96,11 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
         resumeError.withLock { $0 = error }
     }
 
+    /// Sets what the stub does at once after the answer of the next resume.
+    func setAfterAnswer(_ work: @escaping @Sendable (AgentSideConnection) async -> Void) {
+        afterAnswer.withLock { $0 = work }
+    }
+
     /// Sends one update.
     func send(_ update: SessionUpdate, to sessionId: SessionId = testSession) async throws {
         try await connection.sessionUpdate(UpdateSessionNotification(sessionId: sessionId, update: update))
@@ -106,6 +116,10 @@ final class ResumeStubAgent: BaselineStubAgent, UpdateSendingStubAgent {
         await beforeAnswer.withLock { $0 }?.wait()
         if let error = resumeError.withLock({ $0 }) {
             throw error
+        }
+        if let work = afterAnswer.withLock({ $0 }) {
+            let connection = connection
+            connection.afterRespondingToCurrentRequest { await work(connection) }
         }
         return ResumeSessionResponse()
     }
