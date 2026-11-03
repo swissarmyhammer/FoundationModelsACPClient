@@ -1,4 +1,5 @@
 import FoundationModelsACP
+import Synchronization
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -55,6 +56,49 @@ struct OrderedEventConsumerTests {
         defer { await connected.model.disconnect() }
         let grandchild = try await waitForChild(nestedGrandchild, under: connected.root)
 
+        try await waitForObservation { grandchild.pendingRequestCount == 1 } orFailWhen: { connected.root.isClosed }
+
+        #expect(grandchild.pendingPermissions.first?.request.sessionId == nestedGrandchild)
+    }
+
+    @Test func aRequestWaitsForTheEventsThatCameBeforeIt() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        let gate = UpdateGate()
+        // The consumer stops at the announcement of the grandchild, which is
+        // in the stream of the child. The response and the request of the
+        // agent reach the client while the consumer waits.
+        connected.model.beforeApplyingEvent = { event in
+            guard event.sessionId == firstChild, case .update(.subagentUpdate(let update)) = event.event,
+                update.sessionId == nestedGrandchild
+            else { return }
+            await gate.wait()
+        }
+        connected.agent.setReplay { connection in
+            let first = try snapshot(firstChild)
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: testSession, update: first))
+            let nested = try snapshot(nestedGrandchild)
+            try await connection.sessionUpdate(UpdateSessionNotification(sessionId: firstChild, update: nested))
+        }
+        let handlerWaits = Mutex(false)
+        let requestAnswered = Mutex(false)
+        connected.model.didStartWaitingForEvents = {
+            handlerWaits.withLock { $0 = true }
+            TestChangeSignal.post()
+        }
+        connected.agent.setAfterAnswer { connection in
+            _ = try? await connection.requestPermission(grandchildRequest)
+            requestAnswered.withLock { $0 = true }
+            TestChangeSignal.post()
+        }
+        let resume = Task { try await connected.resume(replayFrom: SessionModelFixtures.replayFromStart) }
+        // The handler of the request waits for the held consumer. An answer
+        // before that wait means that the handler did not wait.
+        try await waitUntil { handlerWaits.withLock { $0 } } orFailWhen: { requestAnswered.withLock { $0 } }
+
+        gate.open()
+        _ = try await resume.value
+        let grandchild = try await waitForChild(nestedGrandchild, under: connected.root)
         try await waitForObservation { grandchild.pendingRequestCount == 1 } orFailWhen: { connected.root.isClosed }
 
         #expect(grandchild.pendingPermissions.first?.request.sessionId == nestedGrandchild)

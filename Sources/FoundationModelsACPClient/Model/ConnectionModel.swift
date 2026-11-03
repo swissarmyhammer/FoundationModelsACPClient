@@ -205,6 +205,14 @@ public final class ConnectionModel {
     /// marks the session as missed.
     @ObservationIgnored private var pendingLimits = SessionUpdateBufferLimits.default
 
+    /// A test hook that the consumer awaits before it applies each event, so
+    /// a test can hold the consumer at one event.
+    @ObservationIgnored var beforeApplyingEvent: (@MainActor (SequencedSessionEvent) async -> Void)?
+
+    /// A test hook that tells that a request handler waits for events that
+    /// the consumer did not apply yet.
+    @ObservationIgnored var didStartWaitingForEvents: (@MainActor () -> Void)?
+
     /// The highest wire sequence that the consumer applied, or `nil` before
     /// the first event.
     @ObservationIgnored private(set) var appliedSequence: UInt64?
@@ -455,6 +463,9 @@ public final class ConnectionModel {
         let events = subscription.events
         eventConsumer = Task { @MainActor [weak self] in
             for await event in events {
+                if let hook = self?.beforeApplyingEvent {
+                    await hook(event)
+                }
                 self?.apply(event)
             }
             self?.eventStreamDidEnd()
@@ -544,6 +555,7 @@ public final class ConnectionModel {
     /// - Parameter sequence: The sequence to wait for.
     func waitUntilApplied(_ sequence: UInt64) async {
         guard eventConsumer != nil, appliedSequence.map({ $0 < sequence }) ?? true else { return }
+        didStartWaitingForEvents?()
         await withCheckedContinuation { waiter in
             sequenceWaiters.append((sequence, waiter))
         }
