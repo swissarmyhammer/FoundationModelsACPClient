@@ -277,8 +277,9 @@ struct AgentNestedScenarioTests {
         defer { await second.cleanUp() }
 
         // The root resumed, and the tree has the child and the grandchild as
-        // unknown, each with its reason.
-        #expect(session.workState == .running)
+        // unknown, each with its reason. The root is idle: a child that failed
+        // to restore adds no foreground work, and idle allows background work.
+        #expect(session.workState == .idle(stopReason: nil, error: nil))
         try await waitUntil({ session.descendants.count == nestedSessionCount }, orFailWhen: { session.isClosed })
         let (child, grandchild) = try childAndGrandchild(of: session)
         try await waitUntil(
