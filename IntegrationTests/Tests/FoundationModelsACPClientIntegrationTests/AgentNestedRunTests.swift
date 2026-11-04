@@ -13,10 +13,8 @@ import Testing
 // at a gate (a file that the test writes), so the test sees the tree while
 // the runs are alive, and can stop the agent process in the middle of the run.
 //
-// These tests are RED until the agent package lands its remaining tasks: no
-// marker hides the failure. Each test carries the `.bug` trait with the card
-// that lists the assertions. The public API of the library is the only API
-// that the tests use.
+// These tests run the real `acp-agent-stub` and must pass. The public API of
+// the library is the only API that the tests use.
 //
 // Assertions of the first test (the card lists them too):
 //  1. The tree appears: the root has one child, and the child has one
@@ -67,7 +65,7 @@ func sessionEnded(_ session: SessionModel) -> Bool {
 struct AgentNestedRunTests {
     /// The real agent runs a root, a child and a grandchild, and the model
     /// follows the tree to the end of the runs.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aNestedRunOfTheRealAgentBuildsAndEmptiesTheTree() async throws {
         do {
@@ -119,7 +117,7 @@ struct AgentNestedRunTests {
     /// The agent process ends in the middle of the run. A new process resumes
     /// the root from the start: the tree comes back, the interrupted runs
     /// continue, and the original agents call completes.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aKilledAgentResumesTheNestedRunWithItsTree() async throws {
         do {
@@ -164,13 +162,16 @@ struct AgentNestedRunTests {
             // 10. The original agents call completes, and the children leave.
             try await waitUntil({ child.isClosed }, orFailWhen: closed)
             #expect(session.children.isEmpty)
+            let calls = agentsCalls(in: session)
+            #expect(!calls.isEmpty)
+            #expect(calls.allSatisfy { $0.status == .completed })
             try FileManager.default.removeItem(at: run.root)
         }
     }
 
     /// The ordered events of a nested run follow the rules of the wire trace
     /// validator.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func theNestedRunTraceFollowsTheWireRules() async throws {
         do {

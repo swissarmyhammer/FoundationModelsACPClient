@@ -108,6 +108,17 @@ func agentText(in session: SessionModel) -> String {
         .joined()
 }
 
+/// The `agents` tool calls of a session, in transcript order.
+///
+/// - Parameter session: The session model.
+/// - Returns: The tool call entries named `agents`.
+@MainActor
+func agentsCalls(in session: SessionModel) -> [ToolCallEntry] {
+    session.transcript.compactMap { entry -> ToolCallEntry? in
+        if case .toolCall(let call) = entry, call.name == "agents" { call } else { nil }
+    }
+}
+
 /// Connects a new model over a transport and initializes it. When
 /// `initialize` throws, the helper closes the connection first.
 ///

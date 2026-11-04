@@ -7,9 +7,8 @@ import Testing
 // The remaining acceptance tests of the sub-agent model against the REAL
 // `acp-agent` with the scripted stub model (`ACP_AGENT_STUB_SCRIPT`). Each
 // test records the frames of its connection with `TraceTransport`, and checks
-// the trace with `SubagentWireTraceValidator`. The tests are RED until the
-// agent package lands the scripted stub model and the behavior they name; each
-// carries the `.bug` trait with the card that lists the assertions.
+// the trace with `SubagentWireTraceValidator`. These tests run the real
+// `acp-agent-stub` and must pass.
 //
 // The script steps that these tests assume, beside the steps of the agent
 // contract (`text`, `reasoning`, `toolCall`, `gate`):
@@ -86,9 +85,31 @@ private func askingScript(_ gate: (String) -> String) -> String {
         NestedScript.scriptedSession(
             marker: childMarker,
             passes: [[
-                "{\"elicit\": \"Which file?\"}", "{\"text\": \"after question\"}",
+                "{\"elicit\": \"Which file?\"}", "{\"text\": \"\(textAfterQuestion)\"}",
             ]]),
     ])
+}
+
+/// The text that the asking child plays after its question.
+private let textAfterQuestion = "after question"
+
+/// Prompts the root of the asking script, and waits for the form question of
+/// the child. The question is pending once under the child, and never under
+/// the root.
+///
+/// - Parameter session: The root session.
+/// - Returns: The child, and its pending question.
+/// - Throws: The error of the prompt, of a wait, or of `#require`.
+@MainActor
+private func awaitChildQuestion(of session: SessionModel) async throws -> (SessionModel, PendingElicitation) {
+    let ended: @MainActor () -> Bool = { sessionEnded(session) }
+    _ = try await session.prompt([.text(TextContent(text: rootMarker))])
+    try await waitUntil({ session.children.count == 1 }, orFailWhen: ended)
+    let child = try #require(session.children.first)
+    try await waitUntil({ !child.pendingElicitations.isEmpty }, orFailWhen: ended)
+    #expect(child.pendingElicitations.count == 1)
+    #expect(session.pendingElicitations.isEmpty)
+    return (child, try #require(child.pendingElicitations.first))
 }
 
 /// Starts a traced run over a script and opens a session.
@@ -160,7 +181,7 @@ private func startNestedRun(_ run: NestedRun) async throws -> (TracedRun, Sessio
 struct AgentNestedScenarioTests {
     /// A cancel of one child ends only that child. A cancel of the parent
     /// leaves a background child running.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aCancelOfOneChildEndsOnlyThatChild() async throws {
         let (run, started, session) = try await startSession(script: siblingScript)
@@ -176,8 +197,14 @@ struct AgentNestedScenarioTests {
         // The cancel of the first child: it goes idle with the stop reason
         // `cancelled`, its tool call ends, and its sibling and the root go on.
         try await waitUntil({ first.capabilities?.cancel != nil }, orFailWhen: ended)
+        let firstCall = try #require(agentsCalls(in: session).first { $0.childSession === first })
         try await first.cancel()
         try await waitUntil({ first.workState == .idle(stopReason: .cancelled, error: nil) }, orFailWhen: ended)
+        // The linked agents call of the cancelled child ends: its status is
+        // final, and the child leaves the tree.
+        try await waitUntil({ first.isClosed }, orFailWhen: ended)
+        #expect(firstCall.status == .completed || firstCall.status == .failed)
+        #expect(!session.children.contains { $0 === first })
         #expect(second.workState == .running)
         #expect(!second.isClosed)
         if case .idle = session.workState {
@@ -203,27 +230,17 @@ struct AgentNestedScenarioTests {
 
     /// A form question of a child shows under the child id once, and its
     /// answer reaches the child. The agent sends no permission request.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
         let (run, started, session) = try await startSession(script: askingScript)
         defer { await started.cleanUp() }
-        let ended: @MainActor () -> Bool = { sessionEnded(session) }
+        let (child, question) = try await awaitChildQuestion(of: session)
 
-        _ = try await session.prompt([.text(TextContent(text: rootMarker))])
-        try await waitUntil({ session.children.count == 1 }, orFailWhen: ended)
-        let child = try #require(session.children.first)
-
-        // The form question: once, under the child.
-        try await waitUntil({ !child.pendingElicitations.isEmpty }, orFailWhen: ended)
-        #expect(child.pendingElicitations.count == 1)
-        #expect(session.pendingElicitations.isEmpty)
-        let question = try #require(child.pendingElicitations.first)
-        // The agent ends the pass on a decline by design, so the test accepts.
         // The form has one required string field, `answer`.
         child.acceptElicitation(question.id, content: .object(["answer": .string("x.txt")]))
-        try await waitUntil({ agentText(in: child).contains("after question") }, orFailWhen: ended)
-        #expect(agentText(in: child).contains("after question"))
+        try await waitUntil({ agentText(in: child).contains(textAfterQuestion) }, orFailWhen: { sessionEnded(session) })
+        #expect(agentText(in: child).contains(textAfterQuestion))
 
         // The trace holds the whole run only after the child ends.
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
@@ -231,10 +248,28 @@ struct AgentNestedScenarioTests {
         try FileManager.default.removeItem(at: run.root)
     }
 
+    /// A decline of the form question of a child reaches the child: the child
+    /// ends its pass, and the text after the question never plays.
+    @Test(.timeLimit(.minutes(2)))
+    @MainActor
+    func aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt() async throws {
+        let (run, started, session) = try await startSession(script: askingScript)
+        defer { await started.cleanUp() }
+        let (child, question) = try await awaitChildQuestion(of: session)
+
+        child.declineElicitation(question.id)
+        try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
+        #expect(!agentText(in: child).contains(textAfterQuestion))
+        #expect(child.pendingElicitations.isEmpty)
+
+        started.expectValidTrace()
+        try FileManager.default.removeItem(at: run.root)
+    }
+
     /// A hot resume of a live session tree: the history comes before the
     /// response, the running child keeps running, and the current child
     /// snapshots come after the response.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aHotResumeKeepsTheRunningChildRunning() async throws {
         let run = try NestedRun.make()
@@ -260,7 +295,7 @@ struct AgentNestedScenarioTests {
 
     /// A child whose definition is gone after a restart shows unknown with a
     /// restore failure, and so do its descendants, while the root resumes.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aChildWithNoDefinitionAfterARestartShowsUnknownWithItsReason() async throws {
         let run = try NestedRun.make()
@@ -293,7 +328,7 @@ struct AgentNestedScenarioTests {
     /// An orderly quit (SIGTERM) of the agent process, and a new process: the
     /// interrupted nested runs come back, and the ORIGINAL agents call
     /// completes.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)))
     @MainActor
     func anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall() async throws {
         let run = try NestedRun.make()
@@ -316,11 +351,9 @@ struct AgentNestedScenarioTests {
         // The interrupted runs continue, and the original agents call ends.
         try run.openGate()
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
-        let agentsCalls = session.transcript.compactMap { entry -> ToolCallEntry? in
-            if case .toolCall(let call) = entry, call.name == "agents" { call } else { nil }
-        }
-        #expect(!agentsCalls.isEmpty)
-        #expect(agentsCalls.allSatisfy { $0.status == .completed })
+        let calls = agentsCalls(in: session)
+        #expect(!calls.isEmpty)
+        #expect(calls.allSatisfy { $0.status == .completed })
         second.expectValidTrace()
         try FileManager.default.removeItem(at: run.root)
     }
