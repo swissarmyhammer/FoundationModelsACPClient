@@ -30,6 +30,23 @@ comments:
     - stuck on: B1, B2 only (missing agent step "permission").
     - next: the agent package adds the permission step; then write the B1/B2 test.
   timestamp: 2026-11-04T19:08:24.194160+00:00
+- actor: claude-code
+  id: 01m6m2br3t9qn25rcn5n17sx2y
+  text: |-
+    ### implement — stuck
+    - evidence: 1 file changed: IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift. New test aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt (script: permission step, then text; checks B1: one pending request under the child id with the child session id, none under the root; B2: after selecting allow once, the text after the permission plays, no request stays pending; then trace check). The fixture needed no change (the researcher AGENT.md already has "tools: Agent, runCode"). swift build --build-tests: complete.
+    - blocker: the new test did not run against the agent. The build of the stub fails: `swift build --package-path IntegrationTests/LiveAgentServer --product acp-agent-stub` exits 1. FoundationModelsACPAgent at 3fc632a, file Sources/FoundationModelsACPAgent/Tools/CodeContextLease.swift (lines 228 and 251): "missing argument for parameter 'selection' in call". Cause: the resolved FoundationModelsCodeContext is main at 0bc7bdd. Its commit b2c258c (2026-11-04, "CodeContext takes a required selection model") made the `selection` parameter required, and the agent pin does not pass it. The agent needs a newer commit, or the CodeContext revision in IntegrationTests/LiveAgentServer must be older than b2c258c (for example ffa5a66).
+    - B1 and B2 stay unticked: the test has not run green. The child question test was not run (the build blocker is the same).
+    - next: a person decides: pin CodeContext below b2c258c locally, or wait for an agent commit that passes `selection`. Then run the new test alone, then the child question test alone.
+  timestamp: 2026-11-04T20:00:17.018142+00:00
+- actor: claude-code
+  id: 01m6m2fdhcgswayhgeqkfvxgj7
+  text: |-
+    ### implement — changed
+    - evidence: 1 file changed: IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift (new test aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt). The coordinator pinned FoundationModelsCodeContext to ffa5a66 locally (Package.resolved is gitignored), which fixed the agent build. Run alone from IntegrationTests: aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt passed (30.2 s); aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt passed (19.7 s). No code was changed in this pass.
+    - boxes ticked: B1 and B2 (the new test checks both). The card text was checked: the only other open item is C5, which stays NOT TESTABLE with one stdio process. No other unticked item has a test.
+    - next: /review.
+  timestamp: 2026-11-04T20:02:17.260409+00:00
 position_column: doing
 position_ordinal: '8180'
 title: More end-to-end acceptance tests of the sub-agent model against the real acp-agent
@@ -47,8 +64,8 @@ Test A: aCancelOfOneChildEndsOnlyThatChild
 - [x] A4. cancel() on the parent leaves the running background child running.
 - [x] A5. The trace has zero violations.
 Test B: aChildRequestShowsUnderTheChildOnceAndItsAnswerReachesIt
-- [ ] B1. A permission request of the child is pending under the child id, exactly once, and never under the root (the relayed copy never reaches the client). (BLOCKED: the stub script has no permission step. See the comment of the card.)
-- [ ] B2. The answer reaches the child: the run goes on (text after permission). (BLOCKED: the same missing step. The test checks the text after a form answer.)
+- [x] B1. A permission request of the child is pending under the child id, exactly once, and never under the root (the relayed copy never reaches the client). (Test aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt checks it.)
+- [x] B2. The answer reaches the child: the run goes on (text after permission). (The same test selects allow once and checks the text after the permission.)
 - [x] B3. A form question of the child is pending under the child once and never under the root; the decline reaches the child. (Test aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt checks the pending question; test aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt declines it and checks that the child ends its pass without the text after the question.)
 - [x] B4. The trace has zero violations.
 Test C: aHotResumeKeepsTheRunningChildRunning

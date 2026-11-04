@@ -13,6 +13,7 @@ import Testing
 // The script steps that these tests assume, beside the steps of the agent
 // contract (`text`, `reasoning`, `toolCall`, `gate`):
 // - `{"elicit": "<message>"}`: the run asks a form question and waits.
+// - `{"permission": "<title>"}`: the run asks a permission and waits.
 
 /// The count of the sibling children of the sibling script.
 private let siblingCount = 2
@@ -92,6 +93,27 @@ private func askingScript(_ gate: (String) -> String) -> String {
 
 /// The text that the asking child plays after its question.
 private let textAfterQuestion = "after question"
+
+/// The title of the permission request of the permission script.
+private let permissionTitle = "Run the tool?"
+
+/// The text that the child plays after its permission request.
+private let textAfterPermission = "after permission"
+
+/// The script of a root with one child that asks a permission.
+///
+/// - Parameter gate: Gives the path of a gate by name. The script holds none.
+/// - Returns: The script.
+private func permissionScript(_ gate: (String) -> String) -> String {
+    NestedScript.scriptJSON([
+        NestedScript.rootSession(starts: [NestedScript.startAgentStep("researcher", prompt: "\(childMarker) ask")]),
+        NestedScript.scriptedSession(
+            marker: childMarker,
+            passes: [[
+                "{\"permission\": \"\(permissionTitle)\"}", "{\"text\": \"\(textAfterPermission)\"}",
+            ]]),
+    ])
+}
 
 /// Prompts the root of the asking script, and waits for the form question of
 /// the child. The question is pending once under the child, and never under
@@ -241,6 +263,39 @@ struct AgentNestedScenarioTests {
         child.acceptElicitation(question.id, content: .object(["answer": .string("x.txt")]))
         try await waitUntil({ agentText(in: child).contains(textAfterQuestion) }, orFailWhen: { sessionEnded(session) })
         #expect(agentText(in: child).contains(textAfterQuestion))
+
+        // The trace holds the whole run only after the child ends.
+        try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
+        started.expectValidTrace()
+        try FileManager.default.removeItem(at: run.root)
+    }
+
+    /// A permission request of a child shows under the child id once, never
+    /// under the root, and its answer reaches the child: the run goes on.
+    @Test(.timeLimit(.minutes(2)))
+    @MainActor
+    func aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
+        let (run, started, session) = try await startSession(script: permissionScript)
+        defer { await started.cleanUp() }
+        let ended: @MainActor () -> Bool = { sessionEnded(session) }
+        _ = try await session.prompt([.text(TextContent(text: rootMarker))])
+        try await waitUntil({ session.children.count == 1 }, orFailWhen: ended)
+        let child = try #require(session.children.first)
+
+        // The request is pending once under the child, and never under the root.
+        try await waitUntil({ !child.pendingPermissions.isEmpty }, orFailWhen: ended)
+        #expect(child.pendingPermissions.count == 1)
+        #expect(session.pendingPermissions.isEmpty)
+        let pending = try #require(child.pendingPermissions.first)
+        #expect(pending.request.sessionId == child.sessionId)
+        #expect(pending.request.title == permissionTitle)
+
+        // The selection reaches the child: the text after the permission plays.
+        let allow = try #require(pending.request.options.first { $0.kind == .allowOnce })
+        await child.selectPermission(pending.id, option: allow.optionId)
+        try await waitUntil({ agentText(in: child).contains(textAfterPermission) }, orFailWhen: ended)
+        #expect(child.pendingPermissions.isEmpty)
+        #expect(session.pendingPermissions.isEmpty)
 
         // The trace holds the whole run only after the child ends.
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })

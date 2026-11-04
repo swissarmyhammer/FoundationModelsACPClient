@@ -24,8 +24,22 @@ comments:
     - evidence: item 10 is now a test check. aKilledAgentResumesTheNestedRunWithItsTree asserts that the agents calls of the root are not empty and each has status completed, after the resume and the open gate. New helper agentsCalls(in:) in IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/IntegrationWait.swift (also used by the orderly-quit test). Files: AgentNestedRunTests.swift, IntegrationWait.swift, AgentNestedScenarioTests.swift. swift build --build-tests: complete. The test passed alone (41.6 s). The orderly-quit test passed alone after the helper change (38.4 s).
     - next: /review. Card B1/B2 of ^kg9t45m are stuck on the missing permission step of the agent.
   timestamp: 2026-11-04T19:08:26.704294+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m6kzet07ccys5ya9t62x7gwc
+  text: |-
+    ### commit — changed
+    - evidence: 608e99a test(integration): remove .bug traits, check the original agents call, the cancelled child call and a declined child question
+    - next: none. Local commit only. No push.
+  timestamp: 2026-11-04T19:09:31.527282+00:00
+- actor: claude-code
+  id: 01m6kzhxg65eptpa6sjsy6hk88
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD. 0 findings, 0 confirmed, 1 refuted. 3 files reviewed. 4 .kanban files not reviewed (ignore rule).
+    - next: none. The task is in done.
+  timestamp: 2026-11-04T19:11:13.414844+00:00
+position_column: done
+position_ordinal: ffa380
 title: End-to-end acceptance tests of the sub-agent model against the real acp-agent
 ---
 ## What
