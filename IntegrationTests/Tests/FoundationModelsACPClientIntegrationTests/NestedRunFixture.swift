@@ -62,21 +62,19 @@ struct NestedRun {
         try script.write(to: scriptFile, atomically: true, encoding: .utf8)
         var environment = ProcessInfo.processInfo.environment
         environment[stubScriptVariable] = scriptFile.path
-        // The stub path does not load a model. The script variable implies it
-        // once the agent package lands it; the plain variable keeps the agent
-        // from a model download before.
-        environment["ACP_AGENT_STUB_MODEL"] = "1"
-        environment["ACP_AGENT_HOME"] = home.path
+        // The stub executable plays the script and loads no model. It reads
+        // its configuration from the XDG config home.
+        environment["XDG_CONFIG_HOME"] = home.path
         return NestedRun(root: root, workspace: workspace, gate: gate, environment: environment)
     }
 
-    /// Starts a new `acp-agent acp` process over stdio.
+    /// Starts a new `acp-agent-stub acp` process over stdio.
     ///
     /// - Returns: The agent process.
     /// - Throws: The error of the build or of the start.
     func startAgent() async throws -> AgentProcess {
         try await LiveAgentServerBuild(rootDirectory: root).startExecutable(
-            LiveAgentServerBuild.acpAgent,
+            LiveAgentServerBuild.acpAgentStub,
             arguments: ["acp"],
             environment: environment,
             currentDirectory: workspace

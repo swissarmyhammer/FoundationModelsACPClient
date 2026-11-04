@@ -5,7 +5,12 @@ import Synchronization
 
 /// The error of a wait that ended on its failure event before its condition
 /// became true.
-struct WaitEndedOnFailure: Error {}
+struct WaitEndedOnFailure: Error, CustomStringConvertible {
+    /// The place of the wait call that ended.
+    let location: String
+
+    var description: String { "the wait at \(location) ended on its failure event" }
+}
 
 /// Waits until a condition on observable state is true, or until its failure
 /// event is true, or until the task is cancelled. It reads no clock and polls
@@ -20,7 +25,9 @@ struct WaitEndedOnFailure: Error {}
 @MainActor
 func waitUntil(
     _ condition: @escaping @MainActor () -> Bool,
-    orFailWhen failure: @escaping @MainActor () -> Bool
+    orFailWhen failure: @escaping @MainActor () -> Bool,
+    fileID: String = #fileID,
+    line: Int = #line
 ) async throws {
     let ended: @MainActor () -> Bool = { condition() || failure() }
     while !ended() {
@@ -39,7 +46,7 @@ func waitUntil(
             wake.fire()
         }
     }
-    guard condition() else { throw WaitEndedOnFailure() }
+    guard condition() else { throw WaitEndedOnFailure(location: "\(fileID):\(line)") }
 }
 
 /// A continuation that resumes at most one time, from any thread, whether the

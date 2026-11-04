@@ -72,9 +72,9 @@ struct LiveAgentServerBuild {
         try await startExecutable(productName, arguments: [rootDirectory.path, workspace.path])
     }
 
-    /// The executable of the real agent of FoundationModelsACPAgent. With the
-    /// variable `ACP_AGENT_STUB_SCRIPT` it plays a scripted stub model.
-    static let acpAgent = "acp-agent"
+    /// The executable of the scripted stub agent of FoundationModelsACPAgent.
+    /// It plays the script in `ACP_AGENT_STUB_SCRIPT` and loads no model.
+    static let acpAgentStub = "acp-agent-stub"
 
     /// The executable of the ACP test agent of the wire package, which plays
     /// the nested sub-agent scenario.

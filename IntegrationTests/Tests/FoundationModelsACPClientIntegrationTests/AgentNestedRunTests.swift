@@ -52,15 +52,15 @@ private final class DecliningClient: Client {
 }
 
 /// The failure event of each wait: the root session closed, or its work ended
-/// with no run to wait for (an agent that plays no script answers the prompt
-/// and goes idle).
+/// with no child run left (an agent that plays no script answers the prompt
+/// and goes idle). A root that is idle while a child still runs is not an end.
 ///
 /// - Parameter session: The root session.
 /// - Returns: `true` when the wait must end.
 @MainActor
 func sessionEnded(_ session: SessionModel) -> Bool {
     if session.isClosed { return true }
-    if case .idle = session.workState { return true }
+    if case .idle = session.workState { return session.children.isEmpty }
     return false
 }
 
