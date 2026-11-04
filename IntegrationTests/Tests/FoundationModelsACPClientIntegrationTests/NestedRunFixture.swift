@@ -12,7 +12,7 @@ let nestedClientName = "acp-client-agent-nested-integration-test"
 /// prompt.
 let rootMarker = "ROOT-MARKER"
 let childMarker = "CHILD-MARKER"
-let grandchildMarker = "GRANDCHILD-MARKER"
+let grandchildMarker = "GRANDKID-MARK"
 
 /// The environment variable that gives the stub script to `acp-agent`.
 let stubScriptVariable = "ACP_AGENT_STUB_SCRIPT"
@@ -45,7 +45,9 @@ struct NestedRun {
         for name in ["researcher", "reviewer"] {
             let folder = workspace.appendingPathComponent(".agents/agents/\(name)", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try "---\nname: \(name)\ndescription: The \(name) test agent.\n---\n\nDo the task.\n"
+            // Only the researcher starts other agents, so it holds the Agent tool.
+            let toolsLine = name == "researcher" ? "tools: Agent\n" : ""
+            try "---\nname: \(name)\ndescription: The \(name) test agent.\n\(toolsLine)---\n\nDo the task.\n"
                 .write(to: folder.appendingPathComponent("AGENT.md"), atomically: true, encoding: .utf8)
         }
         let defaultScript = NestedScript.scriptJSON([

@@ -184,9 +184,13 @@ struct AgentNestedScenarioTests {
             Issue.record("the root went idle with a running child")
         }
 
-        // The cancel of the parent leaves the running background child.
+        // The cancel of the parent leaves the running background child. The
+        // second child starts about 5.7 seconds after the first, inline at
+        // first. Cancel only when the second child is a background item of the
+        // root. With only background work left, a root cancel sends no state
+        // update, so the test does not wait for an idle root.
+        try await started.trace.waitForIncomingFrame(containing: "scripted-call-2")
         try await session.cancel()
-        try await waitUntil({ session.workState == .idle(stopReason: .cancelled, error: nil) }, orFailWhen: { session.isClosed })
         #expect(second.workState == .running)
         #expect(!second.isClosed)
 
@@ -215,7 +219,9 @@ struct AgentNestedScenarioTests {
         #expect(child.pendingElicitations.count == 1)
         #expect(session.pendingElicitations.isEmpty)
         let question = try #require(child.pendingElicitations.first)
-        child.declineElicitation(question.id)
+        // The agent ends the pass on a decline by design, so the test accepts.
+        // The form has one required string field, `answer`.
+        child.acceptElicitation(question.id, content: .object(["answer": .string("x.txt")]))
         try await waitUntil({ agentText(in: child).contains("after question") }, orFailWhen: ended)
         #expect(agentText(in: child).contains("after question"))
 

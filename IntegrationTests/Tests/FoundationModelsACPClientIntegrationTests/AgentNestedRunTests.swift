@@ -177,7 +177,8 @@ struct AgentNestedRunTests {
             let run = try NestedRun.make()
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
-            let connection = await ClientSideConnection(stream: agentProcess.transport) { _ in DecliningClient() }
+            let trace = TraceTransport(wrapping: agentProcess.transport)
+            let connection = await ClientSideConnection(stream: trace) { _ in DecliningClient() }
             let all = connection.subscribeToAllSessions()
             _ = try await connection.initialize(.integrationTest(clientName: nestedClientName))
             let created = try await connection.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
@@ -187,10 +188,8 @@ struct AgentNestedRunTests {
 
             // Read until the root work is idle. With no scripted run, that
             // comes at once, and no child was announced.
-            var trace: [WireTraceEvent] = []
             var announced = false
             for await event in all.events {
-                if let traced = WireTraceEvent(event) { trace.append(traced) }
                 if case .update(.subagentUpdate) = event.event { announced = true }
                 if event.sessionId == created.sessionId, case .update(.stateUpdate(.idle)) = event.event {
                     break
@@ -201,7 +200,8 @@ struct AgentNestedRunTests {
             // The agent must announce the child, and the trace must follow the
             // rules.
             #expect(announced, "the agent announced no child")
-            let violations = SubagentWireTraceValidator().validate(trace)
+            #expect(trace.decodeFailures.isEmpty, "\(trace.decodeFailures)")
+            let violations = SubagentWireTraceValidator().validate(trace.events)
             #expect(violations.isEmpty, "\(violations)")
         }
     }

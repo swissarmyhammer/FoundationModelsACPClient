@@ -64,6 +64,19 @@ final class TraceTransport: ACPTransport, Sendable {
         read().failures
     }
 
+    /// Waits until an incoming frame holds a text. The client model has no
+    /// value for some fields of a frame, such as the background list of a
+    /// state update, so a test waits on the raw frame. The wait polls, and a
+    /// cancel of the task or the time limit of the test ends it.
+    ///
+    /// - Parameter text: The text that an incoming frame must hold.
+    /// - Throws: `CancellationError` when the task is cancelled.
+    func waitForIncomingFrame(containing text: String) async throws {
+        while !box.lines.contains(where: { $0.isIncoming && $0.text.contains(text) }) {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// The trace of the recorded frames, in wire order.
     var events: [WireTraceEvent] {
         read().trace
