@@ -47,8 +47,29 @@ comments:
     - boxes ticked: B1 and B2 (the new test checks both). The card text was checked: the only other open item is C5, which stays NOT TESTABLE with one stdio process. No other unticked item has a test.
     - next: /review.
   timestamp: 2026-11-04T20:02:17.260409+00:00
+- actor: claude-code
+  id: 01m6m2hrjdy8nbv4c4v80rwpd1
+  text: |-
+    ### commit — changed
+    - evidence: 74ce6eb test(integration): a child permission request shows under the child once and its answer reaches it
+    - next: none. The commit is local. No push was done.
+  timestamp: 2026-11-04T20:03:34.093546+00:00
+- actor: claude-code
+  id: 01m6m2kw29jfrrqbzjgqcgv5nz
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD. 2 findings, 2 confirmed, 0 refuted. AgentNestedScenarioTests.swift:107, AgentNestedScenarioTests.swift:281.
+    - next: Fix both findings. Item C5 is a documented non-testable item and does not block the card. The card stays in review until the 2 findings are fixed and a new review is clean.
+  timestamp: 2026-11-04T20:04:43.209396+00:00
+- actor: claude-code
+  id: 01m6m2szyx4mt89rv5es2p2t4p
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift. Finding 1: askingScript now takes childStep, textAfter and gate; permissionScript is removed; the elicit test and the permission test call askingScript with their own step. Finding 2: new helper promptAndAwaitChild(of:) returns the child; awaitChildQuestion and the permission test both call it. No other copy of either script shape remains in the file. swift build --build-tests: complete. Run alone, all passed: aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt, aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt, aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt. Both findings are ticked.
+    - next: /review. The card stays in doing.
+  timestamp: 2026-11-04T20:08:03.805675+00:00
 position_column: doing
-position_ordinal: '8180'
+position_ordinal: '80'
 title: More end-to-end acceptance tests of the sub-agent model against the real acp-agent
 ---
 ## What
@@ -86,3 +107,13 @@ Test E: anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall
 
 ## Workflow
 - Use /tdd. Red first (the tests are red on purpose; the .bug trait names this card). #subagents
+
+## Review Findings (2026-11-04 14:03)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 1 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift:107` `reuse/reuse` — permissionScript repeats askingScript (lines 83-92) step for step. The only difference is one child step, a permission instead of an elicit. A near-match that was not extended leaves two copies of the same script shape, and the copies can drift apart. Generalize askingScript to take the child's first step as a parameter, for example askingScript(childStep: String, gate:). Then call it as askingScript(childStep: "{\"elicit\": \"Which file?\"}") and askingScript(childStep: "{\"permission\": \"\(permissionTitle)\"}"). Remove permissionScript.
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift:281` `reuse/reuse` — The new permission test rewrites the prompt-and-wait steps that awaitChildQuestion already performs (prompt the root, wait for one child, require the child). This near-match was not extended to cover the permission case, so the same sequence now lives in two places. Split the shared prefix into a helper, such as promptAndAwaitChild(of:) -> SessionModel, that returns the child. Have awaitChildQuestion and the permission test both call it. The permission test then waits only for its pending permission.

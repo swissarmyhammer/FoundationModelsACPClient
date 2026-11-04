@@ -76,46 +76,51 @@ private func siblingScript(_ gate: (String) -> String) -> String {
     ])
 }
 
-/// The script of a root with one child that asks a form question.
-///
-/// - Parameter gate: Gives the path of a gate by name. The script holds none.
-/// - Returns: The script.
-private func askingScript(_ gate: (String) -> String) -> String {
-    NestedScript.scriptJSON([
-        NestedScript.rootSession(starts: [NestedScript.startAgentStep("researcher", prompt: "\(childMarker) ask")]),
-        NestedScript.scriptedSession(
-            marker: childMarker,
-            passes: [[
-                "{\"elicit\": \"Which file?\"}", "{\"text\": \"\(textAfterQuestion)\"}",
-            ]]),
-    ])
-}
+/// The step of a child that asks a form question.
+private let elicitStep = "{\"elicit\": \"Which file?\"}"
 
 /// The text that the asking child plays after its question.
 private let textAfterQuestion = "after question"
 
-/// The title of the permission request of the permission script.
+/// The title of the permission request of the permission step.
 private let permissionTitle = "Run the tool?"
+
+/// The step of a child that asks a permission.
+private let permissionStep = "{\"permission\": \"\(permissionTitle)\"}"
 
 /// The text that the child plays after its permission request.
 private let textAfterPermission = "after permission"
 
-/// The script of a root with one child that asks a permission.
+/// The script of a root with one child. The child plays a first step that
+/// asks, and then a text.
 ///
-/// - Parameter gate: Gives the path of a gate by name. The script holds none.
+/// - Parameters:
+///   - childStep: The first step of the child, a question or a permission.
+///   - textAfter: The text that the child plays after the first step.
+///   - gate: Gives the path of a gate by name. The script holds none.
 /// - Returns: The script.
-private func permissionScript(_ gate: (String) -> String) -> String {
+private func askingScript(childStep: String, textAfter: String, gate: (String) -> String) -> String {
     NestedScript.scriptJSON([
         NestedScript.rootSession(starts: [NestedScript.startAgentStep("researcher", prompt: "\(childMarker) ask")]),
         NestedScript.scriptedSession(
             marker: childMarker,
-            passes: [[
-                "{\"permission\": \"\(permissionTitle)\"}", "{\"text\": \"\(textAfterPermission)\"}",
-            ]]),
+            passes: [[childStep, "{\"text\": \"\(textAfter)\"}"]]),
     ])
 }
 
-/// Prompts the root of the asking script, and waits for the form question of
+/// Prompts the root, and waits for its one child.
+///
+/// - Parameter session: The root session.
+/// - Returns: The child.
+/// - Throws: The error of the prompt, of the wait, or of `#require`.
+@MainActor
+private func promptAndAwaitChild(of session: SessionModel) async throws -> SessionModel {
+    _ = try await session.prompt([.text(TextContent(text: rootMarker))])
+    try await waitUntil({ session.children.count == 1 }, orFailWhen: { sessionEnded(session) })
+    return try #require(session.children.first)
+}
+
+/// Prompts the root of the question script, and waits for the form question of
 /// the child. The question is pending once under the child, and never under
 /// the root.
 ///
@@ -124,11 +129,8 @@ private func permissionScript(_ gate: (String) -> String) -> String {
 /// - Throws: The error of the prompt, of a wait, or of `#require`.
 @MainActor
 private func awaitChildQuestion(of session: SessionModel) async throws -> (SessionModel, PendingElicitation) {
-    let ended: @MainActor () -> Bool = { sessionEnded(session) }
-    _ = try await session.prompt([.text(TextContent(text: rootMarker))])
-    try await waitUntil({ session.children.count == 1 }, orFailWhen: ended)
-    let child = try #require(session.children.first)
-    try await waitUntil({ !child.pendingElicitations.isEmpty }, orFailWhen: ended)
+    let child = try await promptAndAwaitChild(of: session)
+    try await waitUntil({ !child.pendingElicitations.isEmpty }, orFailWhen: { sessionEnded(session) })
     #expect(child.pendingElicitations.count == 1)
     #expect(session.pendingElicitations.isEmpty)
     return (child, try #require(child.pendingElicitations.first))
@@ -255,7 +257,7 @@ struct AgentNestedScenarioTests {
     @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
-        let (run, started, session) = try await startSession(script: askingScript)
+        let (run, started, session) = try await startSession(script: { askingScript(childStep: elicitStep, textAfter: textAfterQuestion, gate: $0) })
         defer { await started.cleanUp() }
         let (child, question) = try await awaitChildQuestion(of: session)
 
@@ -275,12 +277,10 @@ struct AgentNestedScenarioTests {
     @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
-        let (run, started, session) = try await startSession(script: permissionScript)
+        let (run, started, session) = try await startSession(script: { askingScript(childStep: permissionStep, textAfter: textAfterPermission, gate: $0) })
         defer { await started.cleanUp() }
         let ended: @MainActor () -> Bool = { sessionEnded(session) }
-        _ = try await session.prompt([.text(TextContent(text: rootMarker))])
-        try await waitUntil({ session.children.count == 1 }, orFailWhen: ended)
-        let child = try #require(session.children.first)
+        let child = try await promptAndAwaitChild(of: session)
 
         // The request is pending once under the child, and never under the root.
         try await waitUntil({ !child.pendingPermissions.isEmpty }, orFailWhen: ended)
@@ -308,7 +308,7 @@ struct AgentNestedScenarioTests {
     @Test(.timeLimit(.minutes(2)))
     @MainActor
     func aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt() async throws {
-        let (run, started, session) = try await startSession(script: askingScript)
+        let (run, started, session) = try await startSession(script: { askingScript(childStep: elicitStep, textAfter: textAfterQuestion, gate: $0) })
         defer { await started.cleanUp() }
         let (child, question) = try await awaitChildQuestion(of: session)
 
