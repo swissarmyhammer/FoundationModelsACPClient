@@ -45,8 +45,9 @@ struct NestedRun {
         for name in ["researcher", "reviewer"] {
             let folder = workspace.appendingPathComponent(".agents/agents/\(name)", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            // Only the researcher starts other agents, so it holds the Agent tool.
-            let toolsLine = name == "researcher" ? "tools: Agent\n" : ""
+            // Only the researcher starts other agents, so it holds the Agent tool. An explicit
+            // tools line limits the agent to its list, and a scripted elicit step plays one runCode call.
+            let toolsLine = name == "researcher" ? "tools: Agent, runCode\n" : ""
             try "---\nname: \(name)\ndescription: The \(name) test agent.\n\(toolsLine)---\n\nDo the task.\n"
                 .write(to: folder.appendingPathComponent("AGENT.md"), atomically: true, encoding: .utf8)
         }
@@ -54,7 +55,7 @@ struct NestedRun {
             NestedScript.rootSession(starts: [NestedScript.startAgentStep("researcher", prompt: "\(childMarker) research")]),
             NestedScript.scriptedSession(
                 marker: childMarker,
-                passes: [[NestedScript.startAgentStep("reviewer", prompt: "\(grandchildMarker) review")], ["{\"text\": \"child done\"}"]]),
+                passes: [[NestedScript.startAgentStep("reviewer", prompt: "\(grandchildMarker) review"), "{\"text\": \"child done\"}"]]),
             NestedScript.scriptedSession(
                 marker: grandchildMarker,
                 passes: [["{\"gate\": \"\(gate.path)\"}", "{\"text\": \"grandchild done\"}"]]),
@@ -142,13 +143,14 @@ enum NestedScript {
         "{\"sessions\": [" + sessions.joined(separator: ",\n") + "]}"
     }
 
-    /// The scripted root session: one pass that starts the given agents, and one
-    /// pass that ends.
+    /// The scripted root session: one pass that starts the given agents and then
+    /// ends with its text. The text stays in the same pass, because a second pass
+    /// plays only on a new prompt or mail.
     ///
     /// - Parameter starts: The steps that start agents.
     /// - Returns: The session entry.
     static func rootSession(starts: [String]) -> String {
-        scriptedSession(marker: rootMarker, passes: [starts, ["{\"text\": \"root done\"}"]])
+        scriptedSession(marker: rootMarker, passes: [starts + ["{\"text\": \"root done\"}"]])
     }
 }
 

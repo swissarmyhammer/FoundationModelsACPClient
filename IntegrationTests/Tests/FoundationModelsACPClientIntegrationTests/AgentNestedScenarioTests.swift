@@ -225,6 +225,8 @@ struct AgentNestedScenarioTests {
         try await waitUntil({ agentText(in: child).contains("after question") }, orFailWhen: ended)
         #expect(agentText(in: child).contains("after question"))
 
+        // The trace holds the whole run only after the child ends.
+        try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
         started.expectValidTrace()
         try FileManager.default.removeItem(at: run.root)
     }
