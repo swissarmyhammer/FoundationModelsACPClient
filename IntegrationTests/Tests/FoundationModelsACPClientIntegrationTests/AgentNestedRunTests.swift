@@ -67,7 +67,7 @@ func sessionEnded(_ session: SessionModel) -> Bool {
 struct AgentNestedRunTests {
     /// The real agent runs a root, a child and a grandchild, and the model
     /// follows the tree to the end of the runs.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aNestedRunOfTheRealAgentBuildsAndEmptiesTheTree() async throws {
         do {
@@ -119,7 +119,7 @@ struct AgentNestedRunTests {
     /// The agent process ends in the middle of the run. A new process resumes
     /// the root from the start: the tree comes back, the interrupted runs
     /// continue, and the original agents call completes.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aKilledAgentResumesTheNestedRunWithItsTree() async throws {
         do {
@@ -170,7 +170,7 @@ struct AgentNestedRunTests {
 
     /// The ordered events of a nested run follow the rules of the wire trace
     /// validator.
-    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6H96QSAMH4C0R7ECAZ95NEM", "End-to-end acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func theNestedRunTraceFollowsTheWireRules() async throws {
         do {

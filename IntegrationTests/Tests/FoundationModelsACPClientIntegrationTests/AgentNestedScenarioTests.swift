@@ -160,7 +160,7 @@ private func startNestedRun(_ run: NestedRun) async throws -> (TracedRun, Sessio
 struct AgentNestedScenarioTests {
     /// A cancel of one child ends only that child. A cancel of the parent
     /// leaves a background child running.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aCancelOfOneChildEndsOnlyThatChild() async throws {
         let (run, started, session) = try await startSession(script: siblingScript)
@@ -199,7 +199,7 @@ struct AgentNestedScenarioTests {
 
     /// A form question of a child shows under the child id once, and its
     /// answer reaches the child. The agent sends no permission request.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
         let (run, started, session) = try await startSession(script: askingScript)
@@ -226,7 +226,7 @@ struct AgentNestedScenarioTests {
     /// A hot resume of a live session tree: the history comes before the
     /// response, the running child keeps running, and the current child
     /// snapshots come after the response.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aHotResumeKeepsTheRunningChildRunning() async throws {
         let run = try NestedRun.make()
@@ -252,7 +252,7 @@ struct AgentNestedScenarioTests {
 
     /// A child whose definition is gone after a restart shows unknown with a
     /// restore failure, and so do its descendants, while the root resumes.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func aChildWithNoDefinitionAfterARestartShowsUnknownWithItsReason() async throws {
         let run = try NestedRun.make()
@@ -284,7 +284,7 @@ struct AgentNestedScenarioTests {
     /// An orderly quit (SIGTERM) of the agent process, and a new process: the
     /// interrupted nested runs come back, and the ORIGINAL agents call
     /// completes.
-    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"))
+    @Test(.bug("kanban://task/01M6HCB90N3N6V8VTCQKG9T45M", "Acceptance tests against the real acp-agent"), .timeLimit(.minutes(2)))
     @MainActor
     func anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall() async throws {
         let run = try NestedRun.make()

@@ -1,19 +1,22 @@
 import FoundationModelsACP
 import FoundationModelsACPClient
 import Observation
+import Synchronization
 
 /// The error of a wait that ended on its failure event before its condition
 /// became true.
 struct WaitEndedOnFailure: Error {}
 
 /// Waits until a condition on observable state is true, or until its failure
-/// event is true. It reads no clock and polls nothing: it tracks the
-/// observable values that the two closures read.
+/// event is true, or until the task is cancelled. It reads no clock and polls
+/// nothing: it tracks the observable values that the two closures read. A
+/// test time limit cancels the task, and so ends a wait that cannot succeed.
 ///
 /// - Parameters:
 ///   - condition: The condition to wait for.
 ///   - failure: The failure event, for example the close of the connection.
-/// - Throws: ``WaitEndedOnFailure`` when the failure event came first.
+/// - Throws: ``WaitEndedOnFailure`` when the failure event came first, or
+///   `CancellationError` when the task was cancelled.
 @MainActor
 func waitUntil(
     _ condition: @escaping @MainActor () -> Bool,
@@ -21,15 +24,63 @@ func waitUntil(
 ) async throws {
     let ended: @MainActor () -> Bool = { condition() || failure() }
     while !ended() {
-        await withCheckedContinuation { (changed: CheckedContinuation<Void, Never>) in
-            withObservationTracking {
-                _ = ended()
-            } onChange: {
-                changed.resume()
+        try Task.checkCancellation()
+        let wake = OneShotWake()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (changed: CheckedContinuation<Void, Never>) in
+                wake.install(changed)
+                withObservationTracking {
+                    _ = ended()
+                } onChange: {
+                    wake.fire()
+                }
             }
+        } onCancel: {
+            wake.fire()
         }
     }
     guard condition() else { throw WaitEndedOnFailure() }
+}
+
+/// A continuation that resumes at most one time, from any thread, whether the
+/// fire call comes before or after the install call.
+private final class OneShotWake: Sendable {
+    private enum State {
+        case idle
+        case fired
+        case waiting(CheckedContinuation<Void, Never>)
+        case done
+    }
+
+    private let state = Mutex<State>(.idle)
+
+    func install(_ continuation: CheckedContinuation<Void, Never>) {
+        let resumeNow = state.withLock { state -> Bool in
+            if case .fired = state {
+                state = .done
+                return true
+            }
+            state = .waiting(continuation)
+            return false
+        }
+        if resumeNow { continuation.resume() }
+    }
+
+    func fire() {
+        let continuation = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            switch state {
+            case .waiting(let continuation):
+                state = .done
+                return continuation
+            case .idle:
+                state = .fired
+                return nil
+            case .fired, .done:
+                return nil
+            }
+        }
+        continuation?.resume()
+    }
 }
 
 /// The text of each agent message of a session, joined, in transcript order.
