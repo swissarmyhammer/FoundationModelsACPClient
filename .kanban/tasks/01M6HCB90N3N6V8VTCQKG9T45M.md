@@ -68,8 +68,22 @@ comments:
     - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift. Finding 1: askingScript now takes childStep, textAfter and gate; permissionScript is removed; the elicit test and the permission test call askingScript with their own step. Finding 2: new helper promptAndAwaitChild(of:) returns the child; awaitChildQuestion and the permission test both call it. No other copy of either script shape remains in the file. swift build --build-tests: complete. Run alone, all passed: aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt, aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt, aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt. Both findings are ticked.
     - next: /review. The card stays in doing.
   timestamp: 2026-11-04T20:08:03.805675+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m6m2vm5pdjmy2sbhh9p8vf06
+  text: |-
+    ### commit — changed
+    - evidence: c7b4a17 test(integration): one asking script for the question and permission tests, one helper for prompt and wait
+    - next: the comment changes the task file. A new local change can show in git status.
+  timestamp: 2026-11-04T20:08:57.270417+00:00
+- actor: claude-code
+  id: 01m6m2wwxc5727zyd6nqcs2sr2
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD, 0 findings (0 confirmed, 0 refuted). All prior review items are checked. C5 is a documented non-testable item and is not a finding.
+    - next: card moved to done. C5 stays unchecked on purpose; the agent package must test it with two connections.
+  timestamp: 2026-11-04T20:09:38.988656+00:00
+position_column: done
+position_ordinal: ffa480
 title: More end-to-end acceptance tests of the sub-agent model against the real acp-agent
 ---
 ## What
