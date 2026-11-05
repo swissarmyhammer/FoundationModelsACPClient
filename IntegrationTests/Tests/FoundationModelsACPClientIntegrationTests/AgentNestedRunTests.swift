@@ -71,6 +71,7 @@ struct AgentNestedRunTests {
     func aNestedRunOfTheRealAgentBuildsAndEmptiesTheTree() async throws {
         do {
             let run = try NestedRun.make()
+            defer { try? FileManager.default.removeItem(at: run.root) }
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
             let model = try await run.connect(over: agentProcess)
@@ -111,7 +112,6 @@ struct AgentNestedRunTests {
             try await waitUntil({ child.isClosed }, orFailWhen: closed)
             #expect(session.children.isEmpty)
             #expect(grandchild.isClosed)
-            try FileManager.default.removeItem(at: run.root)
         }
     }
 
@@ -123,6 +123,7 @@ struct AgentNestedRunTests {
     func aKilledAgentResumesTheNestedRunWithItsTree() async throws {
         do {
             let run = try NestedRun.make()
+            defer { try? FileManager.default.removeItem(at: run.root) }
             let first = try await run.startAgent()
             let firstModel = try await run.connect(over: first)
             let firstSession = try await firstModel.newSession(
@@ -166,7 +167,6 @@ struct AgentNestedRunTests {
             let calls = agentsCalls(in: session)
             #expect(!calls.isEmpty)
             #expect(calls.allSatisfy { $0.status == .completed })
-            try FileManager.default.removeItem(at: run.root)
         }
     }
 
@@ -177,6 +177,7 @@ struct AgentNestedRunTests {
     func theNestedRunTraceFollowsTheWireRules() async throws {
         do {
             let run = try NestedRun.make()
+            defer { try? FileManager.default.removeItem(at: run.root) }
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
             let trace = TraceTransport(wrapping: agentProcess.transport)
@@ -198,7 +199,6 @@ struct AgentNestedRunTests {
                 }
             }
             await connection.close()
-            try FileManager.default.removeItem(at: run.root)
             // The agent must announce the child, and the trace must follow the
             // rules.
             #expect(announced, "the agent announced no child")

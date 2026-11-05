@@ -210,6 +210,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aCancelOfOneChildEndsOnlyThatChild() async throws {
         let (run, started, session) = try await startSession(script: siblingScript)
+        defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
         let ended: @MainActor () -> Bool = { sessionEnded(session) }
 
@@ -250,7 +251,6 @@ struct AgentNestedScenarioTests {
         try run.openGate(named: "b")
         try await waitUntil({ second.isClosed }, orFailWhen: { session.isClosed })
         started.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// A form question of a child shows under the child id once, and its
@@ -259,6 +259,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aChildQuestionShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
         let (run, started, session) = try await startSession(script: { askingScript(childStep: elicitStep, textAfter: textAfterQuestion, gate: $0) })
+        defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
         let (child, question) = try await awaitChildQuestion(of: session)
 
@@ -270,7 +271,6 @@ struct AgentNestedScenarioTests {
         // The trace holds the whole run only after the child ends.
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
         started.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// A permission request of a child shows under the child id once, never
@@ -279,6 +279,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aChildPermissionRequestShowsUnderTheChildOnceAndItsAnswerReachesIt() async throws {
         let (run, started, session) = try await startSession(script: { askingScript(childStep: permissionStep, textAfter: textAfterPermission, gate: $0) })
+        defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
         let ended: @MainActor () -> Bool = { sessionEnded(session) }
         let child = try await promptAndAwaitChild(of: session)
@@ -301,7 +302,6 @@ struct AgentNestedScenarioTests {
         // The trace holds the whole run only after the child ends.
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
         started.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// A decline of the form question of a child reaches the child: the child
@@ -310,6 +310,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aDeclinedChildQuestionEndsTheChildPassWithoutTheTextAfterIt() async throws {
         let (run, started, session) = try await startSession(script: { askingScript(childStep: elicitStep, textAfter: textAfterQuestion, gate: $0) })
+        defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
         let (child, question) = try await awaitChildQuestion(of: session)
 
@@ -319,7 +320,6 @@ struct AgentNestedScenarioTests {
         #expect(child.pendingElicitations.isEmpty)
 
         started.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// A hot resume of a live session tree: the history comes before the
@@ -329,6 +329,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aHotResumeKeepsTheRunningChildRunning() async throws {
         let run = try NestedRun.make()
+        defer { try? FileManager.default.removeItem(at: run.root) }
         let (started, session, rootId) = try await startNestedRun(run)
         defer { await started.cleanUp() }
 
@@ -346,7 +347,6 @@ struct AgentNestedScenarioTests {
         try run.openGate()
         try await waitUntil({ child.isClosed }, orFailWhen: { session.isClosed })
         started.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// A child whose definition is gone after a restart shows unknown with a
@@ -355,6 +355,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func aChildWithNoDefinitionAfterARestartShowsUnknownWithItsReason() async throws {
         let run = try NestedRun.make()
+        defer { try? FileManager.default.removeItem(at: run.root) }
         let (first, _, rootId) = try await startNestedRun(run)
         // The cleanup is idempotent: it covers a throw before the manual end.
         defer { await first.cleanUp() }
@@ -378,7 +379,6 @@ struct AgentNestedScenarioTests {
         #expect(child.workState == .unknown)
         #expect(grandchild.workState == .unknown)
         second.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 
     /// An orderly quit (SIGTERM) of the agent process, and a new process: the
@@ -388,6 +388,7 @@ struct AgentNestedScenarioTests {
     @MainActor
     func anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall() async throws {
         let run = try NestedRun.make()
+        defer { try? FileManager.default.removeItem(at: run.root) }
         let (first, _, rootId) = try await startNestedRun(run)
         // The cleanup is idempotent: it covers a throw before the manual end.
         defer { await first.cleanUp() }
@@ -411,6 +412,5 @@ struct AgentNestedScenarioTests {
         #expect(!calls.isEmpty)
         #expect(calls.allSatisfy { $0.status == .completed })
         second.expectValidTrace()
-        try FileManager.default.removeItem(at: run.root)
     }
 }
