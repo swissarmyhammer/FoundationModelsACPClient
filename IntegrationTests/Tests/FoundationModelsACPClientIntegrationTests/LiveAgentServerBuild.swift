@@ -115,14 +115,16 @@ struct LiveAgentServerBuild {
     ///   file, or the error of `#require` when `--show-bin-path` wrote no
     ///   path.
     func makeExecutable(_ productName: String) async throws -> String {
-        _ = try await runSwiftBuild(["--product", productName], logName: "build-\(productName).log")
-        let binPathOutput = try await runSwiftBuild(["--show-bin-path"], logName: "bin-path.log")
-        let binDirectory = try #require(
-            binPathOutput.split(whereSeparator: \.isNewline).last,
-            "swift build --show-bin-path wrote no path")
-        return URL(filePath: String(binDirectory), directoryHint: .isDirectory)
-            .appending(path: productName)
-            .path
+        try await BuiltProducts.shared.path(of: productName) {
+            _ = try await runSwiftBuild(["--product", productName], logName: "build-\(productName).log")
+            let binPathOutput = try await runSwiftBuild(["--show-bin-path"], logName: "bin-path.log")
+            let binDirectory = try #require(
+                binPathOutput.split(whereSeparator: \.isNewline).last,
+                "swift build --show-bin-path wrote no path")
+            return URL(filePath: String(binDirectory), directoryHint: .isDirectory)
+                .appending(path: productName)
+                .path
+        }
     }
 
     /// Runs `swift build --package-path <package> <arguments>`, and waits
@@ -218,5 +220,41 @@ extension InitializeRequest {
             info: Implementation(name: clientName, version: "1.0.0"),
             protocolVersion: ACPClient.supportedProtocolVersion,
             capabilities: ACPClient.advertisedCapabilities)
+    }
+}
+
+/// The executables that this process built, one build for each product.
+///
+/// Each `swift build --package-path` loads the whole package graph, also when
+/// nothing is left to build. A test that asks for a product that a test
+/// before it built gets the path at once. A test that asks while the build
+/// runs waits for the same build.
+private actor BuiltProducts {
+    /// The one shared instance of the process.
+    static let shared = BuiltProducts()
+
+    /// The build task of each product name.
+    private var builds: [String: Task<String, any Error>] = [:]
+
+    /// Gives the path of a product, and builds it only for the first call.
+    ///
+    /// - Parameters:
+    ///   - productName: The executable product of the package.
+    ///   - build: The build, which gives the absolute path of the executable.
+    /// - Returns: The absolute path of the executable.
+    /// - Throws: The error of the build. A failed build is not kept, so a
+    ///   later call builds again.
+    func path(of productName: String, build: @escaping @Sendable () async throws -> String) async throws -> String {
+        if let existing = builds[productName] {
+            return try await existing.value
+        }
+        let task = Task { try await build() }
+        builds[productName] = task
+        do {
+            return try await task.value
+        } catch {
+            builds[productName] = nil
+            throw error
+        }
     }
 }

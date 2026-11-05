@@ -1,37 +1,6 @@
 import Foundation
 import Testing
 
-/// The once-only builds of the products of the `LiveAgentServer` package.
-///
-/// A cold `swift build` of a product takes many minutes on a CI runner. Each
-/// product builds one time in a process. A test that asks for the same
-/// product at the same time waits for the same build.
-private actor AgentProductBuilds {
-    /// The one shared instance of the process.
-    static let shared = AgentProductBuilds()
-
-    /// The build task of each product name.
-    private var builds: [String: Task<String, any Error>] = [:]
-
-    /// Builds a product, or waits for the build that already runs.
-    ///
-    /// - Parameter productName: The executable product of the package.
-    /// - Returns: The absolute path of the executable.
-    /// - Throws: The error of the build.
-    func executable(_ productName: String) async throws -> String {
-        if let build = builds[productName] {
-            return try await build.value
-        }
-        let build = Task {
-            let root = try IntegrationTemporaryDirectory.make(prefix: "acp-client-agent-build")
-            defer { try? FileManager.default.removeItem(at: root) }
-            return try await LiveAgentServerBuild(rootDirectory: root).makeExecutable(productName)
-        }
-        builds[productName] = build
-        return try await build.value
-    }
-}
-
 /// A suite trait that builds the products of the `LiveAgentServer` package
 /// before the tests of the suite run.
 ///
@@ -58,8 +27,10 @@ struct AgentBuiltTrait: SuiteTrait, TestScoping {
         testCase: Test.Case?,
         performing function: @Sendable () async throws -> Void
     ) async throws {
+        let root = try IntegrationTemporaryDirectory.make(prefix: "acp-client-agent-build")
+        defer { try? FileManager.default.removeItem(at: root) }
         for productName in productNames {
-            _ = try await AgentProductBuilds.shared.executable(productName)
+            _ = try await LiveAgentServerBuild(rootDirectory: root).makeExecutable(productName)
         }
         try await function()
     }
