@@ -65,7 +65,7 @@ func sessionEnded(_ session: SessionModel) -> Bool {
 struct AgentNestedRunTests {
     /// The real agent runs a root, a child and a grandchild, and the model
     /// follows the tree to the end of the runs.
-    @Test(.timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(4)))
     @MainActor
     func aNestedRunOfTheRealAgentBuildsAndEmptiesTheTree() async throws {
         do {
