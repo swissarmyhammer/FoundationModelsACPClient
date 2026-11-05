@@ -202,6 +202,7 @@ private func startNestedRun(_ run: NestedRun) async throws -> (TracedRun, Sessio
     return (started, session, session.sessionId)
 }
 
+@Suite(.acpAgentStubBuilt)
 struct AgentNestedScenarioTests {
     /// A cancel of one child ends only that child. A cancel of the parent
     /// leaves a background child running.
