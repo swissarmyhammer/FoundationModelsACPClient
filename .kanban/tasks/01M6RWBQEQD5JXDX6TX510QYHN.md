@@ -1,6 +1,15 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m6s7rs9kdv7y03jr08rsyv0r
+  text: |-
+    ### finish — skipped
+    - evidence: /finish (scoped-batch, no filter) on 2026-11-06 found this card as the only ready todo card. It was not started.
+    - reason: blocked on the root fix in FoundationModelsACP (AgentSideConnection.init reads before setRole). That repository is not on this board, so the board shows the card as READY. swissarmyhammer-75 said: make no code change until that fix is pushed.
+    - next: when swissarmyhammer-75 tells us the fix is pushed, remove the "blocked" tag and run /finish ^510qyhn.
+  timestamp: 2026-11-06T20:10:59.251582+00:00
 position_column: todo
 position_ordinal: '80'
 title: Check the integration agent servers when the FoundationModelsACP read-before-setRole fix lands
