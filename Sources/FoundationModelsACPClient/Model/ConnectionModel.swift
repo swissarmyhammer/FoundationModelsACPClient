@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import FoundationModelsExtras
 import Observation
 
 /// The observable state of one ACP connection to an agent.
@@ -22,7 +23,7 @@ import Observation
 ///
 /// Each session model that the connection makes gets the coalescing cadence,
 /// the clock, and the wall clock given to
-/// ``init(coalescingCadence:clock:now:logger:)``, and the diagnostic sink of
+/// ``init(coalescingCadence:clock:now:logger:identitySource:)``, and the diagnostic sink of
 /// the connection.
 @MainActor @Observable
 public final class ConnectionModel {
@@ -75,6 +76,19 @@ public final class ConnectionModel {
     /// connection sets it back to `nil`. Its auth methods hold one method for
     /// each method id; see ``authMethods``.
     public internal(set) var initializeResponse: InitializeResponse?
+
+    /// The identity of the person that the last ``initialize(_:)`` sent in
+    /// the `_meta` of its request, or `nil` before the first
+    /// ``initialize(_:)``. A UI can show it.
+    ///
+    /// When the caller put an actor under `GraphQLActor.initializeMetaKey`,
+    /// it is the actor of the caller. Otherwise it is the actor that
+    /// ``identitySource`` gave. A new connection does not clear it.
+    public internal(set) var actor: GraphQLActor?
+
+    /// The source of the identity of the person. ``initialize(_:)`` resolves
+    /// it one time for each `initialize`.
+    @ObservationIgnored let identitySource: any PersonIdentitySource
 
     /// The auth state of the connection. It is ``AuthState/unknown`` before
     /// ``initialize(_:)`` succeeds, and each new connection sets it back to
@@ -296,12 +310,18 @@ public final class ConnectionModel {
     ///     makes. Tests give a manual wall clock, so they do not read the
     ///     system date.
     ///   - logger: The diagnostic sink of the connection; never stdout.
+    ///   - identitySource: The source of the identity of the person, which
+    ///     ``initialize(_:)`` sends to the agent. The default is
+    ///     ``LocalUserIdentitySource``. Only an app with the iCloud
+    ///     entitlement can give an `ICloudIdentitySource`.
     public init(
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock(),
         now: @escaping @Sendable () -> Date = Date.init,
-        logger: ACPLogger = .disabled
+        logger: ACPLogger = .disabled,
+        identitySource: any PersonIdentitySource = LocalUserIdentitySource()
     ) {
+        self.identitySource = identitySource
         self.coalescingCadence = coalescingCadence
         self.clock = clock
         self.now = now
@@ -351,7 +371,7 @@ public final class ConnectionModel {
     /// - Parameters:
     ///   - transport: The bidirectional transport to run over.
     ///   - logger: The diagnostic sink of this connection, or `nil` for the
-    ///     logger given to ``init(coalescingCadence:clock:now:logger:)``; never
+    ///     logger given to ``init(coalescingCadence:clock:now:logger:identitySource:)``; never
     ///     stdout.
     ///   - bufferLimits: The limits on the `session/update` notifications that
     ///     the connection keeps for a session with no subscriber, for example

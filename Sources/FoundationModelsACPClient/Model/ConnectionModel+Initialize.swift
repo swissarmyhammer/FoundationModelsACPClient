@@ -1,4 +1,5 @@
 import FoundationModelsACP
+import FoundationModelsExtras
 
 // The initialize and the auth part of `ConnectionModel`: the `initialize`
 // answer, the capability flags that it gives, the auth state, login, and
@@ -178,18 +179,69 @@ extension ConnectionModel {
     /// `cancel` and a reason each elicitation of a mode that `request` did not
     /// advertise; see ``ACPClient/capabilities(for:)``.
     ///
+    /// Before the send, the model resolves ``identitySource`` and puts the
+    /// actor in the `_meta` of the request, under
+    /// `GraphQLActor.initializeMetaKey` (`"sah/actor"`). The other `_meta`
+    /// keys of `request` stay. When `request` already has an actor under
+    /// that key, the model keeps the value of the caller. When the `_meta` of
+    /// `request` is not a JSON object, the model keeps it as it is, adds no
+    /// actor, and logs one warning. ``actor`` gets the actor that goes out.
+    ///
     /// - Parameter request: The initialize request.
     /// - Returns: The answer of the agent.
     /// - Throws: `ConnectionError.closed` when no connection is open, or the
     ///   error of the connection.
     public func initialize(_ request: InitializeRequest) async throws -> InitializeResponse {
         let connection = try openConnection()
-        let response = try await ClientRequestSpan.send(request) { try await connection.initialize($0) }
+        let sent = await withActor(request)
+        let response = try await ClientRequestSpan.send(sent) { try await connection.initialize($0) }
         initializeResponse = keepingOneAuthMethodForEachID(in: response)
         hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
         advertisedElicitation = request.capabilities.elicitation
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
         return response
+    }
+
+    /// Gives a copy of an `initialize` request with the actor of the person in
+    /// its `_meta`, and sets ``actor``.
+    ///
+    /// - Parameter request: The initialize request of the caller.
+    /// - Returns: The request to send.
+    private func withActor(_ request: InitializeRequest) async -> InitializeRequest {
+        let key = GraphQLActor.initializeMetaKey
+        var members: [String: JSONValue]
+        switch request.meta {
+        case nil, .null?:
+            members = [:]
+        case .object(let callerMembers)?:
+            if callerMembers[key] != nil {
+                if let callerActor = GraphQLActor.fromMeta(request.meta) {
+                    actor = callerActor
+                } else {
+                    actor = await identitySource.resolve()
+                }
+                return request
+            }
+            members = callerMembers
+        case .some:
+            connectionLogger.log(
+                "ConnectionModel: the _meta of the initialize request is not a JSON object, "
+                    + "so the request does not send the actor of the person"
+            )
+            actor = nil
+            return request
+        }
+        let resolved = await identitySource.resolve()
+        actor = resolved
+        do {
+            members[key] = try resolved.metaValue(as: JSONValue.self)
+        } catch {
+            connectionLogger.log("ConnectionModel: cannot encode the actor of the person: \(error)")
+            return request
+        }
+        var sent = request
+        sent.meta = .object(members)
+        return sent
     }
 
     /// Gives a copy of an `initialize` answer with one auth method for each
