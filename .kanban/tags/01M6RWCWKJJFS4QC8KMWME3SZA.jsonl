@@ -1,0 +1,1 @@
+{"id":"01M6RWCWKJ32YG65JHZXRQBTG6","timestamp":"2026-11-06T16:52:15.090609Z","op":"create","item_id":"01M6RWCWKJJFS4QC8KMWME3SZA","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 0e8a16\n+tag_name: blocked\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 0e8a16\n-tag_name: blocked\n","transaction_id":null}
