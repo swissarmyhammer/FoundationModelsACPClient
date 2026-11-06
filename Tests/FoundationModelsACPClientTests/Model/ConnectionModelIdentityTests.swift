@@ -1,4 +1,6 @@
+#if canImport(CloudKit)
 import CloudKit
+#endif
 import FoundationModelsACP
 import FoundationModelsExtras
 import Testing
@@ -60,6 +62,7 @@ private enum IdentityFixtures {
         return members
     }
 
+    #if canImport(CloudKit)
     /// Makes an iCloud source with injected CloudKit closures.
     ///
     /// - Parameters:
@@ -77,6 +80,7 @@ private enum IdentityFixtures {
             userRecordName: recordName
         )
     }
+    #endif
 }
 
 /// The error of an injected CloudKit closure.
@@ -139,6 +143,7 @@ struct IdentitySourceTests {
         #expect(actor == GraphQLActor(id: "local/pat", name: "Pat Person"))
     }
 
+    #if canImport(CloudKit)
     @Test func iCloudSourceGivesTheRecordNameWhenTheAccountIsAvailable() async {
         let actor = await IdentityFixtures.iCloud(status: { .available }).resolve()
         #expect(actor == GraphQLActor(id: "_icloud-record", name: "Pat Person", aliases: ["local/pat"]))
@@ -166,4 +171,5 @@ struct IdentitySourceTests {
         let source = IdentityFixtures.iCloud(status: { .available }, recordName: { "" })
         #expect(await source.resolve() == IdentityFixtures.local.actor)
     }
+    #endif
 }
