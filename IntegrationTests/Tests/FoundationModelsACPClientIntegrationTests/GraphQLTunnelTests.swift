@@ -81,9 +81,7 @@ private struct TunnelAgent {
     ///   Before it throws, the call stops what it started.
     static func start() async throws -> TunnelAgent {
         let root = try IntegrationTemporaryDirectory.make(prefix: temporaryDirectoryPrefix)
-        let workspace = try IntegrationTemporaryDirectory.makeWorkspace(in: root)
-        let process = try await LiveAgentServerBuild(rootDirectory: root)
-            .startServer(LiveAgentServerBuild.graphQLTunnelServer, workspace: workspace)
+        let (process, workspace) = try await startProcess(in: root)
         let model = ConnectionModel(coalescingCadence: .zero)
         _ = await model.connect(over: process.transport)
         do {
@@ -95,6 +93,20 @@ private struct TunnelAgent {
             process.shutdown()
             throw error
         }
+    }
+
+    /// Makes the workspace in a temporary directory, and builds and starts
+    /// the server over it. No connection is on the process yet.
+    ///
+    /// - Parameter root: The temporary directory of the test.
+    /// - Returns: The server process, and the workspace of its sessions.
+    /// - Throws: The error of the directory creation, of the build, or of the
+    ///   start of the process.
+    static func startProcess(in root: URL) async throws -> (process: AgentProcess, workspace: URL) {
+        let workspace = try IntegrationTemporaryDirectory.makeWorkspace(in: root)
+        let process = try await LiveAgentServerBuild(rootDirectory: root)
+            .startServer(LiveAgentServerBuild.graphQLTunnelServer, workspace: workspace)
+        return (process, workspace)
     }
 
     /// Closes the connection, stops the server process, and removes the
@@ -111,6 +123,73 @@ private struct TunnelAgent {
     /// - Returns: The stream of the subscription.
     func subscribeToProbe(_ variables: [String: JSONValue]) -> AsyncThrowingStream<JSONValue, any Error> {
         client.subscribe(endpoint: probeEndpoint, sessionId: sessionId, document: probeDocument, variables: variables)
+    }
+}
+
+/// One raw `initialize` exchange on the stdio of a server, with no connection
+/// model. The test writes the request frame itself, so the frame can be in
+/// the pipe before the agent sets its role.
+private enum RawInitialize {
+    /// The JSON-RPC id of the request.
+    static let requestId: JSONValue = .number(1)
+
+    /// One JSON-RPC request frame of the `initialize` method.
+    private struct RequestFrame: Encodable {
+        /// The JSON-RPC version.
+        let jsonrpc: String
+
+        /// The id of the request.
+        let id: JSONValue
+
+        /// The method name.
+        let method: String
+
+        /// The params of the request.
+        let params: InitializeRequest
+    }
+
+    /// A response frame with the id of the request that has no `result`.
+    struct MissingResult: Error, CustomStringConvertible {
+        /// The response frame.
+        let frame: JSONValue
+
+        /// The response frame, as the reason of the failure.
+        var description: String {
+            "the initialize response has no result: \(frame)"
+        }
+    }
+
+    /// Encodes the request frame, with the `initialize` request of an
+    /// integration test.
+    ///
+    /// - Returns: The NDJSON frame.
+    /// - Throws: An encoding failure.
+    static func makeRequestFrame() throws -> Data {
+        try NDJSONCodec.encode(
+            RequestFrame(
+                jsonrpc: "2.0", id: requestId, method: "initialize",
+                params: .integrationTest(clientName: clientName)))
+    }
+
+    /// Reads the frames of a transport until the response to the request
+    /// comes, and decodes its result.
+    ///
+    /// - Parameter transport: The transport of the server process.
+    /// - Returns: The decoded result, or `nil` when the frames end with no
+    ///   response.
+    /// - Throws: ``MissingResult`` for an error response, the error of the
+    ///   transport, or a decoding failure.
+    static func response(from transport: any ACPTransport) async throws -> InitializeResponse? {
+        for try await frame in NDJSONCodec.frames(from: transport.bytes, logger: .disabled) {
+            guard case .message(.object(let message)) = frame, message["id"] == requestId else {
+                continue
+            }
+            guard let result = message["result"] else {
+                throw MissingResult(frame: .object(message))
+            }
+            return try JSONDecoder().decode(InitializeResponse.self, from: JSONEncoder().encode(result))
+        }
+        return nil
     }
 }
 
@@ -322,6 +401,26 @@ struct GraphQLTunnelTests {
 
         let ending = await nextResult(of: &held)
         #expect(endingError(of: ending) as? SAHGraphQLError == .connectionClosed)
+    }
+
+    // MARK: - The start-up of the server
+
+    // The test writes `initialize` into the stdin of the server immediately
+    // after the process starts, before the agent can set its role. The
+    // agent must serve that frame, and must not answer `methodNotFound`. A
+    // subprocess cannot make this order deterministic, so this check can
+    // pass also when the defect is present. The deterministic test is
+    // `InboundBeforeRoleTests` of FoundationModelsACP.
+    @Test func anInitializeWrittenAtTheProcessStartGetsAnInitializeResponse() async throws {
+        let root = try IntegrationTemporaryDirectory.make(prefix: temporaryDirectoryPrefix)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (process, _) = try await TunnelAgent.startProcess(in: root)
+        defer { process.shutdown() }
+
+        try await process.transport.write(RawInitialize.makeRequestFrame())
+        let response = try #require(try await RawInitialize.response(from: process.transport))
+
+        #expect(response.protocolVersion == ACPClient.supportedProtocolVersion)
     }
 
     // MARK: - The kanban endpoint as a GraphQLEndpoint
