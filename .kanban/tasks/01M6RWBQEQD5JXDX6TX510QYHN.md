@@ -10,6 +10,14 @@ comments:
     - reason: blocked on the root fix in FoundationModelsACP (AgentSideConnection.init reads before setRole). That repository is not on this board, so the board shows the card as READY. swissarmyhammer-75 said: make no code change until that fix is pushed.
     - next: when swissarmyhammer-75 tells us the fix is pushed, remove the "blocked" tag and run /finish ^510qyhn.
   timestamp: 2026-11-06T20:10:59.251582+00:00
+- actor: claude-code
+  id: 01m6v5774pnpdd5905qjqj2afq
+  text: |-
+    ### finish — skipped
+    - evidence: /finish (scoped-batch, no filter) on 2026-11-07. `git fetch` of FoundationModelsACP: origin/main is still 9fcca1d. AgentSideConnection.init still makes RoleConnectionCore (read loop) before core.setRole. The root fix is not pushed.
+    - reason: blocked on the root fix in FoundationModelsACP. swissarmyhammer-75 said: make no code change until that fix is pushed.
+    - next: when the fix is pushed, remove the "blocked" tag and run /finish ^510qyhn.
+  timestamp: 2026-11-07T14:04:55.318066+00:00
 position_column: todo
 position_ordinal: '80'
 title: Check the integration agent servers when the FoundationModelsACP read-before-setRole fix lands
