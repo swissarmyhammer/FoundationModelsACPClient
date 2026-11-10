@@ -220,6 +220,17 @@ struct SessionModelMailPauseTests {
         #expect(model.mailDeliveryPause == nil)
     }
 
+    @Test func aFailedReplayGivesBackTheEarlierPause() {
+        let model = SessionModelFixtures.immediateModel()
+        model.apply(pauseUpdate())
+
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
+        model.apply(userChunk(text: "later", message: "user-2"))
+        model.endReplay(succeeded: false)
+
+        #expect(model.mailDeliveryPause == expectedPause)
+    }
+
     @Test func aResumeWithNoReplayKeepsThePause() {
         let model = SessionModelFixtures.immediateModel()
         model.apply(pauseUpdate())

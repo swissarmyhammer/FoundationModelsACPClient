@@ -67,6 +67,37 @@ comments:
     - evidence: swift build (only the allowed mlx metal warning); swift test 860 tests in 71 suites passed. Files: Sources/FoundationModelsACPClient/Model/ClientModelExtension.swift, Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift, Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift. Both findings are `- [x]`.
     - next: /review
   timestamp: 2026-11-10T17:15:47.321872+00:00
+- actor: claude-code
+  id: 01m737znv4fhhxzmwtb9312c71
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (377322f), 1 finding — Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift:12 (completeness/inverse-operation-coverage). The 2 prior reuse findings are checked.
+    - next: add a failed-replay test for mailDeliveryPause in SessionModelMailPauseTests.swift, then review again.
+  timestamp: 2026-11-10T17:27:09.412950+00:00
+- actor: claude-code
+  id: 01m73802ynq1ky5exf12021t89
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — 4 files (one shared empty default)
+    - test: green — swift test 860/860; IntegrationTests 1 flaky timeout in the first run (task 01M737WW16), 23/23 in the second run
+    - commit: 377322f (pushed)
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift:12
+  timestamp: 2026-11-10T17:27:22.837853+00:00
+- actor: claude-code
+  id: 01m7384r6wkj9hgmqebc6td811
+  text: |-
+    Implement of the finding SessionModelMailPauseTests.swift:12 (completeness/inverse-operation-coverage).
+    - New test aFailedReplayGivesBackTheEarlierPause in SessionModelMailPauseTests.swift: set a pause, beginReplay(replayFromStart), fold a replayed user message, endReplay(succeeded: false), expect the earlier pause.
+    - Same cause for mcpServers: the doc of SessionModel.ReplayRollback says that a failed replay gives back mcpServers, and no test did it. New test aFailedReplayGivesBackTheEarlierList in SessionModelMCPServerStatusTests.swift (new MARK Replay): two client servers, files connected, beginReplay, fold a config server update, endReplay(succeeded: false), expect the earlier list. The file header now states the rule.
+    - The two tests passed at once, because the rollback code is correct. To prove that they can fail, `sessionExtensions = rollback.sessionExtensions` in restore(_:) was removed for one run: both tests failed. The source file was then put back (git diff shows no change to SessionModel.swift). No production code changed.
+  timestamp: 2026-11-10T17:29:55.676833+00:00
+- actor: claude-code
+  id: 01m7384t6ghpgt2g4xakxswcqf
+  text: |-
+    ### implement — changed
+    - evidence: swift build (only the allowed mlx metal warning); swift test 862 tests in 71 suites passed. Files: Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelMCPServerStatusTests.swift. The finding is `- [x]`.
+    - next: /review
+  timestamp: 2026-11-10T17:29:57.712893+00:00
 depends_on:
 - 01M7302MHW9G50K9NMMQSGVQNH
 position_column: doing
@@ -107,3 +138,12 @@ Make these changes:
 
 - [x] `Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift:60` `reuse/reuse` — The no-op `registerHandlers(into:context:)` repeats the same empty method in `MailDeliveryPauseExtension`. Remove this method and use one shared default no-op, as described in the finding on MailDeliveryPauseExtension.swift:29.
 - [x] `Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift:29` `reuse/reuse` — The no-op `registerHandlers(into:context:)` is copied from `MCPServerStatusExtension`. Both built-in extensions register no handlers, so the same empty body appears twice. Move the empty `registerHandlers` into a protocol extension that requires `ConnectionState == EmptyExtensionConnectionState`, as described for `makeConnectionState()`. Delete this copy.
+
+## Review Findings (2026-11-10 11:26)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift:12` `completeness/inverse-operation-coverage` — The new header comment says a failed replay gives the earlier mail pause back. No test in this file exercises that case. Every replay test here uses endReplay(succeeded: true). The only failed-replay tests (aFailedReplayGivesBackTheEarlierSessionState in ClientModelExtensionTests.swift and the aFailedReplay* tests in SessionModelStreamTests.swift) check session status or live history, not mailDeliveryPause. So the documented rule is unproven, and a regression in the pause restore would pass the suite. Add one test in SessionModelMailPauseTests.swift that sets a pause, runs beginReplay, then endReplay(succeeded: false), and asserts mailDeliveryPause still holds the earlier pause. Alternatively, reword the comment if the rollback is not meant to cover the pause.

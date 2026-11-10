@@ -8,7 +8,7 @@ import Testing
 // v2 alpha.7 has no session update for the status of an MCP server, so the
 // update arrives as `SessionUpdate.unknown`. The model applies it to
 // `mcpServers` and never gives it to the merge engine, so it adds no
-// transcript entry.
+// transcript entry. A failed replay gives the earlier list back.
 //
 // Each update goes through the real wire decode: the fixtures encode the
 // members of the update as JSON and decode a `SessionUpdate` from it.
@@ -307,6 +307,24 @@ struct SessionModelMCPServerStatusTests {
         model.apply(try StatusFixtures.exampleUpdate(setting: "uptime", to: .string("ten minutes")))
 
         #expect(model.mcpServers.map(\.status) == [.notReported, .failed(reason: StatusFixtures.reason)])
+    }
+
+    // MARK: - Replay
+
+    @Test func aFailedReplayGivesBackTheEarlierList() throws {
+        let model = StatusFixtures.modelWithClientServers()
+        model.apply(try StatusFixtures.filesUpdate(status: "connected"))
+
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
+        model.apply(try StatusFixtures.searchUpdate(transport: "http", status: "connected"))
+        model.endReplay(succeeded: false)
+
+        #expect(
+            StatusFixtures.statuses(of: model) == [
+                NameAndStatus(name: StatusFixtures.docsName, status: .notReported),
+                NameAndStatus(name: StatusFixtures.filesName, status: .connected),
+            ]
+        )
     }
 
     // MARK: - Transcript and tap
