@@ -74,7 +74,7 @@ struct AgentNestedRunTests {
             defer { try? FileManager.default.removeItem(at: run.root) }
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
-            let model = try await run.connect(over: agentProcess)
+            let model = try await run.connect(over: agentProcess, connection: firstConnection)
             defer { await model.disconnect() }
             let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
             let closed: @MainActor () -> Bool = { sessionEnded(session) }
@@ -118,14 +118,14 @@ struct AgentNestedRunTests {
     /// The agent process ends in the middle of the run. A new process resumes
     /// the root from the start: the tree comes back, the interrupted runs
     /// continue, and the original agents call completes.
-    @Test(.timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)), .wireFramesOnIssue)
     @MainActor
     func aKilledAgentResumesTheNestedRunWithItsTree() async throws {
         do {
             let run = try NestedRun.make()
             defer { try? FileManager.default.removeItem(at: run.root) }
             let first = try await run.startAgent()
-            let firstModel = try await run.connect(over: first)
+            let firstModel = try await run.connect(over: first, connection: firstConnection)
             let firstSession = try await firstModel.newSession(
                 NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
             _ = try await firstSession.prompt([.text(TextContent(text: rootMarker))])
@@ -138,7 +138,7 @@ struct AgentNestedRunTests {
 
             let second = try await run.startAgent()
             defer { second.shutdown() }
-            let model = try await run.connect(over: second)
+            let model = try await run.connect(over: second, connection: secondConnection)
             defer { await model.disconnect() }
             let session = try await model.resumeSession(
                 ResumeSessionRequest(
@@ -180,7 +180,7 @@ struct AgentNestedRunTests {
             defer { try? FileManager.default.removeItem(at: run.root) }
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
-            let trace = TraceTransport(wrapping: agentProcess.transport)
+            let trace = TraceTransport(wrapping: agentProcess.transport, connection: firstConnection)
             let connection = await ClientSideConnection(stream: trace) { _ in DecliningClient() }
             let all = connection.subscribeToAllSessions()
             _ = try await connection.initialize(.integrationTest(clientName: nestedClientName))
@@ -202,9 +202,7 @@ struct AgentNestedRunTests {
             // The agent must announce the child, and the trace must follow the
             // rules.
             #expect(announced, "the agent announced no child")
-            #expect(trace.decodeFailures.isEmpty, "\(trace.decodeFailures)")
-            let violations = SubagentWireTraceValidator().validate(trace.events)
-            #expect(violations.isEmpty, "\(violations)")
+            trace.expectValidTrace()
         }
     }
 }

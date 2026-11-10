@@ -8,6 +8,12 @@ let nestedTemporaryDirectoryPrefix = "acp-client-agent-nested-integration"
 /// The client name that each test gives in `initialize`.
 let nestedClientName = "acp-client-agent-nested-integration-test"
 
+/// The names of the connections of a test in the text of an issue: the
+/// connection to the first agent process, and the connection to the agent
+/// process that resumes the run.
+let firstConnection = "first"
+let secondConnection = "second"
+
 /// The markers that select the scripted pass of each session by its first
 /// prompt.
 let rootMarker = "ROOT-MARKER"
@@ -84,14 +90,19 @@ struct NestedRun {
         )
     }
 
-    /// Starts a connection model over an agent process and initializes it.
+    /// Starts a connection model over a traced transport of an agent process
+    /// and initializes it. In a test with the ``WireFramesOnIssueTrait``, an
+    /// issue of the test holds the last frames of the connection.
     ///
-    /// - Parameter process: The agent process.
+    /// - Parameters:
+    ///   - process: The agent process.
+    ///   - connection: The name of the connection in the text of an issue.
     /// - Returns: The connected model, after `initialize`.
     /// - Throws: The error of `initialize`.
     @MainActor
-    func connect(over process: AgentProcess) async throws -> ConnectionModel {
-        try await connectedModel(over: process.transport, clientName: nestedClientName)
+    func connect(over process: AgentProcess, connection: String) async throws -> ConnectionModel {
+        try await connectedModel(
+            over: TraceTransport(wrapping: process.transport, connection: connection), clientName: nestedClientName)
     }
 
     /// Opens a gate by name: the pass that waits for it goes on.

@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModelsACP
 import Synchronization
+import Testing
 
 /// A pass-through transport that records the frames of one connection in wire
 /// order, and turns them into a trace for `SubagentWireTraceValidator`.
@@ -9,6 +10,10 @@ import Synchronization
 /// holds the `session/update` notifications of the agent, the requests of the
 /// agent that wait on the user, the `session/resume` requests of the client,
 /// and the responses to them.
+///
+/// In a test with the ``WireFramesOnIssueTrait``, the transport adds its frames
+/// to the ``WireFrameLog`` of the test, so that an issue of the test holds the
+/// last frames.
 final class TraceTransport: ACPTransport, Sendable {
     let bytes: AsyncThrowingStream<Data, any Error>
 
@@ -18,15 +23,23 @@ final class TraceTransport: ACPTransport, Sendable {
     /// The forwarding task.
     private let forwarder: Task<Void, Never>
 
+    /// The name of the connection in the text of an issue.
+    let connection: String
+
     /// Wraps a transport.
     ///
-    /// - Parameter inner: The transport to wrap.
-    init(wrapping inner: any ACPTransport) {
+    /// - Parameters:
+    ///   - inner: The transport to wrap.
+    ///   - connection: The name of the connection in the text of an issue,
+    ///     for example `first` or `second`.
+    init(wrapping inner: any ACPTransport, connection: String) {
         self.inner = inner
+        self.connection = connection
         let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         bytes = stream
         let box = LineBox()
         self.box = box
+        WireFrameLog.current?.add(connection: connection) { box.lines }
         forwarder = Task {
             var framer = NDJSONFramer()
             do {
@@ -80,6 +93,16 @@ final class TraceTransport: ACPTransport, Sendable {
     /// The trace of the recorded frames, in wire order.
     var events: [WireTraceEvent] {
         read().trace
+    }
+
+    /// Checks the recorded trace against the wire rules. Each frame must
+    /// decode, and the trace must have no violation. The issue of a
+    /// violation holds the ordered trace.
+    ///
+    /// - Parameter sourceLocation: The place that an issue names.
+    func expectValidTrace(sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(decodeFailures.isEmpty, "\(decodeFailures)", sourceLocation: sourceLocation)
+        WireTraceReport.expectNoViolations(in: events, connection: connection, sourceLocation: sourceLocation)
     }
 
     /// Reads each recorded line.
@@ -148,16 +171,10 @@ final class TraceTransport: ACPTransport, Sendable {
 
 /// The store of the recorded lines of a ``TraceTransport``, under one lock.
 private final class LineBox: Sendable {
-    /// One recorded line.
-    struct Recorded {
-        let isIncoming: Bool
-        let text: String
-    }
-
-    private let store = Mutex<[Recorded]>([])
+    private let store = Mutex<[WireFrame]>([])
 
     func append(isIncoming: Bool, text: String) {
-        store.withLock { $0.append(Recorded(isIncoming: isIncoming, text: text)) }
+        store.withLock { $0.append(WireFrame(isIncoming: isIncoming, text: text)) }
         // A debugging aid: the variable names a file that receives each frame.
         if let path = ProcessInfo.processInfo.environment["ACP_TRACE_FILE"],
             let data = ((isIncoming ? "< " : "> ") + text + "\n").data(using: .utf8)
@@ -172,7 +189,7 @@ private final class LineBox: Sendable {
         }
     }
 
-    var lines: [Recorded] {
+    var lines: [WireFrame] {
         store.withLock { $0 }
     }
 }

@@ -37,12 +37,14 @@ private struct TracedRun {
     /// Starts an agent process, connects a model over a traced transport, and
     /// initializes it.
     ///
-    /// - Parameter run: The files of the run.
+    /// - Parameters:
+    ///   - run: The files of the run.
+    ///   - connection: The name of the connection in the text of an issue.
     /// - Returns: The started run.
     /// - Throws: The error of the start or of `initialize`.
-    static func start(_ run: NestedRun) async throws -> TracedRun {
+    static func start(_ run: NestedRun, connection: String) async throws -> TracedRun {
         let process = try await run.startAgent()
-        let trace = TraceTransport(wrapping: process.transport)
+        let trace = TraceTransport(wrapping: process.transport, connection: connection)
         let model = try await connectedModel(over: trace, clientName: nestedClientName)
         return TracedRun(process: process, trace: trace, model: model)
     }
@@ -53,11 +55,12 @@ private struct TracedRun {
         await model.disconnect()
     }
 
-    /// Checks the recorded trace against the wire rules.
-    func expectValidTrace() {
-        #expect(trace.decodeFailures.isEmpty, "\(trace.decodeFailures)")
-        let violations = SubagentWireTraceValidator().validate(trace.events)
-        #expect(violations.isEmpty, "\(violations)")
+    /// Checks the recorded trace against the wire rules. The issue of a
+    /// violation holds the ordered trace.
+    ///
+    /// - Parameter sourceLocation: The place that an issue names.
+    func expectValidTrace(sourceLocation: SourceLocation = #_sourceLocation) {
+        trace.expectValidTrace(sourceLocation: sourceLocation)
     }
 }
 
@@ -157,7 +160,7 @@ private func startSession(
 /// - Throws: The error of the start or of `session/new`.
 @MainActor
 private func openSession(_ run: NestedRun) async throws -> (TracedRun, SessionModel) {
-    let started = try await TracedRun.start(run)
+    let started = try await TracedRun.start(run, connection: firstConnection)
     let session = try await started.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
     return (started, session)
 }
@@ -171,7 +174,7 @@ private func openSession(_ run: NestedRun) async throws -> (TracedRun, SessionMo
 /// - Throws: The error of the start or of the resume.
 @MainActor
 private func resumeInNewProcess(_ run: NestedRun, rootId: SessionId) async throws -> (TracedRun, SessionModel) {
-    let second = try await TracedRun.start(run)
+    let second = try await TracedRun.start(run, connection: secondConnection)
     let session = try await NestedRun.resumeRoot(second.model, run, sessionId: rootId)
     return (second, session)
 }
@@ -384,7 +387,7 @@ struct AgentNestedScenarioTests {
     /// An orderly quit (SIGTERM) of the agent process, and a new process: the
     /// interrupted nested runs come back, and the ORIGINAL agents call
     /// completes.
-    @Test(.timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)), .wireFramesOnIssue)
     @MainActor
     func anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall() async throws {
         let run = try NestedRun.make()
