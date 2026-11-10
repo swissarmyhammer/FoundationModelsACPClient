@@ -27,10 +27,13 @@ extension ConnectionModel {
     /// not throw, so the session opens with the servers that remain.
     ///
     /// The model subscribes to the updates of the session as soon as the
-    /// response gives the session id. The first subscription gets each update
-    /// that the connection kept for the session, so an update that the agent
-    /// sends before its response is in the model. When the connection had to
-    /// discard kept updates, the model has ``SessionModel/hasMissedUpdates``.
+    /// response gives the session id. Before it attaches, the call waits
+    /// until the consumer of the ordered event stream applied each event
+    /// that the connection read before the response. Thus the model gets
+    /// each update that the consumer kept for the session, so an update that
+    /// the agent sends before its response is in the model, whatever the
+    /// order of the tasks. When the consumer had to discard kept updates, the
+    /// model has ``SessionModel/hasMissedUpdates``.
     ///
     /// The commands and the configuration options of the response seed the
     /// model, and the model goes into ``openSessions``. The MCP servers of the
@@ -68,7 +71,9 @@ extension ConnectionModel {
         }
         let response = try await sendRecordingAuth(sent) {
             try await connection.newSession($0) { answer in
-                ticket.record(answer.sessionId)
+                // The hook runs before the next frame, so this is the last
+                // event that the agent sent before its answer.
+                ticket.record(answer.sessionId, latestEventSequence: connection.latestEventSequence)
                 opening.markOpening(answer.sessionId)
             }
         }
@@ -81,6 +86,12 @@ extension ConnectionModel {
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         if let beforeRegisteringNewSession {
             await beforeRegisteringNewSession(response.sessionId)
+        }
+        // The consumer applies each event that came before the answer first,
+        // so the kept updates and the overflow mark of the session are in
+        // the consumer when the model attaches.
+        if let latestEvent = ticket.latestEventSequence {
+            await waitUntilApplied(latestEvent)
         }
         attachToEvents(session)
         try register(session, openedOver: connection)

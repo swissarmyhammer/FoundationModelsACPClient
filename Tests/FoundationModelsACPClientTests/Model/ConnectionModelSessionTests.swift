@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Synchronization
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -521,6 +522,40 @@ struct ConnectionModelSessionTests {
         defer { await connected.model.disconnect() }
 
         let session = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+
+        #expect(session.hasMissedUpdates)
+    }
+
+    @Test func newSessionWaitsForTheUpdatesThatCameBeforeItsAnswer() async throws {
+        let connected = try await SessionFactoryFixtures.connect(
+            bufferLimits: SessionFactoryFixtures.oneUpdateBuffer,
+            newSessionScript: SessionFactoryFixtures.twoMessages
+        )
+        defer { await connected.model.disconnect() }
+        // The gate holds the consumer at the first update of the session, so
+        // the answer reaches `newSession` before the consumer applied the
+        // updates that came before it.
+        let gate = UpdateGate()
+        defer { gate.open() }
+        connected.model.beforeApplyingEvent = { event in
+            guard event.sessionId == testSession else { return }
+            await gate.wait()
+        }
+        let callWaits = Mutex(false)
+        connected.model.didStartWaitingForEvents = {
+            callWaits.withLock { $0 = true }
+            TestChangeSignal.post()
+        }
+        let creating = Task { [model = connected.model] in
+            try await model.newSession(SessionFactoryFixtures.newSessionRequest)
+        }
+        // The call waits for the held consumer. An end of the call before
+        // that wait means that the call did not wait.
+        let creatingEnd = TaskEnd(of: creating)
+        try await waitUntil { callWaits.withLock { $0 } } orFailWhen: { creatingEnd.hasEnded }
+
+        gate.open()
+        let session = try await creating.value
 
         #expect(session.hasMissedUpdates)
     }

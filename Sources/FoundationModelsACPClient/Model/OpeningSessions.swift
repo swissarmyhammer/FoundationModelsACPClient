@@ -107,23 +107,44 @@ final class OpeningSessions: Sendable {
 }
 
 /// The session id that one `session/new` call marked as opening, if the
-/// agent answered it.
+/// agent answered it, and the highest event sequence when the answer came.
 ///
 /// The `onResponse` hook writes it on the reader, and the call reads it when
 /// it ends, so the call ends the open that it started.
 final class OpeningTicket: Sendable {
-    /// The marked id, or `nil` before the answer.
-    private let sessionId = Mutex<SessionId?>(nil)
+    /// What the hook of the answer recorded.
+    private struct Answer {
+        /// The id of the new session.
+        let sessionId: SessionId
 
-    /// Records the id that the answer gave.
+        /// The highest sequence of the ordered event stream when the answer
+        /// came, or `nil` when the stream had no event yet.
+        let latestEventSequence: UInt64?
+    }
+
+    /// The recorded answer, or `nil` before the answer.
+    private let answer = Mutex<Answer?>(nil)
+
+    /// Records the id that the answer gave, and the highest event sequence
+    /// before the answer.
     ///
-    /// - Parameter id: The id of the new session.
-    func record(_ id: SessionId) {
-        sessionId.withLock { $0 = id }
+    /// - Parameters:
+    ///   - id: The id of the new session.
+    ///   - latestEventSequence: The highest sequence of the ordered event
+    ///     stream when the answer came, or `nil` when the stream had no
+    ///     event yet.
+    func record(_ id: SessionId, latestEventSequence: UInt64?) {
+        answer.withLock { $0 = Answer(sessionId: id, latestEventSequence: latestEventSequence) }
     }
 
     /// The recorded id, or `nil` when no answer came.
     var recorded: SessionId? {
-        sessionId.withLock { $0 }
+        answer.withLock { $0?.sessionId }
+    }
+
+    /// The highest event sequence when the answer came, or `nil` when no
+    /// answer came or the stream had no event before the answer.
+    var latestEventSequence: UInt64? {
+        answer.withLock { $0?.latestEventSequence }
     }
 }
