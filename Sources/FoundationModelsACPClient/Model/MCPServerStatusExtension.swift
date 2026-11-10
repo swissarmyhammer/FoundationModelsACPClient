@@ -49,18 +49,9 @@ struct MCPServerStatusExtension: ClientModelExtension {
         }
     }
 
-    @MainActor func makeConnectionState() -> EmptyExtensionConnectionState {
-        EmptyExtensionConnectionState()
-    }
-
     @MainActor func makeSessionState(for sessionId: SessionId) -> SessionState {
         SessionState()
     }
-
-    func registerHandlers(
-        into handlers: inout ClientModelExtensionHandlers,
-        context: ClientModelExtensionContext<Self>
-    ) {}
 
     /// Takes each `_mcp_server_status` update. A valid one changes the list,
     /// and an update that ``MCPServerStatusUpdate`` ignores changes nothing.

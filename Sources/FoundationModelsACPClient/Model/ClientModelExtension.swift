@@ -209,6 +209,27 @@ enum BuiltInClientModelExtensions {
 @MainActor
 final class EmptyExtensionConnectionState {}
 
+/// The defaults of an extension that keeps no state for the connection, and
+/// thus registers no handler.
+extension ClientModelExtension where ConnectionState == EmptyExtensionConnectionState {
+    /// Makes a new empty connection state.
+    ///
+    /// - Returns: The new connection state.
+    @MainActor func makeConnectionState() -> EmptyExtensionConnectionState {
+        EmptyExtensionConnectionState()
+    }
+
+    /// Registers no handler.
+    ///
+    /// - Parameters:
+    ///   - handlers: The handlers of the connection.
+    ///   - context: The context of the connection.
+    func registerHandlers(
+        into handlers: inout ClientModelExtensionHandlers,
+        context: ClientModelExtensionContext<Self>
+    ) {}
+}
+
 /// Finds the model of a session of one connection on the main actor.
 typealias ExtensionSessionLookup = @MainActor @Sendable (SessionId) -> SessionModel?
 

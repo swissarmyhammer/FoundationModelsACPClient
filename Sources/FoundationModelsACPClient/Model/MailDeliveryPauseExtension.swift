@@ -18,18 +18,9 @@ struct MailDeliveryPauseExtension: ClientModelExtension {
         var pause: MailDeliveryPause?
     }
 
-    @MainActor func makeConnectionState() -> EmptyExtensionConnectionState {
-        EmptyExtensionConnectionState()
-    }
-
     @MainActor func makeSessionState(for sessionId: SessionId) -> SessionState {
         SessionState()
     }
-
-    func registerHandlers(
-        into handlers: inout ClientModelExtensionHandlers,
-        context: ClientModelExtensionContext<Self>
-    ) {}
 
     /// Takes each `_mail_delivery_paused` update: a valid one replaces the
     /// pause. Clears the pause at each user message and each user message

@@ -31,6 +31,42 @@ comments:
     - evidence: swift build (only the allowed mlx metal warning); card filter SessionModelMCPServerStatusTests|SessionModelMailPauseTests|ClientModelExtensionTests 76 tests in 5 suites passed; swift test 860 tests in 71 suites passed; swift test --package-path IntegrationTests 23 tests in 5 suites passed. Files: new Model/MCPServerStatusExtension.swift, Model/MailDeliveryPauseExtension.swift; changed Model/ClientModelExtension.swift, Model/ConnectionModel.swift, Model/ConnectionModel+Sessions.swift, Model/SessionModel.swift, Preview/SessionModel+Preview.swift, docc/WritingAClientModelExtension.md, Tests Model/ClientModelExtensionTests.swift, Model/SessionModelMCPServerStatusTests.swift, Model/SessionModelMailPauseTests.swift.
     - next: /review
   timestamp: 2026-11-10T17:06:57.406385+00:00
+- actor: claude-code
+  id: 01m7374pg53405844qh72brtd5
+  text: |-
+    ### review — findings
+    - evidence: `review sha HEAD~1..HEAD` (8d9c81b): 2 findings (2 confirmed, 4 refuted). Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift:60, Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift:29 (`reuse/reuse`, the copied no-op `registerHandlers`).
+    - Caller check 1 (replay with history starts with no mail pause): the doc comment of `SessionModel.mailDeliveryPause` and of `ReplayRollback` state the new rule, and the commit message states it. The tests `aReplayFromTheStartSetsThePauseAgain`, `aReplayWithALaterUserMessageClearsThePause` and `aResumeWithNoReplayKeepsThePause` stay green. The file header comment of SessionModelMailPauseTests.swift still says "A replay keeps it until it gives a later user message". That line did not change in this commit, so it is not a finding of this diff review.
+    - Caller check 2 (observation tests that can hang): `noFailureEvent` in ObservationWait.swift is a written, allowed choice "only when no event can tell that the change will never come", with the reason in a comment at the call site. Both new tests have that comment. A `TaskEnd` failure event does not work here: when the task ends, the value already changed, so the wait passes also when observation did not report the change. The same pattern is in ChunkCoalescerTests.swift and ConnectionModelTests.swift. Thus the tests obey rule T1 as written. No finding.
+    - Caller check 3 (`runReplay` restores `mcpServers`): yes. ConnectionModel+Sessions.swift keeps `mcpServersBeforeResume` and sets `session.mcpServers` back in the `catch` of the refused resume, before `endReplay(of:afterFailure:)`. For a replay with history, the rollback then puts back the earlier state objects. No finding.
+    - next: implement the 2 findings, then review again.
+  timestamp: 2026-11-10T17:12:25.349241+00:00
+- actor: claude-code
+  id: 01m73757cvtxgkeqxeg52xwnqa
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 11 files (2 new)
+    - test: green — swift test 860/860, IntegrationTests 23/23
+    - commit: 8d9c81b (pushed)
+    - review: findings — Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift:60, Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift:29
+  timestamp: 2026-11-10T17:12:42.651248+00:00
+- actor: claude-code
+  id: 01m737asa8q1axe3nc9e4q0y1q
+  text: |-
+    Implement of the 2 review findings (reuse/reuse, the copied no-op registerHandlers).
+    - ClientModelExtension.swift: new constrained extension `extension ClientModelExtension where ConnectionState == EmptyExtensionConnectionState`. It holds the one empty `registerHandlers(into:context:)` and the one `makeConnectionState()` that gives a new `EmptyExtensionConnectionState`. The members are internal, because `EmptyExtensionConnectionState` is internal.
+    - Same cause, whole files: the two built-in extensions also had the same copied `makeConnectionState()` default. Both copies are deleted, and both copies of `registerHandlers` are deleted. `makeSessionState(for:)` stays in each type: each one makes a different `SessionState` type, so it is not a copied default.
+    - Discovery: the compiler infers `ConnectionState == EmptyExtensionConnectionState` from the constrained default, so the two types need no `typealias ConnectionState`. A first try with a `typealias` in each type also compiled; it was removed, because it was one more copied line.
+    - SessionModelMailPauseTests.swift: the header comment now says that a replay with history starts with no pause, a replayed pause sets it again, a later replayed user message clears it, a failed replay gives the earlier pause back, and a resume with no history and the close keep it. This agrees with the doc of SessionModel.mailDeliveryPause.
+    - No new test: this is a refactor with no change of behavior. The existing tests of the two extensions cover it.
+  timestamp: 2026-11-10T17:15:44.840171+00:00
+- actor: claude-code
+  id: 01m737avqse7ydzjp8kxnd781g
+  text: |-
+    ### implement — changed
+    - evidence: swift build (only the allowed mlx metal warning); swift test 860 tests in 71 suites passed. Files: Sources/FoundationModelsACPClient/Model/ClientModelExtension.swift, Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift, Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift. Both findings are `- [x]`.
+    - next: /review
+  timestamp: 2026-11-10T17:15:47.321872+00:00
 depends_on:
 - 01M7302MHW9G50K9NMMQSGVQNH
 position_column: doing
@@ -58,3 +94,16 @@ Make these changes:
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass. #step1
+
+## Review Findings (2026-11-10 11:10)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 10 file(s) reviewed, 5 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+> 1 file(s) not reviewed — no validator matched:
+> - `Sources/FoundationModelsACPClient/FoundationModelsACPClient.docc/WritingAClientModelExtension.md` — no validator matches this file
+
+- [x] `Sources/FoundationModelsACPClient/Model/MCPServerStatusExtension.swift:60` `reuse/reuse` — The no-op `registerHandlers(into:context:)` repeats the same empty method in `MailDeliveryPauseExtension`. Remove this method and use one shared default no-op, as described in the finding on MailDeliveryPauseExtension.swift:29.
+- [x] `Sources/FoundationModelsACPClient/Model/MailDeliveryPauseExtension.swift:29` `reuse/reuse` — The no-op `registerHandlers(into:context:)` is copied from `MCPServerStatusExtension`. Both built-in extensions register no handlers, so the same empty body appears twice. Move the empty `registerHandlers` into a protocol extension that requires `ConnectionState == EmptyExtensionConnectionState`, as described for `makeConnectionState()`. Delete this copy.

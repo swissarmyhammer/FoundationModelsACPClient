@@ -7,8 +7,10 @@ import Testing
 // The tests of `SessionModel.mailDeliveryPause`: the `_mail_delivery_paused`
 // extension update of the FoundationModelsACPAgent session (ACPAgent
 // d30f8cd) sets it, and adds no transcript entry. A prompt of this client and
-// each folded user message clear it. A replay keeps it until it gives a later
-// user message, and the close keeps it.
+// each folded user message clear it. A replay with history starts with no
+// pause: a replayed pause sets it again, and a later replayed user message
+// clears it. A failed replay gives the earlier pause back. A resume with no
+// history and the close keep it.
 
 /// The limit in force that the test pause gives.
 private let pauseLimit = 3
