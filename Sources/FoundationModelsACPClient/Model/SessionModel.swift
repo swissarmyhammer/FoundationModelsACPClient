@@ -33,6 +33,12 @@ import Observation
 /// that does not go to the engine: it sets the status of one item of
 /// ``mcpServers``, and it adds no transcript entry.
 ///
+/// Each ``ClientModelExtension`` of the connection keeps one session state
+/// in the model; ``extensionState(_:)`` gives it. The model gives each update
+/// to the extensions first, in order. An update that an extension takes
+/// changes only the state of that extension: it does not go to the engine,
+/// and it adds no transcript entry.
+///
 /// The model also holds the pending permission requests and the pending
 /// session-scoped elicitations of the session, as ``pendingPermissions`` and
 /// ``pendingElicitations``.
@@ -219,6 +225,14 @@ public final class SessionModel: Identifiable {
 
     /// Whether the session is closed. A closed model changes no more.
     public internal(set) var isClosed = false
+
+    /// The extensions of the connection of the session, each with its
+    /// session state.
+    ///
+    /// A replay with history replaces the value with new states, and a failed
+    /// replay gives the earlier value back. The value is observable, so a
+    /// view that reads ``extensionState(_:)`` sees the new state.
+    var sessionExtensions: SessionExtensions
 
     // MARK: - Child sessions
 
@@ -432,15 +446,19 @@ public final class SessionModel: Identifiable {
     ///     not read the system date.
     ///   - logger: The diagnostic sink of the connection of the session;
     ///     never stdout.
+    ///   - extensionFactories: Makes the session state of each extension of
+    ///     the connection, in the order of ``ConnectionModel/addExtension(_:)``.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
         coalescingCadence: Duration = SessionModel.defaultCoalescingCadence,
         clock: any Clock<Duration> = ContinuousClock(),
         now: @escaping @Sendable () -> Date = Date.init,
-        logger: ACPLogger = .disabled
+        logger: ACPLogger = .disabled,
+        extensionFactories: [SessionExtensionFactory] = []
     ) {
         self.sessionId = sessionId
+        sessionExtensions = SessionExtensions(extensionFactories, for: sessionId)
         self.requestSender = requestSender
         self.coalescingCadence = coalescingCadence
         self.clock = clock
@@ -526,6 +544,10 @@ public final class SessionModel: Identifiable {
     /// come through here, so an echo of a local prompt links its local entry
     /// on each path.
     ///
+    /// Each update goes to the extensions first, in order. An update that an
+    /// extension takes goes nowhere else. The buffered chunks come through
+    /// here in the same order, so each extension sees the arrival order.
+    ///
     /// An `_mcp_server_status` update never goes to the engine, because the
     /// engine makes an unknown transcript entry from it. A valid one changes
     /// ``mcpServers``, and an update that ``MCPServerStatusUpdate`` ignores
@@ -543,15 +565,19 @@ public final class SessionModel: Identifiable {
 
     /// Folds one update, and gives the change of the engine.
     ///
-    /// An `_mcp_server_status` update goes to ``applyMCPServerStatus(_:)``
-    /// and a `_mail_delivery_paused` update goes to ``mailDeliveryPause``,
-    /// and not to the engine, so they give no change. Each other update goes
-    /// to the prompt correlator and then to the engine.
+    /// The update goes to the extensions first. An update that an extension
+    /// takes gives no change. An `_mcp_server_status` update goes to
+    /// ``applyMCPServerStatus(_:)`` and a `_mail_delivery_paused` update goes
+    /// to ``mailDeliveryPause``, and not to the engine, so they give no
+    /// change. Each other update goes to the prompt correlator and then to
+    /// the engine.
     ///
     /// - Parameter update: The update to fold.
-    /// - Returns: The change of the engine, or `nil` for an
-    ///   `_mcp_server_status` or a `_mail_delivery_paused` update.
+    /// - Returns: The change of the engine, or `nil` for an update that an
+    ///   extension took, and for an `_mcp_server_status` or a
+    ///   `_mail_delivery_paused` update.
     private func engineChange(folding update: SessionUpdate) -> SessionMergeEngine.Change? {
+        guard !sessionExtensions.take(update) else { return nil }
         guard !MCPServerStatusUpdate.isStatusUpdate(update) else {
             if let status = MCPServerStatusUpdate.decode(update) {
                 applyMCPServerStatus(status)
@@ -636,15 +662,15 @@ public final class SessionModel: Identifiable {
         item.status = update.status
     }
 
-    /// Clears the transcript and the last-value state, so a replay of the
-    /// whole history does not append its chunks to the text it already gave.
-    ///
-    /// The engine forgets each entry, and each replayed entry gets a new
-    /// object. The local prompts lose their link state. A pending elicitation
-    /// keeps its tool-call link: the link waits for the replayed entry of its
-    /// tool call.
     /// The state that a replay with history clears, kept aside until the
     /// outcome of the resume is known. A failed resume gives it back.
+    ///
+    /// The rollback also keeps the session state objects of the extensions.
+    /// A replay with history makes a new session state for each extension,
+    /// because the replay gives each update of the session again, and a
+    /// failed replay puts the earlier state objects back. The rollback does
+    /// not keep ``mcpServers``: a refused request of
+    /// ``ConnectionModel/resumeSession(_:)`` gives the earlier list back.
     struct ReplayRollback {
         fileprivate var transcript: [TranscriptEntry]
         fileprivate var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry]
@@ -659,6 +685,10 @@ public final class SessionModel: Identifiable {
         fileprivate var sessionInfo: SessionInfoUpdate
         fileprivate var history: SessionHistory
         fileprivate var hasMissedUpdates: Bool
+
+        /// The session state of each extension before the replay. A failed
+        /// replay gives back these same state objects.
+        fileprivate var sessionExtensions: SessionExtensions
 
         /// The child models of the session, kept open while the replay
         /// rebuilds the tree.
@@ -684,11 +714,13 @@ public final class SessionModel: Identifiable {
             sessionInfo: sessionInfo,
             history: history,
             hasMissedUpdates: hasMissedUpdates,
+            sessionExtensions: sessionExtensions,
             children: children
         )
     }
 
-    /// Gives back the state that a failed replay cleared.
+    /// Gives back the state that a failed replay cleared, also the earlier
+    /// session state objects of the extensions.
     ///
     /// - Parameter rollback: The state that ``makeReplayRollback()`` kept.
     func restore(_ rollback: ReplayRollback) {
@@ -705,11 +737,24 @@ public final class SessionModel: Identifiable {
         sessionInfo = rollback.sessionInfo
         history = rollback.history
         hasMissedUpdates = rollback.hasMissedUpdates
+        sessionExtensions = rollback.sessionExtensions
         for entry in transcript {
             attachUnresolvedElicitationLinks(to: entry)
         }
     }
 
+    /// Clears the transcript and the last-value state, so a replay of the
+    /// whole history does not append its chunks to the text it already gave.
+    ///
+    /// The engine forgets each entry, and each replayed entry gets a new
+    /// object. The local prompts lose their link state. A pending elicitation
+    /// keeps its tool-call link: the link waits for the replayed entry of its
+    /// tool call.
+    ///
+    /// The call does not change the session states of the extensions.
+    /// ``beginReplay(replayFrom:)`` replaces them for each replay with
+    /// history, also when the transcript is empty and this call does not
+    /// run.
     func resetTranscript() {
         detachElicitationLinksFromToolCalls()
         engine.reset()
@@ -847,6 +892,25 @@ public final class SessionModel: Identifiable {
             message,
             metadata: [ACPClientTelemetry.LogMetadataKey.sessionID: "\(sessionId.rawValue)"]
         )
+    }
+
+    // MARK: - Extensions
+
+    /// Gives the session state of an extension for this session.
+    ///
+    /// The connection makes one state for each extension when it makes the
+    /// model, also for a child session. A replay of the retained history of
+    /// a `session/resume` makes a new state, and a failed replay gives the
+    /// earlier state back. A resume with no replay and the close keep the
+    /// state.
+    ///
+    /// - Parameter extensionType: The type of the extension.
+    /// - Returns: The session state, or `nil` when the connection of the
+    ///   session had no extension of that type.
+    public func extensionState<Extension: ClientModelExtension>(
+        _ extensionType: Extension.Type
+    ) -> Extension.SessionState? {
+        sessionExtensions.state(of: extensionType)
     }
 
     // MARK: - Notices

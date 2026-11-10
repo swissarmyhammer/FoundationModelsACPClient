@@ -153,9 +153,21 @@ struct ResumeConnection {
 
     /// Connects the model and opens the root session.
     ///
+    /// - Parameters:
+    ///   - bufferLimits: The limits on the events that the connection keeps
+    ///     for a session with no model.
+    ///   - extensions: The extensions that the model adds before the
+    ///     connect, in order.
     /// - Throws: The error of `initialize` or of `session/new`.
-    static func make(bufferLimits: SessionUpdateBufferLimits = .default) async throws -> Self {
-        Self(connected: try await ConnectedStub.make(bufferLimits: bufferLimits) { ResumeStubAgent(connection: $0) })
+    static func make(
+        bufferLimits: SessionUpdateBufferLimits = .default,
+        extensions: [any ClientModelExtension] = []
+    ) async throws -> Self {
+        Self(
+            connected: try await ConnectedStub.make(bufferLimits: bufferLimits, extensions: extensions) {
+                ResumeStubAgent(connection: $0)
+            }
+        )
     }
 
     /// Sends a live snapshot and waits until the model made the child.

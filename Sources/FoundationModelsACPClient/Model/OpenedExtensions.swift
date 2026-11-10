@@ -23,23 +23,34 @@ struct OpenedExtension {
     /// Gives the close of the connection to the extension.
     let didClose: () -> Void
 
+    /// Makes the session state of the extension for each session model of
+    /// the connection.
+    let makeSessionExtension: SessionExtensionFactory
+
     /// Makes a new connection state for an extension, and the context of the
     /// connection.
     ///
     /// - Parameters:
     ///   - clientExtension: The extension.
     ///   - connectionLogger: The diagnostic sink of the connection.
-    init<Extension: ClientModelExtension>(_ clientExtension: Extension, connectionLogger: ACPLogger) {
+    ///   - sessions: Finds the model of a session of the connection.
+    init<Extension: ClientModelExtension>(
+        _ clientExtension: Extension,
+        connectionLogger: ACPLogger,
+        sessions: @escaping ExtensionSessionLookup
+    ) {
         let state = clientExtension.makeConnectionState()
         let context = ClientModelExtensionContext<Extension>(
             connectionLogger: connectionLogger,
-            connectionState: state
+            connectionState: state,
+            sessions: sessions
         )
         key = ObjectIdentifier(Extension.self)
         self.state = state
         registration = { clientExtension.registerHandlers(into: &$0, context: context) }
         didInitialize = { clientExtension.didInitialize($0, state: state) }
         didClose = { clientExtension.didClose(state: state) }
+        makeSessionExtension = OpenedSessionExtension.factory(for: clientExtension)
     }
 }
 
@@ -64,8 +75,13 @@ final class OpenedExtensions {
     /// - Parameters:
     ///   - extensions: The extensions, in order.
     ///   - connectionLogger: The diagnostic sink of the connection.
-    init(_ extensions: [any ClientModelExtension], connectionLogger: ACPLogger) {
-        let members = extensions.map { OpenedExtension($0, connectionLogger: connectionLogger) }
+    ///   - sessions: Finds the model of a session of the connection.
+    init(
+        _ extensions: [any ClientModelExtension],
+        connectionLogger: ACPLogger,
+        sessions: @escaping ExtensionSessionLookup
+    ) {
+        let members = extensions.map { OpenedExtension($0, connectionLogger: connectionLogger, sessions: sessions) }
         self.members = members
         states = Dictionary(members.map { ($0.key, $0.state) }) { _, later in later }
     }
@@ -73,6 +89,11 @@ final class OpenedExtensions {
     /// The handler registration of each extension, in order.
     var registrations: [ExtensionRegistration] {
         members.map(\.registration)
+    }
+
+    /// The factory of the session state of each extension, in order.
+    var sessionFactories: [SessionExtensionFactory] {
+        members.map(\.makeSessionExtension)
     }
 
     /// Gives the connection state of one extension type.

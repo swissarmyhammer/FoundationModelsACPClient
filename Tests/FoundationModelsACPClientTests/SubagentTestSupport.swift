@@ -95,11 +95,14 @@ struct ConnectedStub<Stub: Agent & Sendable> {
     /// - Parameters:
     ///   - bufferLimits: The limits on the events that the connection keeps
     ///     for a session with no model.
+    ///   - extensions: The extensions that the model adds before the
+    ///     connect, in order.
     ///   - makeStub: Builds the stub from its connection.
     /// - Returns: The connected stub.
     /// - Throws: The error of `initialize` or of `session/new`.
     static func make(
         bufferLimits: SessionUpdateBufferLimits = .default,
+        extensions: [any ClientModelExtension] = [],
         makeStub: @escaping @Sendable (AgentSideConnection) -> Stub
     ) async throws -> Self {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -110,6 +113,9 @@ struct ConnectedStub<Stub: Agent & Sendable> {
             return stub
         }
         let model = ConnectionModel(coalescingCadence: .zero)
+        for clientExtension in extensions {
+            model.addExtension(clientExtension)
+        }
         _ = await model.connect(over: clientEnd, bufferLimits: bufferLimits)
         _ = try await model.initialize(makeInitializeRequest())
         let root = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))

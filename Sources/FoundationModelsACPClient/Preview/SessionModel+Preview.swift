@@ -59,6 +59,13 @@ extension SessionModel {
     ///     ``PreviewSessionRequestSender/Sent/elicitationResponse(id:response:)``
     ///     in `requestSender`, and returns at once.
     ///   - requestSender: The sender of the requests of the session.
+    ///   - extensions: The extensions of the session, in order, with one
+    ///     extension for each type. Each one gets a new session state before
+    ///     the transcript folds, and each transcript item goes to the
+    ///     extensions as a live update does. Thus a
+    ///     ``PreviewTranscriptItem/update(_:)`` item with an `_` update that
+    ///     an extension takes sets sample data in its state. A preview can
+    ///     also set the state that ``extensionState(_:)`` gives.
     /// - Returns: The model.
     public static func preview(
         sessionId: SessionId = previewSessionId,
@@ -69,14 +76,16 @@ extension SessionModel {
         mcpServers: [MCPServer] = [],
         pendingPermissions: [RequestPermissionRequest] = [],
         pendingElicitations: [CreateElicitationRequest] = [],
-        requestSender: PreviewSessionRequestSender = PreviewSessionRequestSender()
+        requestSender: PreviewSessionRequestSender = PreviewSessionRequestSender(),
+        extensions: [any ClientModelExtension] = []
     ) -> SessionModel {
         let model = SessionModel(
             sessionId: sessionId,
             requestSender: requestSender,
             coalescingCadence: .zero,
             clock: PreviewClock(),
-            now: { previewDate }
+            now: { previewDate },
+            extensionFactories: extensions.map { OpenedSessionExtension.factory(for: $0) }
         )
         model.cwd = cwd
         model.setMCPServers(mcpServers)

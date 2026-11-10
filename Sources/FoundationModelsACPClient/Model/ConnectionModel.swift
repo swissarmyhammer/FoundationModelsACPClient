@@ -444,7 +444,10 @@ public final class ConnectionModel {
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger
         let subscriptions = SAHGraphQLSubscriptions()
-        let opening = OpenedExtensions(extensions, connectionLogger: connectionLogger)
+        let generation = connectionGeneration
+        let opening = OpenedExtensions(extensions, connectionLogger: connectionLogger) { [weak self] sessionId in
+            self?.session(for: sessionId, ofConnection: generation)
+        }
         openedExtensions = opening
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
@@ -585,6 +588,22 @@ public final class ConnectionModel {
         _ extensionType: Extension.Type
     ) -> Extension.ConnectionState? {
         openedExtensions?.state(of: extensionType)
+    }
+
+    /// Gives the model of a session of one connection: an open session, or a
+    /// child session at any level under one.
+    ///
+    /// ``ClientModelExtensionContext/session(for:)`` reads it, so a handler
+    /// of an earlier connection finds no session of a later one.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The id of the session.
+    ///   - generation: The ``connectionGeneration`` of the connection.
+    /// - Returns: The model, or `nil` when the session is not open, and when
+    ///   `generation` is not the generation of the open connection.
+    func session(for sessionId: SessionId, ofConnection generation: Int) -> SessionModel? {
+        guard generation == connectionGeneration else { return nil }
+        return session(for: sessionId) ?? childSession(for: sessionId)
     }
 
     // MARK: - Ordered events
@@ -803,8 +822,9 @@ public final class ConnectionModel {
     }
 
     /// Makes the model of a session, with the coalescing cadence, the clock,
-    /// the wall clock, and the diagnostic sink of this connection. The model
-    /// is not open until ``register(_:)`` adds it.
+    /// the wall clock, the diagnostic sink, and a new session state for each
+    /// extension of this connection. The model is not open until
+    /// ``register(_:)`` adds it.
     ///
     /// The model tells this connection model each change of its
     /// ``SessionModel/sessionInfo``, so the item of the session in
@@ -821,7 +841,8 @@ public final class ConnectionModel {
             coalescingCadence: coalescingCadence,
             clock: clock,
             now: now,
-            logger: connectionLogger
+            logger: connectionLogger,
+            extensionFactories: openedExtensions?.sessionFactories ?? []
         )
         model.sessionInfoDidChange = { [weak self] sessionId, info in
             self?.patchListedSession(sessionId, with: info)

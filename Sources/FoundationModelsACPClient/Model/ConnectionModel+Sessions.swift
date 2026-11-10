@@ -77,6 +77,7 @@ extension ConnectionModel {
         // update, so a status update that the agent sends after the response
         // always finds it.
         session.setMCPServers(sent.mcpServers ?? [])
+        session.sessionExtensions.didStartSession(sent)
         session.setWorkspace(of: sent)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
         if let beforeRegisteringNewSession {
@@ -331,6 +332,7 @@ extension ConnectionModel {
         let mcpServersBeforeResume = session.mcpServers
         session.beginReplay(replayFrom: request.replayFrom)
         session.setMCPServers(request.mcpServers ?? [])
+        session.sessionExtensions.didStartSession(request)
         let resumeStarts = watchResumeStarts(of: connection, for: session)
         defer { resumeStarts.cancel() }
         let response: ResumeSessionResponse
@@ -537,12 +539,14 @@ extension ConnectionModel {
     }
 }
 
-/// A request that sends a list of MCP servers to the agent.
+/// A request that sends a list of MCP servers to the agent: a
+/// `session/new` or a `session/resume` request.
 ///
-/// ``ConnectionModel/removingUnadvertisedMCPServers(from:)`` filters the
-/// list of each request of this kind, so the rule for the servers that go
-/// out is in one location.
-protocol MCPServerListRequest {
+/// ``ConnectionModel`` filters the list of each request of this kind, so the
+/// rule for the servers that go out is in one location.
+/// ``ClientModelExtension/didStartSession(state:mcpServers:)`` gets the
+/// request that went out.
+public protocol MCPServerListRequest {
     /// The MCP servers that the request sends, or `nil` when the request
     /// sends no list.
     var mcpServers: [MCPServer]? { get set }

@@ -156,8 +156,12 @@ extension SessionModel {
     /// these items. When the
     /// request asks for a replay and the model already has a transcript, the
     /// model also clears its transcript and its last-value state, because a
-    /// replayed chunk appends again and would double the text. The count of
-    /// replayed updates, ``replayedUpdateCount``, starts again at 0.
+    /// replayed chunk appends again and would double the text. A request
+    /// that asks for a replay also gives each extension a new session state,
+    /// so a replayed update does not apply twice to one state; a failed
+    /// replay gives the earlier states back. A resume with no replay keeps
+    /// the session states. The count of replayed updates,
+    /// ``replayedUpdateCount``, starts again at 0.
     ///
     /// - Parameter replayFrom: The `replayFrom` field of the request that the
     ///   client sends, or `nil` for no replay.
@@ -173,6 +177,7 @@ extension SessionModel {
             // The old state stays aside until the resume gives its outcome. A
             // failed resume gives it back; a successful one drops it.
             replayRollback = makeReplayRollback()
+            sessionExtensions = sessionExtensions.remade()
             if !transcript.isEmpty {
                 resetTranscript()
             }

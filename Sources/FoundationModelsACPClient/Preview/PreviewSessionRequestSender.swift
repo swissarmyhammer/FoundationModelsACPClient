@@ -5,7 +5,7 @@ import Observation
 /// A request sender for a preview ``SessionModel``. It never uses the
 /// network, and it never opens a process or a socket.
 ///
-/// Give it to ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:pendingElicitations:requestSender:)``.
+/// Give it to ``SessionModel/preview(sessionId:cwd:transcript:availableCommands:configOptions:mcpServers:pendingPermissions:pendingElicitations:requestSender:extensions:)``.
 /// ``SessionModel/prompt(_:meta:)`` then works as it does on a live model:
 /// the transcript shows the prompt at once as a local user message in the
 /// ``SendState/pending`` state, and the answer of this sender sets
