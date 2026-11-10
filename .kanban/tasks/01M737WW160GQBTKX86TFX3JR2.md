@@ -31,21 +31,49 @@ comments:
     - `anOrderlyQuit…` has no frame dump yet. It can be the short `running` wait (^bywxxvm).
     - 10 full runs with ACPAgent 89152e3 (the hot-resume fix ^4273b5t) are in progress.
   timestamp: 2026-11-10T19:08:05.044497+00:00
-position_column: todo
-position_ordinal: '8580'
+- actor: claude-code
+  id: 01m73hn7e7zd0d04x42b0ytecy
+  text: |-
+    ### upstream status (2026-11-10, from testudoapp-75)
+    - The prompt-record fix for the `aKilledAgentResumesTheNestedRunWithItsTree` hang is in FoundationModelsAgents e181a24 (^vejnx2n).
+    - ACPAgent card 01M73DP5EY59X102WFGYJJ4MR5 moves ACPAgent to that commit and checks the restore end to end.
+    - next: when that ACPAgent commit is pushed, move the `IntegrationTests/LiveAgentServer` pin to it (`swift package update FoundationModelsACPAgent`). Then run `swift test --package-path IntegrationTests` 10 times, and send the result to foundationmodelsacpagent-ec and testudoapp-75.
+    - The hot-resume order fault is fixed (ACPAgent 89152e3: 10/10 runs pass). `anOrderlyQuit…` still has no frame dump.
+  timestamp: 2026-11-10T20:16:12.743543+00:00
+- actor: claude-code
+  id: 01m73q22dn7t5zww18xc8hhpmr
+  text: |-
+    ### test — red
+    - evidence: 10 runs of `swift test --package-path IntegrationTests` on FoundationModelsACPAgent 4fd6b94, FoundationModelsAgents 609c812, FoundationModelsSkills 1421de4. aKilledAgentResumesTheNestedRunWithItsTree passed 10/10. anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall passed 10/10. aHotResumeKeepsTheRunningChildRunning failed 2/10 (runs 4 and 10). It passed 10/10 on 89152e3.
+    - fault: in the resume replay, the state_update of the child and of the grandchild go out (positions 16, 17) before the subagent_update frames that announce them (18, 19). Rules 3, 2 and 9 fail.
+    - note: Agents 609c812 needs Skills 1421de4 or later (SkillsTool.make with sandboxProbe:).
+    - next: foundationmodelsacpagent-ec has the traces. When a new ACPAgent hash comes, move the pin and run 10 times again.
+  timestamp: 2026-11-10T21:50:36.469714+00:00
+- actor: claude-code
+  id: 01m73smdbxzskn01xpf3smd01d
+  text: |-
+    ### test — green
+    - evidence: 10 of 10 runs of `swift test --package-path IntegrationTests` passed (28/28 each, 1 expected known issue) on FoundationModelsACPAgent d8c0fb1, FoundationModelsAgents 609c812, FoundationModelsSkills 1421de4, FoundationModelsMultitool 558b503. aHotResumeKeepsTheRunningChildRunning 10/10, aKilledAgentResumesTheNestedRunWithItsTree 10/10, anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall 10/10. Logs: scratchpad runs10d.
+    - cause, hangs: a run was announced before its task prompt was recorded, so a kill in that window gave `restoreFailure` "its task prompt was not recorded" and the wait did not end. Fixed in FoundationModelsAgents e181a24 (^vejnx2n).
+    - cause, hot resume order fault: `restoreSession` checked for a live root only after it loaded the session context. In that wait the hold was not in place, so a live state_update of a child went out after the resume request and before the replay announced it. Old fault (d8fa169). Fixed in FoundationModelsACPAgent 934c0b7.
+    - The test code in this repo did not change. No sleep, poll or larger time limit was added. The failure end event of the wait is the frame dump of 62a1bbc.
+    - next: none. The task is done.
+  timestamp: 2026-11-10T22:35:34.653776+00:00
+position_column: done
+position_ordinal: ffb080
 title: 'IntegrationTests: anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall sometimes exceeds its 120 s limit in the full run'
 ---
 ## What
 On 2026-11-10, one full run of `swift test --package-path IntegrationTests` failed. `anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall` in `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/AgentNestedScenarioTests.swift` gave "Time limit was exceeded: 120.000 seconds". The same test alone passed in 29.7 s, and the next full run passed 23/23 in 64.8 s. The code under test did not change between the runs (the change at that time was a refactor of the default methods of `ClientModelExtension`). Find the cause: a slow agent start when the suites run together, a wait with no end event, or contention between the agent processes. Then correct it.
 
 ## Acceptance Criteria
-- [ ] The cause is found and written in the task.
-- [ ] The test does not exceed its limit in 10 full runs in a row of `swift test --package-path IntegrationTests`.
-- [ ] No sleep, poll or larger time limit hides the cause.
+- [x] The cause is found and written in the task.
+- [x] The test does not exceed its limit in 10 full runs in a row of `swift test --package-path IntegrationTests`.
+- [x] No sleep, poll or larger time limit hides the cause.
 
 ## Tests
-- [ ] If the cause is a missing end event, add the event to the wait in `AgentNestedScenarioTests.swift`, so a failure ends at once with a message.
-- [ ] Run `for i in $(seq 10); do swift test --package-path IntegrationTests || break; done` → 10 passes.
+- [x] If the cause is a missing end event, add the event to the wait in `AgentNestedScenarioTests.swift`, so a failure ends at once with a message.
+- [x] Run `for i in $(seq 10); do swift test --package-path IntegrationTests || break; done` → 10 passes.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass. #flaky
