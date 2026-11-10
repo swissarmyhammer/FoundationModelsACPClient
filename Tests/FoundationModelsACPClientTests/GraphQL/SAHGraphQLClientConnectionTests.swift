@@ -131,23 +131,45 @@ private struct RecordedTunnelConnection {
         lines.elements.compactMap { try? JSONDecoder().decode(FrameMethod.self, from: Data($0.utf8)).method }
     }
 
+    /// Makes a connection from its parts. The initializer only assigns the
+    /// stored properties; ``make(initializeMeta:)`` connects and sends
+    /// `initialize`.
+    ///
+    /// - Parameters:
+    ///   - model: The model of the client side.
+    ///   - agentConnection: The agent side of the connection.
+    ///   - lines: Gets each line that the client writes to the agent end.
+    private init(model: ConnectionModel, agentConnection: AgentSideConnection, lines: ThreadSafeBuffer<String>) {
+        self.model = model
+        self.agentConnection = agentConnection
+        self.lines = lines
+    }
+
     /// Connects a new model to a new stub agent, and sends `initialize`.
     ///
     /// - Parameter initializeMeta: The SAH object of the `initialize` answer
     ///   of the agent, or `nil` for an answer with no `_meta`.
-    /// - Throws: The error of the `initialize`.
-    init(initializeMeta: SAH.InitializeMeta?) async throws {
+    /// - Returns: The connection. Disconnect its model in a `defer` right
+    ///   after the call, so the close runs also when the test body throws.
+    /// - Throws: The error of the `initialize`. Before it throws, the call
+    ///   disconnects the model.
+    static func make(initializeMeta: SAH.InitializeMeta?) async throws -> RecordedTunnelConnection {
         let lines = ThreadSafeBuffer<String>()
-        self.lines = lines
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let recordedAgentEnd = FrameRecordingTransport(wrapping: agentEnd) { lines.append($0) }
-        agentConnection = await AgentSideConnection(stream: recordedAgentEnd) { connection in
+        let agentConnection = await AgentSideConnection(stream: recordedAgentEnd) { connection in
             GraphQLTunnelStubAgent(
                 connection: connection, endpointList: [requestEndpoint], initializeMeta: initializeMeta)
         }
-        model = ConnectionModel()
+        let model = ConnectionModel()
         _ = await model.connect(over: clientEnd)
-        _ = try await model.initialize(makeInitializeRequest())
+        do {
+            _ = try await model.initialize(makeInitializeRequest())
+        } catch {
+            await model.disconnect()
+            throw error
+        }
+        return RecordedTunnelConnection(model: model, agentConnection: agentConnection, lines: lines)
     }
 }
 
@@ -242,7 +264,7 @@ struct SAHGraphQLClientConnectionTests {
     }
 
     @Test func endpointsWithASAHObjectSendsTheRequestAndGivesTheLiveList() async throws {
-        let tunnel = try await RecordedTunnelConnection(
+        let tunnel = try await RecordedTunnelConnection.make(
             initializeMeta: SAH.InitializeMeta(graphql: [initializeEndpoint]))
         defer { await tunnel.model.disconnect() }
 
@@ -257,7 +279,7 @@ struct SAHGraphQLClientConnectionTests {
     }
 
     @Test func endpointsWithNoSAHObjectSendsTheRequest() async throws {
-        let tunnel = try await RecordedTunnelConnection(initializeMeta: nil)
+        let tunnel = try await RecordedTunnelConnection.make(initializeMeta: nil)
         defer { await tunnel.model.disconnect() }
 
         let endpoints = try await tunnel.client.endpoints()
