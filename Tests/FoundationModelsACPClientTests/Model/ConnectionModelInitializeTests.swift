@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import Observation
 import Testing
 
 @testable import FoundationModelsACPClient
@@ -104,6 +105,51 @@ enum InitializeFixtures {
         .unsupported(method: ClientRequestSpan.Method.login),
         .unsupported(method: ConnectionModelError.terminalAuthOperation),
     ]
+}
+
+/// The fixtures of the `_meta.sah` tests of the initialize answer.
+enum SAHMetaFixtures {
+    /// An endpoint with a scope that the client knows.
+    static let knownEndpoint = SAH.GraphQL.Endpoint(
+        name: "kanban", version: "1", scope: .sessionFolder, schema: "type Query { board: Int }")
+
+    /// An endpoint with a scope that the client does not know.
+    static let unknownScopeEndpoint = SAH.GraphQL.Endpoint(
+        name: "future", version: "1", scope: SAH.GraphQL.Scope(rawValue: "galaxy"), schema: "type Query { z: Int }")
+
+    /// The client form of ``knownEndpoint``.
+    static let knownClientEndpoint = SAHGraphQLClient.Endpoint(
+        name: "kanban", version: "1", scope: .sessionFolder, schema: "type Query { board: Int }")
+
+    /// The SAH object of an agent with ``knownEndpoint`` and
+    /// ``unknownScopeEndpoint``.
+    static let meta = SAH.InitializeMeta(graphql: [knownEndpoint, unknownScopeEndpoint])
+
+    /// A `_meta` whose `sah` member is not a valid SAH object.
+    static let malformedMeta: JSONValue = .object([SAH.metaKey: .string("not an object")])
+
+    /// The text in the diagnostic of an endpoint that the client leaves out.
+    static let leftOutDiagnostic = "left out the endpoint \"future\""
+
+    /// The text in the diagnostic of a `_meta.sah` that is not valid.
+    static let malformedDiagnostic = "_meta.sah"
+
+    /// Connects a new model to a stub agent that answers `initialize` with a
+    /// `_meta`.
+    ///
+    /// - Parameters:
+    ///   - initializeMeta: The `_meta` of the initialize answer, or `nil`.
+    ///   - messages: Gets each diagnostic of the model.
+    /// - Returns: The connected model.
+    @MainActor
+    static func connect(
+        initializeMeta: JSONValue?,
+        messages: ThreadSafeBuffer<String> = ThreadSafeBuffer()
+    ) async -> ConnectedModel {
+        await ConnectedModel(model: ConnectionModel(logger: ACPLogger { messages.append($0) })) {
+            ScriptedStubAgent(connection: $0, session: testSession, script: [], initializeMeta: initializeMeta)
+        }
+    }
 }
 
 /// The capability flags of a model, in one value, so a test compares them
@@ -309,6 +355,69 @@ struct ConnectionModelInitializeTests {
         #expect(CapabilityFlags(of: connected.model) == .none)
         #expect(connected.model.initializeResponse == nil)
         #expect(connected.model.authState == .unknown)
+    }
+
+    // MARK: - The SAH object of the initialize answer
+
+    @Test func anInitializeWithSAHMetaKeepsTheSAHObjectAndEachKnownEndpoint() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = await SAHMetaFixtures.connect(
+            initializeMeta: try SAHMetaFixtures.meta.inject(into: nil), messages: messages)
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(connected.model.sah == SAHMetaFixtures.meta)
+        #expect(connected.model.graphQLEndpoints == [SAHMetaFixtures.knownClientEndpoint])
+        #expect(messages.elements.filter { $0.contains(SAHMetaFixtures.leftOutDiagnostic) }.count == 1)
+    }
+
+    @Test func anInitializeWithSAHMetaReportsTheChangeOfTheEndpoints() async throws {
+        let connected = await SAHMetaFixtures.connect(initializeMeta: try SAHMetaFixtures.meta.inject(into: nil))
+        defer { await connected.model.disconnect() }
+        let changes = ThreadSafeBuffer<Bool>()
+        withObservationTracking {
+            _ = connected.model.graphQLEndpoints
+        } onChange: {
+            changes.append(true)
+        }
+
+        try await connected.initialize()
+
+        #expect(!changes.elements.isEmpty)
+    }
+
+    @Test func anInitializeWithNoSAHMetaHasNoSAHObjectAndNoEndpoint() async throws {
+        let connected = await SAHMetaFixtures.connect(initializeMeta: nil)
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(connected.model.sah == nil)
+        #expect(connected.model.graphQLEndpoints.isEmpty)
+    }
+
+    @Test func aMalformedSAHMetaGivesNoSAHObjectAndOneDiagnostic() async throws {
+        let messages = ThreadSafeBuffer<String>()
+        let connected = await SAHMetaFixtures.connect(initializeMeta: SAHMetaFixtures.malformedMeta, messages: messages)
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(connected.model.sah == nil)
+        #expect(messages.elements.filter { $0.contains(SAHMetaFixtures.malformedDiagnostic) }.count == 1)
+    }
+
+    @Test func aNewConnectionForgetsTheSAHObjectOfTheLastOne() async throws {
+        let connected = await SAHMetaFixtures.connect(initializeMeta: try SAHMetaFixtures.meta.inject(into: nil))
+        defer { await connected.model.disconnect() }
+        try await connected.initialize()
+        let (clientEnd, _) = InMemoryTransport.pair()
+
+        _ = await connected.model.connect(over: clientEnd)
+
+        #expect(connected.model.sah == nil)
+        #expect(connected.model.graphQLEndpoints.isEmpty)
     }
 
     @Test func initializeWithNoConnectionThrowsClosed() async {

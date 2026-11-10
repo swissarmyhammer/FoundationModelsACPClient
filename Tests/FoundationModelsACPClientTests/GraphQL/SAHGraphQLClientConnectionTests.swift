@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 import Testing
 
@@ -96,6 +97,71 @@ private func subscribeToChanges(on client: SAHGraphQLClient) -> AsyncThrowingStr
     )
 }
 
+/// The `method` member of one JSON-RPC frame.
+private struct FrameMethod: Decodable {
+    /// The method of a request or a notification, or `nil` for a response.
+    let method: String?
+}
+
+/// A connection model to a stub agent that records each frame that the
+/// client writes, in wire order.
+///
+/// The frames prove which `_sah/graphql/endpoints` requests went out, in the
+/// order of the wire.
+@MainActor
+private struct RecordedTunnelConnection {
+    /// The model of the client side.
+    let model: ConnectionModel
+
+    /// The agent side of the connection. The test holds it so the agent end
+    /// of the pair outlives the test body.
+    let agentConnection: AgentSideConnection
+
+    /// Each line that the client wrote to the agent end.
+    private let lines: ThreadSafeBuffer<String>
+
+    /// The client under test, over ``model``.
+    var client: SAHGraphQLClient {
+        SAHGraphQLClient(connection: model)
+    }
+
+    /// The method of each request and notification that the client wrote, in
+    /// wire order.
+    var sentMethods: [String] {
+        lines.elements.compactMap { try? JSONDecoder().decode(FrameMethod.self, from: Data($0.utf8)).method }
+    }
+
+    /// Connects a new model to a new stub agent, and sends `initialize`.
+    ///
+    /// - Parameter initializeMeta: The SAH object of the `initialize` answer
+    ///   of the agent, or `nil` for an answer with no `_meta`.
+    /// - Throws: The error of the `initialize`.
+    init(initializeMeta: SAH.InitializeMeta?) async throws {
+        let lines = ThreadSafeBuffer<String>()
+        self.lines = lines
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let recordedAgentEnd = FrameRecordingTransport(wrapping: agentEnd) { lines.append($0) }
+        agentConnection = await AgentSideConnection(stream: recordedAgentEnd) { connection in
+            GraphQLTunnelStubAgent(
+                connection: connection, endpointList: [requestEndpoint], initializeMeta: initializeMeta)
+        }
+        model = ConnectionModel()
+        _ = await model.connect(over: clientEnd)
+        _ = try await model.initialize(makeInitializeRequest())
+    }
+}
+
+/// The endpoint of the `initialize` answer in the tests of the SAH object. It
+/// is not in the `_sah/graphql/endpoints` answer, so a test can tell the two
+/// lists apart.
+private let initializeEndpoint = SAH.GraphQL.Endpoint(
+    name: "kanban", version: "1", scope: .sessionFolder, schema: "type Query { x: Int }")
+
+/// The only endpoint of the `_sah/graphql/endpoints` answer in the tests of
+/// the SAH object: the live list of the agent.
+private let requestEndpoint = SAH.GraphQL.Endpoint(
+    name: "settings", version: "2", scope: .server, schema: "type Query { y: Int }")
+
 @MainActor
 @Suite("SAHGraphQLClient over an ACP connection")
 struct SAHGraphQLClientConnectionTests {
@@ -173,6 +239,35 @@ struct SAHGraphQLClientConnectionTests {
         let endpoints = try await tunnel.client.endpoints()
 
         #expect(endpoints.map(\.name) == ["settings"])
+    }
+
+    @Test func endpointsWithASAHObjectSendsTheRequestAndGivesTheLiveList() async throws {
+        let tunnel = try await RecordedTunnelConnection(
+            initializeMeta: SAH.InitializeMeta(graphql: [initializeEndpoint]))
+        defer { await tunnel.model.disconnect() }
+
+        let endpoints = try await tunnel.client.endpoints()
+
+        #expect(
+            endpoints == [
+                SAHGraphQLClient.Endpoint(
+                    name: "settings", version: "2", scope: .server, schema: "type Query { y: Int }")
+            ])
+        #expect(tunnel.sentMethods.contains(SAH.GraphQL.Method.endpoints))
+    }
+
+    @Test func endpointsWithNoSAHObjectSendsTheRequest() async throws {
+        let tunnel = try await RecordedTunnelConnection(initializeMeta: nil)
+        defer { await tunnel.model.disconnect() }
+
+        let endpoints = try await tunnel.client.endpoints()
+
+        #expect(
+            endpoints == [
+                SAHGraphQLClient.Endpoint(
+                    name: "settings", version: "2", scope: .server, schema: "type Query { y: Int }")
+            ])
+        #expect(tunnel.sentMethods.contains(SAH.GraphQL.Method.endpoints))
     }
 
     @Test func endpointsOnAClosedConnectionThrowsConnectionClosed() async throws {

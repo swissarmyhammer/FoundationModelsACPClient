@@ -159,9 +159,10 @@ extension ConnectionModel {
 
     /// Sends `initialize` and keeps the answer.
     ///
-    /// The answer sets ``initializeResponse``, each capability flag, and
-    /// ``authState``: ``AuthState/notRequired`` when the agent lists no auth
-    /// method, and ``AuthState/required(_:)`` with the methods otherwise.
+    /// The answer sets ``initializeResponse``, ``sah``,
+    /// ``graphQLEndpoints``, each capability flag, and ``authState``:
+    /// ``AuthState/notRequired`` when the agent lists no auth method, and
+    /// ``AuthState/required(_:)`` with the methods otherwise.
     /// ``initializeResponse`` holds one auth method for each method id; see
     /// ``authMethods``. The call returns the answer as the agent sent it.
     ///
@@ -196,6 +197,7 @@ extension ConnectionModel {
         let sent = await withActor(request)
         let response = try await ClientRequestSpan.send(sent) { try await connection.initialize($0) }
         initializeResponse = keepingOneAuthMethodForEachID(in: response)
+        sah = sahObject(in: response)
         hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
         advertisedElicitation = request.capabilities.elicitation
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
@@ -242,6 +244,27 @@ extension ConnectionModel {
         var sent = request
         sent.meta = .object(members)
         return sent
+    }
+
+    /// Gives the SAH object in `_meta.sah` of an `initialize` answer.
+    ///
+    /// When `_meta.sah` is present but is not a valid SAH object, the call
+    /// logs one diagnostic. A `null` member is the same as no member.
+    ///
+    /// - Parameter response: The answer of the agent.
+    /// - Returns: The SAH object, or `nil` when the agent has no SAH
+    ///   extensions.
+    private func sahObject(in response: InitializeResponse) -> SAH.InitializeMeta? {
+        if let sah = SAH.InitializeMeta.extract(from: response.meta) {
+            return sah
+        }
+        if case .object(let members)? = response.meta, let member = members[SAH.metaKey], member != .null {
+            connectionLogger.log(
+                "ConnectionModel: the _meta.sah of the initialize response is not a valid SAH object, "
+                    + "so the model uses no SAH extension of the agent"
+            )
+        }
+        return nil
     }
 
     /// Gives a copy of an `initialize` answer with one auth method for each

@@ -79,13 +79,7 @@ extension ConnectionModel {
 /// ``SAHGraphQLError/connectionClosed``.
 struct ConnectionGraphQLBackend: SAHGraphQLBackend {
     /// The text that starts each diagnostic of the backend.
-    private static let logPrefix = "SAHGraphQLClient: "
-
-    /// The client scope of each wire scope that the client knows.
-    private static let clientScopes: [SAH.GraphQL.Scope: SAHGraphQLClient.Endpoint.Scope] = [
-        .sessionFolder: .sessionFolder,
-        .server: .server,
-    ]
+    fileprivate static let logPrefix = "SAHGraphQLClient: "
 
     /// The model whose open connection carries each call.
     let model: ConnectionModel
@@ -133,7 +127,7 @@ struct ConnectionGraphQLBackend: SAHGraphQLBackend {
                 SAH.GraphQL.Method.endpoints, SAH.GraphQL.EndpointsRequest(),
                 returning: SAH.GraphQL.EndpointsResponse.self)
         }
-        return response.endpoints.compactMap { Self.clientEndpoint(of: $0, logger: route.logger) }
+        return SAHGraphQLClient.Endpoint.clientEndpoints(of: response.endpoints, logger: route.logger)
     }
 
     /// Routes one subscription and sends `_sah/graphql/subscribe`.
@@ -198,26 +192,6 @@ struct ConnectionGraphQLBackend: SAHGraphQLBackend {
         }
     }
 
-    /// Gives the endpoint of the client for one endpoint of the wire.
-    ///
-    /// - Parameters:
-    ///   - endpoint: The endpoint of the wire.
-    ///   - logger: The diagnostic sink of the connection.
-    /// - Returns: The endpoint, or `nil` when the client does not know its
-    ///   scope. Then the call logs one diagnostic.
-    private static func clientEndpoint(
-        of endpoint: SAH.GraphQL.Endpoint, logger: ACPLogger
-    ) -> SAHGraphQLClient.Endpoint? {
-        guard let scope = clientScopes[endpoint.scope] else {
-            logger.log(
-                logPrefix + "left out the endpoint \"\(endpoint.name)\", because the client does not know its scope "
-                    + "\"\(endpoint.scope.rawValue)\"")
-            return nil
-        }
-        return SAHGraphQLClient.Endpoint(
-            name: endpoint.name, version: endpoint.version, scope: scope, schema: endpoint.schema)
-    }
-
     /// Runs one call on the connection, and gives
     /// ``SAHGraphQLError/connectionClosed`` for a closed connection.
     ///
@@ -231,6 +205,47 @@ struct ConnectionGraphQLBackend: SAHGraphQLBackend {
         } catch ConnectionError.closed {
             throw SAHGraphQLError.connectionClosed
         }
+    }
+}
+
+extension SAHGraphQLClient.Endpoint {
+    /// The client scope of each wire scope that the client knows.
+    private static let clientScopes: [SAH.GraphQL.Scope: Scope] = [
+        .sessionFolder: .sessionFolder,
+        .server: .server,
+    ]
+
+    /// Gives the endpoints of the client for the endpoints of the wire.
+    ///
+    /// The answer of `_sah/graphql/endpoints` and `_meta.sah` of the
+    /// `initialize` answer both use this conversion.
+    ///
+    /// - Parameters:
+    ///   - endpoints: The endpoints of the wire.
+    ///   - logger: The diagnostic sink of the connection.
+    /// - Returns: The endpoints, in wire order. The list leaves out each
+    ///   endpoint whose scope the client does not know, and the call logs one
+    ///   diagnostic for each of them.
+    static func clientEndpoints(of endpoints: [SAH.GraphQL.Endpoint], logger: ACPLogger) -> [Self] {
+        endpoints.compactMap { clientEndpoint(of: $0, logger: logger) }
+    }
+
+    /// Gives the endpoint of the client for one endpoint of the wire.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The endpoint of the wire.
+    ///   - logger: The diagnostic sink of the connection.
+    /// - Returns: The endpoint, or `nil` when the client does not know its
+    ///   scope. Then the call logs one diagnostic.
+    private static func clientEndpoint(of endpoint: SAH.GraphQL.Endpoint, logger: ACPLogger) -> Self? {
+        guard let scope = clientScopes[endpoint.scope] else {
+            logger.log(
+                ConnectionGraphQLBackend.logPrefix
+                    + "left out the endpoint \"\(endpoint.name)\", because the client does not know its scope "
+                    + "\"\(endpoint.scope.rawValue)\"")
+            return nil
+        }
+        return Self(name: endpoint.name, version: endpoint.version, scope: scope, schema: endpoint.schema)
     }
 }
 

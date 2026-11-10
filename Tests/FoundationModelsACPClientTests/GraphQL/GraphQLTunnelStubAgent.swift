@@ -34,8 +34,8 @@ struct GraphQLSubscriptionScript: Sendable {
     var refusal: RequestError?
 }
 
-/// An agent that serves only the `_sah/graphql/*` methods of the GraphQL
-/// tunnel, with fixed answers, and records each call.
+/// An agent that serves `initialize` and the `_sah/graphql/*` methods of the
+/// GraphQL tunnel, with fixed answers, and records each call.
 ///
 /// The session methods of `Agent` answer method-not-found: the GraphQL tests
 /// send no session request.
@@ -56,6 +56,10 @@ final class GraphQLTunnelStubAgent: Agent {
     /// What the agent does for each `_sah/graphql/subscribe`.
     private let subscription: GraphQLSubscriptionScript
 
+    /// The SAH object that the agent sends in `_meta.sah` of its
+    /// `initialize` answer, or `nil` for an answer with no `_meta`.
+    private let initializeMeta: SAH.InitializeMeta?
+
     /// The params of each `_sah/graphql/execute`, in arrival order.
     let executeRequests = ThreadSafeBuffer<SAH.GraphQL.ExecuteRequest>()
 
@@ -74,16 +78,20 @@ final class GraphQLTunnelStubAgent: Agent {
     ///   - endpointList: The answer of each `_sah/graphql/endpoints`.
     ///   - subscription: What the agent does for each
     ///     `_sah/graphql/subscribe`.
+    ///   - initializeMeta: The SAH object of the `initialize` answer, or
+    ///     `nil` for an answer with no `_meta`.
     init(
         connection: AgentSideConnection,
         executeResult: SAH.GraphQL.ExecutionResult = SAH.GraphQL.ExecutionResult(),
         endpointList: [SAH.GraphQL.Endpoint] = [],
-        subscription: GraphQLSubscriptionScript = GraphQLSubscriptionScript()
+        subscription: GraphQLSubscriptionScript = GraphQLSubscriptionScript(),
+        initializeMeta: SAH.InitializeMeta? = nil
     ) {
         self.connection = connection
         self.executeResult = executeResult
         self.endpointList = endpointList
         self.subscription = subscription
+        self.initializeMeta = initializeMeta
     }
 
     var extensionHandlers: ExtensionHandlers {
@@ -156,7 +164,11 @@ final class GraphQLTunnelStubAgent: Agent {
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        throw RequestError.methodNotFound("initialize")
+        InitializeResponse(
+            info: Implementation(name: "graphql-tunnel-stub-agent", version: "1.0.0"),
+            protocolVersion: params.protocolVersion,
+            meta: try initializeMeta?.inject(into: nil)
+        )
     }
 
     func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {

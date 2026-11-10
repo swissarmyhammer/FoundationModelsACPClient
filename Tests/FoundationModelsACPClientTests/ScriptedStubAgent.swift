@@ -277,6 +277,10 @@ final class ScriptedStubAgent: Agent {
     /// leave the member out.
     private let authMethods: [AuthMethod]?
 
+    /// The `_meta` this stub answers `initialize` with, or `nil` to leave the
+    /// member out.
+    private let initializeMeta: JSONValue?
+
     /// The error to refuse each `auth/login` with, or `nil` to accept each
     /// login.
     private let loginError: RequestError?
@@ -371,6 +375,8 @@ final class ScriptedStubAgent: Agent {
     ///   - capabilities: The capabilities to answer `initialize` with.
     ///   - authMethods: The auth methods to answer `initialize` with, or
     ///     `nil` to leave the member out.
+    ///   - initializeMeta: The `_meta` to answer `initialize` with, or `nil`
+    ///     to leave the member out.
     ///   - loginError: The error to refuse each `auth/login` with, or `nil`
     ///     to accept each login.
     ///   - loginGate: The gate that must open before each `auth/login`
@@ -409,6 +415,7 @@ final class ScriptedStubAgent: Agent {
         resumeSessionGate: UpdateGate? = nil,
         capabilities: AgentCapabilities = AgentCapabilities(),
         authMethods: [AuthMethod]? = nil,
+        initializeMeta: JSONValue? = nil,
         loginError: RequestError? = nil,
         loginGate: UpdateGate? = nil,
         logoutError: RequestError? = nil,
@@ -440,6 +447,7 @@ final class ScriptedStubAgent: Agent {
         self.resumeSessionGate = resumeSessionGate
         self.capabilities = capabilities
         self.authMethods = authMethods
+        self.initializeMeta = initializeMeta
         self.loginError = loginError
         self.loginGate = loginGate
         self.logoutError = logoutError
@@ -455,7 +463,8 @@ final class ScriptedStubAgent: Agent {
             info: Implementation(name: "stub-agent", version: "1.0.0"),
             protocolVersion: params.protocolVersion,
             authMethods: authMethods,
-            capabilities: capabilities
+            capabilities: capabilities,
+            meta: initializeMeta
         )
     }
 

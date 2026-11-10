@@ -77,6 +77,34 @@ public final class ConnectionModel {
     /// each method id; see ``authMethods``.
     public internal(set) var initializeResponse: InitializeResponse?
 
+    /// The SAH object in `_meta.sah` of the last `initialize` answer of the
+    /// open connection, or `nil` when the agent has no SAH extensions.
+    ///
+    /// It is `nil` before ``initialize(_:)`` succeeds, and when the answer has
+    /// no valid `_meta.sah`. Each new connection sets it back to `nil`.
+    /// ``graphQLEndpoints`` holds its endpoints: the agent-level endpoints at
+    /// connect. For the live list, which also holds the endpoints of each
+    /// open session, use ``SAHGraphQLClient/endpoints()``.
+    public internal(set) var sah: SAH.InitializeMeta? {
+        didSet { sahDidChange() }
+    }
+
+    /// The GraphQL endpoints of ``sah``, in the form of the client: the
+    /// agent-level endpoints at connect. The list is empty when ``sah`` is
+    /// `nil`.
+    ///
+    /// The list does not change until the next ``initialize(_:)``, and it does
+    /// not hold the endpoints that the tools of a session add, for example
+    /// `kanban`. ``SAHGraphQLClient/endpoints()`` gives the live list. The
+    /// list leaves out each endpoint whose scope the client does not know,
+    /// and the model logs one diagnostic for it.
+    public private(set) var graphQLEndpoints: [SAHGraphQLClient.Endpoint] = []
+
+    /// Sets ``graphQLEndpoints`` from ``sah``. A change of ``sah`` calls it.
+    private func sahDidChange() {
+        graphQLEndpoints = SAHGraphQLClient.Endpoint.clientEndpoints(of: sah?.graphql ?? [], logger: connectionLogger)
+    }
+
     /// The identity of the person that the last ``initialize(_:)`` sent in
     /// the `_meta` of its request, or `nil` before the first
     /// ``initialize(_:)``. A UI can show it.
@@ -360,8 +388,9 @@ public final class ConnectionModel {
     ///
     /// The model never reconnects on its own. After a close, the host can
     /// call this method again with a new transport. Each call forgets the
-    /// `initialize` answer and the auth state of the last connection, so
-    /// each capability flag is `false` until ``initialize(_:)`` runs again.
+    /// `initialize` answer, the SAH object (``sah``), and the auth state of
+    /// the last connection, so each capability flag is `false` until
+    /// ``initialize(_:)`` runs again.
     /// Each call keeps the method of a successful terminal login, so the
     /// next ``initialize(_:)`` can give ``AuthState/authenticated(_:)``.
     /// Each call also cancels each pending elicitation of the last
@@ -389,6 +418,7 @@ public final class ConnectionModel {
         state = .connecting
         connectionGeneration += 1
         initializeResponse = nil
+        sah = nil
         authState = .unknown
         hasAdvertisedTerminalAuth = false
         advertisedElicitation = nil

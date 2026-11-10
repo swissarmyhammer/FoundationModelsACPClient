@@ -14,6 +14,16 @@ import FoundationModelsACP
 /// sample JSON. The calls of this type are the same for the two
 /// initializers, so the client models and the views do not change when the
 /// stub handler changes to the ACP connection.
+///
+/// The endpoints come from two places:
+///
+/// - ``ConnectionModel/sah`` and ``ConnectionModel/graphQLEndpoints`` hold
+///   the agent-level endpoints that the agent sent in `_meta.sah` of the
+///   `initialize` answer. A UI can observe them. They do not change until the
+///   next `initialize`, and they do not hold the endpoints of a session.
+/// - ``endpoints()`` gives the live list of the agent. It always sends
+///   `_sah/graphql/endpoints`, so the list also holds the endpoints that the
+///   tools of an open session add, for example `kanban`.
 public final class SAHGraphQLClient: Sendable {
     /// One GraphQL operation for one endpoint of the server.
     public struct Request: Hashable, Sendable {
@@ -214,6 +224,13 @@ public final class SAHGraphQLClient: Sendable {
     }
 
     /// Lists the endpoints of the server (`_sah/graphql/endpoints`).
+    ///
+    /// The list is the live list of the agent. Over an ACP connection, the
+    /// call always sends `_sah/graphql/endpoints`, also when
+    /// ``ConnectionModel/sah`` is set. Thus the list holds the agent-level
+    /// endpoints and the endpoints that the tools of each open session add.
+    /// ``ConnectionModel/graphQLEndpoints`` holds only the agent-level
+    /// endpoints of the `initialize` answer.
     ///
     /// Over an ACP connection, the list leaves out each endpoint whose scope
     /// the client does not know, and the connection logs one diagnostic for
