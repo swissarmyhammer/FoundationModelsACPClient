@@ -221,4 +221,7 @@ struct HostClient: Client {
 }
 ```
 
-A wrapper that does not forward them gives no message to an extension.
+A wrapper that does not forward them gives no message to an extension. The
+built-in extensions of the model are in them too, so such a wrapper also
+gives no `_sah/graphql/*` notification to a ``SAHGraphQLClient`` over the
+model.

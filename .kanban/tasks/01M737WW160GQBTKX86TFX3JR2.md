@@ -1,6 +1,19 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m73a0wcvxdypzpshdq5t1p52
+  text: 'A sibling test has the same fault. On 2026-11-10, during task ^9fjefgg, `aKilledAgentResumesTheNestedRunWithItsTree` (`AgentNestedRunTests.swift`) gave "Time limit was exceeded: 120.000 seconds" in 2 of 5 full runs of `swift test --package-path IntegrationTests`. The other 3 full runs passed 23/23 in about 70 s. Its suite alone passed 2 of 2, and the test took 2.3 s to 2.6 s each time. In the failed runs the test did its `session/resume` with the replay, and then a wait did not end. The session did not close, so `orFailWhen` did not stop the wait. Fix both tests with the same cause.'
+  timestamp: 2026-11-10T18:02:46.043771+00:00
+- actor: claude-code
+  id: 01m73asrrcnckfsxjnt5pqwmw8
+  text: |-
+    ### more flaky integration tests (2026-11-10)
+    - `aHotResumeKeepsTheRunningChildRunning()` failed in 1 of 3 full runs at HEAD a58423a, and in 1 of 3 runs with the uncommitted work of 01M73039GY. It fails with `Expectation failed: violations.isEmpty` at `AgentNestedScenarioTests.swift:60:9`. The `SubagentWireTraceValidator` reports `announceBeforeUse`, `noHistoricalStateAsCurrent` and `backgroundList` at trace positions 16 and 17 ("an update in <session> before it is announced"). This is an order fault, not a timeout.
+    - `aKilledAgentResumesTheNestedRunWithItsTree` went over its 120 s limit in 2 of 5 full runs during 01M73039GY.
+    - Thus the nested scenario suite fails often in a full run. CI runs this package, so CI can be red when the code is correct. Correct this task before the next big change.
+  timestamp: 2026-11-10T18:16:21.516723+00:00
 position_column: todo
 position_ordinal: '8580'
 title: 'IntegrationTests: anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall sometimes exceeds its 120 s limit in the full run'

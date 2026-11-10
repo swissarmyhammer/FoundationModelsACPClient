@@ -18,6 +18,10 @@ private let notifyMethod = "_test/notify"
 /// The request that the agent sends to the test extensions.
 private let echoMethod = "_test/echo"
 
+/// The result that the agent sends in the `_sah/graphql/next` of the test
+/// of the SAH extension.
+private let sahEvent = SAH.GraphQL.ExecutionResult(data: .object(["changes": .string("c-1")]))
+
 /// The params of `_test/notify` and of `_test/echo`, and the result of
 /// `_test/echo`.
 private struct TestNote: Codable, Equatable, Sendable {
@@ -357,6 +361,24 @@ struct ClientModelExtensionTests {
         defer { await connected.model.disconnect() }
 
         #expect(try await ExtensionFixtures.echo(on: connected, "ping") == TestNote(text: "ping-b"))
+    }
+
+    @Test func aHostExtensionAndTheSAHExtensionBothServeTheirNotificationsOnOneConnection() async throws {
+        let connected = await ExtensionFixtures.connectWithEcho()
+        defer { await connected.model.disconnect() }
+        let sahState = try #require(connected.model.extensionState(SAHGraphQLExtension.self))
+        let id = SAH.GraphQL.SubscriptionId(rawValue: "subscription-1")
+        let (stream, continuation) = AsyncThrowingStream<JSONValue, any Error>.makeStream()
+        try #require(sahState.subscriptions.open(id, continuation))
+
+        try await connected.agentConnection.sendExtensionNotification(
+            SAH.GraphQL.Method.next, SAH.GraphQL.NextNotification(subscriptionId: id, payload: sahEvent))
+        // The read loop handles the notifications in arrival order, so the
+        // `_sah/graphql/next` is handled when the host extension has its note.
+        try await ExtensionFixtures.notify(on: connected, "host")
+        continuation.finish()
+
+        #expect(await stream.collect().elements == [sahEvent.jsonValue])
     }
 }
 

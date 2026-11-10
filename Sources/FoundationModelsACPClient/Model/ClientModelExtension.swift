@@ -185,22 +185,31 @@ extension ClientModelExtension {
 }
 
 /// The extensions that the client models have built in. They serve the `_`
-/// session updates that ``SessionModel`` shows as its own properties.
+/// session updates that ``SessionModel`` shows as its own properties, and the
+/// SAH GraphQL tunnel of the connection.
 ///
 /// ``ConnectionModel`` puts them before each extension of the host, and a
 /// ``SessionModel`` that the host makes with no connection also has them.
 /// Thus each built-in extension sees each update before an extension of the
 /// host.
 enum BuiltInClientModelExtensions {
-    /// The built-in extensions, in order.
-    static var extensions: [any ClientModelExtension] {
-        [MCPServerStatusExtension(), MailDeliveryPauseExtension()]
+    /// Gives the built-in extensions of one connection, in order.
+    ///
+    /// - Parameter connectionLogger: The diagnostic sink of the connection.
+    /// - Returns: The built-in extensions.
+    static func extensions(connectionLogger: ACPLogger) -> [any ClientModelExtension] {
+        [
+            MCPServerStatusExtension(),
+            MailDeliveryPauseExtension(),
+            SAHGraphQLExtension(connectionLogger: connectionLogger),
+        ]
     }
 
     /// The factory of the session state of each built-in extension, in
-    /// order.
+    /// order. A session state logs no diagnostic, so the extensions get no
+    /// logger.
     @MainActor static var sessionFactories: [SessionExtensionFactory] {
-        extensions.map { OpenedSessionExtension.factory(for: $0) }
+        extensions(connectionLogger: .disabled).map { OpenedSessionExtension.factory(for: $0) }
     }
 }
 
@@ -208,6 +217,21 @@ enum BuiltInClientModelExtensions {
 /// connection.
 @MainActor
 final class EmptyExtensionConnectionState {}
+
+/// The session state of an extension that keeps no state for a session.
+@MainActor
+final class EmptyExtensionSessionState {}
+
+/// The default of an extension that keeps no state for a session.
+extension ClientModelExtension where SessionState == EmptyExtensionSessionState {
+    /// Makes a new empty session state.
+    ///
+    /// - Parameter sessionId: The session of the new state.
+    /// - Returns: The new session state.
+    @MainActor func makeSessionState(for sessionId: SessionId) -> EmptyExtensionSessionState {
+        EmptyExtensionSessionState()
+    }
+}
 
 /// The defaults of an extension that keeps no state for the connection, and
 /// thus registers no handler.

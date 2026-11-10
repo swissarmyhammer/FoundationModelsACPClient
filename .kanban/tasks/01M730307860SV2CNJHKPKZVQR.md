@@ -98,10 +98,26 @@ comments:
     - evidence: swift build (only the allowed mlx metal warning); swift test 862 tests in 71 suites passed. Files: Tests/FoundationModelsACPClientTests/Model/SessionModelMailPauseTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelMCPServerStatusTests.swift. The finding is `- [x]`.
     - next: /review
   timestamp: 2026-11-10T17:29:57.712893+00:00
+- actor: claude-code
+  id: 01m738b2519ffpte4wyn6vb0bz
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (a58423a): 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. All prior findings are checked.
+    - next: none. The task is in done.
+  timestamp: 2026-11-10T17:33:22.465470+00:00
+- actor: claude-code
+  id: 01m738bdmykbspc1n72w4xt6vf
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: changed — 2 test files (rollback tests)
+    - test: green — swift test 862/862, IntegrationTests 23/23
+    - commit: a58423a (pushed)
+    - review: clean — 0 findings; task in done
+  timestamp: 2026-11-10T17:33:34.238299+00:00
 depends_on:
 - 01M7302MHW9G50K9NMMQSGVQNH
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ffaa80
 title: 'ACPC-4: move _mcp_server_status and _mail_delivery_paused onto the extension point'
 ---
 ## What

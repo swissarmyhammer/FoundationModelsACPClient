@@ -85,8 +85,10 @@ public final class ConnectionModel {
     /// ``graphQLEndpoints`` holds its endpoints: the agent-level endpoints at
     /// connect. For the live list, which also holds the endpoints of each
     /// open session, use ``SAHGraphQLClient/endpoints()``.
-    public internal(set) var sah: SAH.InitializeMeta? {
-        didSet { sahDidChange() }
+    ///
+    /// The built-in SAH extension of the connection keeps it.
+    public var sah: SAH.InitializeMeta? {
+        extensionState(SAHGraphQLExtension.self)?.sah
     }
 
     /// The GraphQL endpoints of ``sah``, in the form of the client: the
@@ -98,11 +100,10 @@ public final class ConnectionModel {
     /// `kanban`. ``SAHGraphQLClient/endpoints()`` gives the live list. The
     /// list leaves out each endpoint whose scope the client does not know,
     /// and the model logs one diagnostic for it.
-    public private(set) var graphQLEndpoints: [SAHGraphQLClient.Endpoint] = []
-
-    /// Sets ``graphQLEndpoints`` from ``sah``. A change of ``sah`` calls it.
-    private func sahDidChange() {
-        graphQLEndpoints = SAHGraphQLClient.Endpoint.clientEndpoints(of: sah?.graphql ?? [], logger: connectionLogger)
+    ///
+    /// The built-in SAH extension of the connection keeps it.
+    public var graphQLEndpoints: [SAHGraphQLClient.Endpoint] {
+        extensionState(SAHGraphQLExtension.self)?.graphQLEndpoints ?? []
     }
 
     /// The identity of the person that the last ``initialize(_:)`` sent in
@@ -159,17 +160,10 @@ public final class ConnectionModel {
     /// that comes from an earlier connection changes nothing.
     @ObservationIgnored private(set) var connection: ClientSideConnection?
 
-    /// The GraphQL subscriptions of the open connection, or `nil` when no
-    /// connection is open. Each connection gets a new table, because a
-    /// subscription id is unique only for one connection. The close of the
-    /// connection finishes each open subscription with
-    /// ``SAHGraphQLError/connectionClosed``.
-    @ObservationIgnored private(set) var graphQLSubscriptions: SAHGraphQLSubscriptions?
-
-    /// The extensions of the model: the built-in extensions first, and then
-    /// the extensions of the host in the order of ``addExtension(_:)``. The
-    /// model keeps one extension for each type.
-    @ObservationIgnored private var extensions: [any ClientModelExtension]
+    /// The extensions of the host, in the order of ``addExtension(_:)``. The
+    /// model keeps one extension for each type. Each connect puts the
+    /// built-in extensions of the connection before them.
+    @ObservationIgnored private var hostExtensions: [any ClientModelExtension] = []
 
     /// The extensions of the last connection, each with its connection
     /// state, or `nil` before the first connect. Each connect replaces it, so
@@ -365,7 +359,6 @@ public final class ConnectionModel {
         self.now = now
         self.logger = logger
         connectionLogger = logger
-        extensions = BuiltInClientModelExtensions.extensions
         elicitations.didRemove = { [weak self] id in
             self?.clearFrontRequest(ifItIs: id)
         }
@@ -393,9 +386,10 @@ public final class ConnectionModel {
     /// and `elicitationComplete(_:)` to the router: the connection gives each
     /// of them one time, to the served `Client` only, so a wrapper that drops
     /// one leaves the models stale. The wrapper must also give the
-    /// `extensionHandlers` of the router as its own: they serve the
-    /// `_sah/graphql/*` notifications of a ``SAHGraphQLClient`` over this
-    /// model, and each method and notification of each extension that
+    /// `extensionHandlers` of the router as its own: they serve each method
+    /// and notification of each registered extension. These are the
+    /// built-in extensions, which serve the `_sah/graphql/*` notifications
+    /// of a ``SAHGraphQLClient`` over this model, and each extension that
     /// ``addExtension(_:)`` added. A wrapper that does not forward them
     /// gives no message to an extension.
     ///
@@ -435,7 +429,6 @@ public final class ConnectionModel {
         state = .connecting
         connectionGeneration += 1
         initializeResponse = nil
-        sah = nil
         authState = .unknown
         hasAdvertisedTerminalAuth = false
         advertisedElicitation = nil
@@ -445,9 +438,11 @@ public final class ConnectionModel {
         elicitations.arrivalSpace.reset()
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger
-        let subscriptions = SAHGraphQLSubscriptions()
         let generation = connectionGeneration
-        let opening = OpenedExtensions(extensions, connectionLogger: connectionLogger) { [weak self] sessionId in
+        let opening = OpenedExtensions(
+            BuiltInClientModelExtensions.extensions(connectionLogger: connectionLogger) + hostExtensions,
+            connectionLogger: connectionLogger
+        ) { [weak self] sessionId in
             self?.session(for: sessionId, ofConnection: generation)
         }
         openedExtensions = opening
@@ -458,7 +453,6 @@ public final class ConnectionModel {
             ModelClient(
                 model: self,
                 logger: connectionLogger,
-                graphQLSubscriptions: subscriptions,
                 extensionRegistrations: opening.registrations,
                 connectionBox: connectionBox
             )
@@ -471,18 +465,17 @@ public final class ConnectionModel {
         pendingLimits = bufferLimits
         connection = opened
         connectionBox.set(opened)
-        graphQLSubscriptions = subscriptions
         requestWatch = watchOutgoingRequests(of: opened)
         startEventConsumer(on: opened)
         state = .connected
         // The wait for the close runs in a task of its own, never in an
         // inbound handler: the close reason comes only after each inbound
         // handler ended, so a wait inside one never ends. The task closes
-        // the subscriptions and the extensions of its own connection also
-        // when a later connection replaced it in this model.
+        // the extensions of its own connection, and thus its GraphQL
+        // subscriptions, also when a later connection replaced it in this
+        // model.
         Task { [weak self] in
             let reason = await opened.closed
-            subscriptions.closeAll()
             opening.didClose()
             self?.connectionDidClose(opened, because: reason)
         }
@@ -521,10 +514,10 @@ public final class ConnectionModel {
     }
 
     /// Records the close of a connection: sets ``state`` from the reason,
-    /// cancels each pending request-scoped elicitation, finishes each open
-    /// GraphQL subscription with ``SAHGraphQLError/connectionClosed``, gives
-    /// the close to each extension of the connection, and closes each open
-    /// session model.
+    /// cancels each pending request-scoped elicitation, gives the close to
+    /// each extension of the connection, and closes each open session model.
+    /// The close of the built-in SAH extension finishes each open GraphQL
+    /// subscription with ``SAHGraphQLError/connectionClosed``.
     ///
     /// - Parameters:
     ///   - closed: The connection that closed.
@@ -532,8 +525,6 @@ public final class ConnectionModel {
     private func connectionDidClose(_ closed: ClientSideConnection, because reason: ConnectionCloseReason) {
         guard closed === connection else { return }
         connection = nil
-        graphQLSubscriptions?.closeAll()
-        graphQLSubscriptions = nil
         openedExtensions?.didClose()
         connectionGeneration += 1
         state = ConnectionState(closedBecause: reason)
@@ -565,14 +556,16 @@ public final class ConnectionModel {
     /// this call. They take the `_mcp_server_status` and the
     /// `_mail_delivery_paused` updates of each session, so an extension of
     /// this call does not get those updates. It gets each other update.
+    /// They also register the `_sah/graphql/next`, `_sah/graphql/complete`
+    /// and `_sah/graphql/error` notifications of a ``SAHGraphQLClient``.
     ///
     /// - Parameter clientExtension: The extension to add.
     public func addExtension(_ clientExtension: some ClientModelExtension) {
         let key = ObjectIdentifier(type(of: clientExtension))
-        if let position = extensions.firstIndex(where: { ObjectIdentifier(type(of: $0)) == key }) {
-            extensions[position] = clientExtension
+        if let position = hostExtensions.firstIndex(where: { ObjectIdentifier(type(of: $0)) == key }) {
+            hostExtensions[position] = clientExtension
         } else {
-            extensions.append(clientExtension)
+            hostExtensions.append(clientExtension)
         }
         guard connection != nil || state == .connecting else { return }
         connectionLogger.log(

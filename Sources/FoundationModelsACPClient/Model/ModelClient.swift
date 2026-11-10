@@ -78,9 +78,8 @@ struct ModelClient: Client {
     private let logger: ACPLogger
 
     /// The handlers of the `_` extension methods and notifications of the
-    /// agent: the `_sah/graphql/next`, `_sah/graphql/complete` and
-    /// `_sah/graphql/error` handlers of the GraphQL subscriptions, and then
-    /// the handlers of each extension of the model, in the order of
+    /// agent: the handlers of each extension of the connection, in order.
+    /// The built-in extensions come first, and then each extension of
     /// ``ConnectionModel/addExtension(_:)``. When two registrations have the
     /// same name, the later one wins. The connection reads them one time,
     /// when it gets this router.
@@ -95,7 +94,6 @@ struct ModelClient: Client {
     /// - Parameters:
     ///   - model: The model that this router serves.
     ///   - logger: The diagnostic sink of the connection; never stdout.
-    ///   - graphQLSubscriptions: The GraphQL subscriptions of the connection.
     ///   - extensionRegistrations: The handler registration of each extension
     ///     of the model, in order. Each one runs one time, in this
     ///     initializer.
@@ -104,7 +102,6 @@ struct ModelClient: Client {
     init(
         model: ConnectionModel,
         logger: ACPLogger,
-        graphQLSubscriptions: SAHGraphQLSubscriptions,
         extensionRegistrations: [ExtensionRegistration] = [],
         connectionBox: ConnectionBox = ConnectionBox()
     ) {
@@ -112,7 +109,6 @@ struct ModelClient: Client {
         self.logger = logger
         self.connectionBox = connectionBox
         var handlers = ClientModelExtensionHandlers(logger: logger)
-        graphQLSubscriptions.registerHandlers(into: &handlers)
         for register in extensionRegistrations {
             register(&handlers)
         }

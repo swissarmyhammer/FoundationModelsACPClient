@@ -58,16 +58,17 @@ struct SAHGraphQLRoute: Sendable {
 }
 
 extension ConnectionModel {
-    /// The open connection and its GraphQL subscriptions.
+    /// The open connection and its GraphQL subscriptions, from the
+    /// connection state of the built-in ``SAHGraphQLExtension``.
     ///
     /// - Returns: The route of the open connection.
     /// - Throws: ``SAHGraphQLError/connectionClosed`` when no connection is
     ///   open.
     func graphQLRoute() throws -> SAHGraphQLRoute {
-        guard let connection, let graphQLSubscriptions else {
+        guard let connection, let subscriptions = extensionState(SAHGraphQLExtension.self)?.subscriptions else {
             throw SAHGraphQLError.connectionClosed
         }
-        return SAHGraphQLRoute(connection: connection, subscriptions: graphQLSubscriptions, logger: connectionLogger)
+        return SAHGraphQLRoute(connection: connection, subscriptions: subscriptions, logger: connectionLogger)
     }
 }
 

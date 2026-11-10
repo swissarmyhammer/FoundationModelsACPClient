@@ -5,9 +5,9 @@ import Synchronization
 /// keyed by subscription id.
 ///
 /// A subscription id is unique for each connection, so each connection of a
-/// ``ConnectionModel`` gets a new table. The served `Client` of the
-/// connection registers the handlers of the table with
-/// ``registerHandlers(into:)``, and gives them to the connection. Thus each
+/// ``ConnectionModel`` gets a new table, in the connection state of the
+/// built-in ``SAHGraphQLExtension``. The extension registers the handlers
+/// of the table with ``registerHandlers(into:)``. Thus each
 /// `_sah/graphql/next`, `_sah/graphql/complete` and `_sah/graphql/error`
 /// comes to this table, and the table gives it to the stream of its
 /// subscription id:
@@ -42,7 +42,7 @@ final class SAHGraphQLSubscriptions: Sendable {
     private let state = Mutex(State())
 
     /// Registers the handlers of the three notifications of the server, for
-    /// the served `Client` of the connection.
+    /// the ``SAHGraphQLExtension`` of the connection.
     ///
     /// - Parameter handlers: The extension handlers of the connection.
     func registerHandlers(into handlers: inout ClientModelExtensionHandlers) {
