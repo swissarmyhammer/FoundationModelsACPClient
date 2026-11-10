@@ -166,7 +166,16 @@ public final class ConnectionModel {
     /// ``SAHGraphQLError/connectionClosed``.
     @ObservationIgnored private(set) var graphQLSubscriptions: SAHGraphQLSubscriptions?
 
-    /// The generation of the connection: each connect and each recorded
+    /// The extensions of the model, in the order of ``addExtension(_:)``.
+    /// The model keeps one extension for each type.
+    @ObservationIgnored private var extensions: [any ClientModelExtension] = []
+
+    /// The extensions of the last connection, each with its connection
+    /// state, or `nil` before the first connect. Each connect replaces it, so
+    /// a view that reads ``extensionState(_:)`` sees the new state.
+    private(set) var openedExtensions: OpenedExtensions?
+
+
     /// close add 1 to it. A request-scoped elicitation reads it before and
     /// after its wait, so a record of a withdrawal on an earlier connection
     /// never comes into ``withdrawnRequests`` of a later one.
@@ -384,7 +393,13 @@ public final class ConnectionModel {
     /// one leaves the models stale. The wrapper must also give the
     /// `extensionHandlers` of the router as its own: they serve the
     /// `_sah/graphql/*` notifications of a ``SAHGraphQLClient`` over this
-    /// model.
+    /// model, and each method and notification of each extension that
+    /// ``addExtension(_:)`` added. A wrapper that does not forward them
+    /// gives no message to an extension.
+    ///
+    /// Each call makes a new connection state for each extension, before it
+    /// calls `wrap`; see ``extensionState(_:)``. The close of the connection
+    /// gives the close to each extension one time.
     ///
     /// The model never reconnects on its own. After a close, the host can
     /// call this method again with a new transport. Each call forgets the
@@ -429,6 +444,8 @@ public final class ConnectionModel {
         let connectionLogger = logger ?? self.logger
         self.connectionLogger = connectionLogger
         let subscriptions = SAHGraphQLSubscriptions()
+        let opening = OpenedExtensions(extensions, connectionLogger: connectionLogger)
+        openedExtensions = opening
         // The factory of the connection is not main-actor isolated, so the
         // served client is built here, on the main actor, and given ready.
         let connectionBox = ConnectionBox()
@@ -437,6 +454,7 @@ public final class ConnectionModel {
                 model: self,
                 logger: connectionLogger,
                 graphQLSubscriptions: subscriptions,
+                extensionRegistrations: opening.registrations,
                 connectionBox: connectionBox
             )
         )
@@ -455,11 +473,12 @@ public final class ConnectionModel {
         // The wait for the close runs in a task of its own, never in an
         // inbound handler: the close reason comes only after each inbound
         // handler ended, so a wait inside one never ends. The task closes
-        // the subscriptions of its own connection also when a later
-        // connection replaced it in this model.
+        // the subscriptions and the extensions of its own connection also
+        // when a later connection replaced it in this model.
         Task { [weak self] in
             let reason = await opened.closed
             subscriptions.closeAll()
+            opening.didClose()
             self?.connectionDidClose(opened, because: reason)
         }
         return opened
@@ -498,8 +517,9 @@ public final class ConnectionModel {
 
     /// Records the close of a connection: sets ``state`` from the reason,
     /// cancels each pending request-scoped elicitation, finishes each open
-    /// GraphQL subscription with ``SAHGraphQLError/connectionClosed``, and
-    /// closes each open session model.
+    /// GraphQL subscription with ``SAHGraphQLError/connectionClosed``, gives
+    /// the close to each extension of the connection, and closes each open
+    /// session model.
     ///
     /// - Parameters:
     ///   - closed: The connection that closed.
@@ -509,11 +529,62 @@ public final class ConnectionModel {
         connection = nil
         graphQLSubscriptions?.closeAll()
         graphQLSubscriptions = nil
+        openedExtensions?.didClose()
         connectionGeneration += 1
         state = ConnectionState(closedBecause: reason)
         stopWatchingRequests()
         stopEventConsumer()
         closeOpenSessions()
+    }
+
+    // MARK: - Extensions
+
+    /// Adds an extension to the model. See ``ClientModelExtension``.
+    ///
+    /// Each later ``connect(over:logger:bufferLimits:client:)`` makes a new
+    /// connection state for the extension, and serves its handlers. Add each
+    /// extension before the connect: the connection reads its handlers one
+    /// time, when it opens. While a connection is open, the call has no
+    /// effect on that connection, and the model logs one diagnostic. The
+    /// extension then takes effect at the next connect.
+    ///
+    /// The model keeps one extension for each type. An extension of a type
+    /// that the model already holds replaces the earlier extension in its
+    /// position.
+    ///
+    /// The extensions register their handlers in the order of this call.
+    /// When two extensions register the same method or notification, the
+    /// later one wins, and the model logs one diagnostic.
+    ///
+    /// - Parameter clientExtension: The extension to add.
+    public func addExtension(_ clientExtension: some ClientModelExtension) {
+        let key = ObjectIdentifier(type(of: clientExtension))
+        if let position = extensions.firstIndex(where: { ObjectIdentifier(type(of: $0)) == key }) {
+            extensions[position] = clientExtension
+        } else {
+            extensions.append(clientExtension)
+        }
+        guard connection != nil || state == .connecting else { return }
+        connectionLogger.log(
+            "ConnectionModel: the extension \(type(of: clientExtension)) was added while a connection is open; "
+                + "it takes effect at the next connect"
+        )
+    }
+
+    /// Gives the connection state of an extension for the last connection.
+    ///
+    /// Each ``connect(over:logger:bufferLimits:client:)`` makes a new state
+    /// for each extension, so the call gives a new state after each connect.
+    /// After a close, the call gives the state of the closed connection until
+    /// the next connect.
+    ///
+    /// - Parameter extensionType: The type of the extension.
+    /// - Returns: The connection state, or `nil` before the first connect and
+    ///   when the last connect had no extension of that type.
+    public func extensionState<Extension: ClientModelExtension>(
+        _ extensionType: Extension.Type
+    ) -> Extension.ConnectionState? {
+        openedExtensions?.state(of: extensionType)
     }
 
     // MARK: - Ordered events

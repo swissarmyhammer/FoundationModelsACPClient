@@ -101,8 +101,24 @@ comments:
     - evidence: 1 file — Tests/FoundationModelsACPClientTests/GraphQL/SAHGraphQLClientConnectionTests.swift. `swift build` is clean (only the allowed mlx-swift_Cmlx "missing creator" warning). `swift test` passes 816/816 in 68 suites. Nothing is committed.
     - next: /review.
   timestamp: 2026-11-10T16:11:14.604908+00:00
-position_column: review
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m733xg75xtgw3wt7k0tppzq2
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (306beca) — 0 findings (0 confirmed, 1 refuted, 7 attempted, 0 failed). 1 file reviewed: Tests/FoundationModelsACPClientTests/GraphQL/SAHGraphQLClientConnectionTests.swift. The prior finding `swift/initialization` is checked. All items of the description are checked. The option (a) decision comment replaces the "no request" items.
+    - next: none. The task is in done.
+  timestamp: 2026-11-10T16:16:03.813992+00:00
+- actor: claude-code
+  id: 01m733xw9y7jb42rywag561x39
+  text: |-
+    ### finish iteration 3 — clean
+    - implement: changed — 1 file (RecordedTunnelConnection factory)
+    - test: green — swift test 816/816, IntegrationTests 23/23
+    - commit: 306beca (pushed)
+    - review: clean — 0 findings; task in done
+  timestamp: 2026-11-10T16:16:16.190649+00:00
+position_column: done
+position_ordinal: ffa780
 title: ConnectionModel reads the SAH endpoint list from _meta.sah of initialize, and SAHGraphQLClient.endpoints() uses it
 ---
 ## What

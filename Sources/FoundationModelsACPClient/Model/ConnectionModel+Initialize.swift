@@ -188,12 +188,18 @@ extension ConnectionModel {
     /// `request` is not a JSON object, the model keeps it as it is, adds no
     /// actor, and logs one warning. ``actor`` gets the actor that goes out.
     ///
+    /// After a successful `initialize`, the model gives the answer, as the
+    /// agent sent it, to ``ClientModelExtension/didInitialize(_:state:)`` of
+    /// each extension of the connection that sent the request, in the order
+    /// of ``addExtension(_:)``.
+    ///
     /// - Parameter request: The initialize request.
     /// - Returns: The answer of the agent.
     /// - Throws: `ConnectionError.closed` when no connection is open, or the
     ///   error of the connection.
     public func initialize(_ request: InitializeRequest) async throws -> InitializeResponse {
         let connection = try openConnection()
+        let extensionsOfConnection = openedExtensions
         let sent = await withActor(request)
         let response = try await ClientRequestSpan.send(sent) { try await connection.initialize($0) }
         initializeResponse = keepingOneAuthMethodForEachID(in: response)
@@ -201,6 +207,7 @@ extension ConnectionModel {
         hasAdvertisedTerminalAuth = request.capabilities.auth?.terminal != nil
         advertisedElicitation = request.capabilities.elicitation
         authState = takePendingTerminalLogin().map(AuthState.authenticated) ?? AuthState(advertising: authMethods)
+        extensionsOfConnection?.didInitialize(response)
         return response
     }
 

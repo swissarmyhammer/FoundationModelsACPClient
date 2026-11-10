@@ -77,10 +77,14 @@ struct ModelClient: Client {
     /// The diagnostic sink of the connection; never stdout.
     private let logger: ACPLogger
 
-    /// The GraphQL subscriptions of the connection. The router gives each
-    /// `_sah/graphql/next`, `_sah/graphql/complete` and `_sah/graphql/error`
-    /// of the agent to this table.
-    private let graphQLSubscriptions: SAHGraphQLSubscriptions
+    /// The handlers of the `_` extension methods and notifications of the
+    /// agent: the `_sah/graphql/next`, `_sah/graphql/complete` and
+    /// `_sah/graphql/error` handlers of the GraphQL subscriptions, and then
+    /// the handlers of each extension of the model, in the order of
+    /// ``ConnectionModel/addExtension(_:)``. When two registrations have the
+    /// same name, the later one wins. The connection reads them one time,
+    /// when it gets this router.
+    let extensionHandlers: ExtensionHandlers
 
     /// The open connection, for the highest event sequence at the start of a
     /// handler.
@@ -92,25 +96,27 @@ struct ModelClient: Client {
     ///   - model: The model that this router serves.
     ///   - logger: The diagnostic sink of the connection; never stdout.
     ///   - graphQLSubscriptions: The GraphQL subscriptions of the connection.
+    ///   - extensionRegistrations: The handler registration of each extension
+    ///     of the model, in order. Each one runs one time, in this
+    ///     initializer.
     ///   - connectionBox: Holds the open connection. A router with no
     ///     connection waits for no event.
     init(
         model: ConnectionModel,
         logger: ACPLogger,
         graphQLSubscriptions: SAHGraphQLSubscriptions,
+        extensionRegistrations: [ExtensionRegistration] = [],
         connectionBox: ConnectionBox = ConnectionBox()
     ) {
         self.model = model
         self.logger = logger
-        self.graphQLSubscriptions = graphQLSubscriptions
         self.connectionBox = connectionBox
-    }
-
-    /// The handlers of the `_sah/graphql/next`, `_sah/graphql/complete` and
-    /// `_sah/graphql/error` notifications of the agent. The connection reads
-    /// them one time, when it gets this router.
-    var extensionHandlers: ExtensionHandlers {
-        graphQLSubscriptions.extensionHandlers
+        var handlers = ClientModelExtensionHandlers(logger: logger)
+        graphQLSubscriptions.registerHandlers(into: &handlers)
+        for register in extensionRegistrations {
+            register(&handlers)
+        }
+        extensionHandlers = handlers.handlers
     }
 
     /// Ignores the update. The session model reads it from its subscription.
