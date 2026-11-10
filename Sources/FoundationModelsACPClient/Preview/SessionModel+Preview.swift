@@ -65,7 +65,9 @@ extension SessionModel {
     ///     extensions as a live update does. Thus a
     ///     ``PreviewTranscriptItem/update(_:)`` item with an `_` update that
     ///     an extension takes sets sample data in its state. A preview can
-    ///     also set the state that ``extensionState(_:)`` gives.
+    ///     also set the state that ``extensionState(_:)`` gives. The
+    ///     built-in extensions of the model come before these extensions,
+    ///     as in a connection.
     /// - Returns: The model.
     public static func preview(
         sessionId: SessionId = previewSessionId,
@@ -85,10 +87,11 @@ extension SessionModel {
             coalescingCadence: .zero,
             clock: PreviewClock(),
             now: { previewDate },
-            extensionFactories: extensions.map { OpenedSessionExtension.factory(for: $0) }
+            extensionFactories: BuiltInClientModelExtensions.sessionFactories
+                + extensions.map { OpenedSessionExtension.factory(for: $0) }
         )
         model.cwd = cwd
-        model.setMCPServers(mcpServers)
+        model.extensionState(MCPServerStatusExtension.self)?.replaceServers(with: mcpServers)
         model.applyLastValues(availableCommands: availableCommands, configOptions: configOptions)
         for (position, item) in transcript.enumerated() {
             item.add(to: model, at: position)

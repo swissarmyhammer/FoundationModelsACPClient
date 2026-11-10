@@ -73,10 +73,9 @@ extension ConnectionModel {
             }
         }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
-        // The list goes in before the stream task of the model can fold an
-        // update, so a status update that the agent sends after the response
-        // always finds it.
-        session.setMCPServers(sent.mcpServers ?? [])
+        // The MCP server list goes in before the stream task of the model can
+        // fold an update, so a status update that the agent sends after the
+        // response always finds it.
         session.sessionExtensions.didStartSession(sent)
         session.setWorkspace(of: sent)
         session.seed(availableCommands: response.availableCommands, configOptions: response.configOptions)
@@ -329,9 +328,11 @@ extension ConnectionModel {
         // The agent sends the status of its MCP servers after the response,
         // so the list of the request must be in the model before the request
         // goes out. A list set after the response could erase those statuses.
+        // A resume with no history keeps the session states of the
+        // extensions, and makes no replay rollback. Thus a refused request
+        // gives the earlier list back here.
         let mcpServersBeforeResume = session.mcpServers
         session.beginReplay(replayFrom: request.replayFrom)
-        session.setMCPServers(request.mcpServers ?? [])
         session.sessionExtensions.didStartSession(request)
         let resumeStarts = watchResumeStarts(of: connection, for: session)
         defer { resumeStarts.cancel() }

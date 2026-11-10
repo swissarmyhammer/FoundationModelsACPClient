@@ -166,9 +166,10 @@ public final class ConnectionModel {
     /// ``SAHGraphQLError/connectionClosed``.
     @ObservationIgnored private(set) var graphQLSubscriptions: SAHGraphQLSubscriptions?
 
-    /// The extensions of the model, in the order of ``addExtension(_:)``.
-    /// The model keeps one extension for each type.
-    @ObservationIgnored private var extensions: [any ClientModelExtension] = []
+    /// The extensions of the model: the built-in extensions first, and then
+    /// the extensions of the host in the order of ``addExtension(_:)``. The
+    /// model keeps one extension for each type.
+    @ObservationIgnored private var extensions: [any ClientModelExtension]
 
     /// The extensions of the last connection, each with its connection
     /// state, or `nil` before the first connect. Each connect replaces it, so
@@ -364,6 +365,7 @@ public final class ConnectionModel {
         self.now = now
         self.logger = logger
         connectionLogger = logger
+        extensions = BuiltInClientModelExtensions.extensions
         elicitations.didRemove = { [weak self] id in
             self?.clearFrontRequest(ifItIs: id)
         }
@@ -558,6 +560,11 @@ public final class ConnectionModel {
     /// The extensions register their handlers in the order of this call.
     /// When two extensions register the same method or notification, the
     /// later one wins, and the model logs one diagnostic.
+    ///
+    /// The built-in extensions of the model come before each extension of
+    /// this call. They take the `_mcp_server_status` and the
+    /// `_mail_delivery_paused` updates of each session, so an extension of
+    /// this call does not get those updates. It gets each other update.
     ///
     /// - Parameter clientExtension: The extension to add.
     public func addExtension(_ clientExtension: some ClientModelExtension) {
@@ -823,8 +830,9 @@ public final class ConnectionModel {
 
     /// Makes the model of a session, with the coalescing cadence, the clock,
     /// the wall clock, the diagnostic sink, and a new session state for each
-    /// extension of this connection. The model is not open until
-    /// ``register(_:)`` adds it.
+    /// extension of this connection. Before the first connect, the model gets
+    /// a session state for each built-in extension only. The model is not
+    /// open until ``register(_:)`` adds it.
     ///
     /// The model tells this connection model each change of its
     /// ``SessionModel/sessionInfo``, so the item of the session in
@@ -842,7 +850,7 @@ public final class ConnectionModel {
             clock: clock,
             now: now,
             logger: connectionLogger,
-            extensionFactories: openedExtensions?.sessionFactories ?? []
+            extensionFactories: openedExtensions?.sessionFactories ?? BuiltInClientModelExtensions.sessionFactories
         )
         model.sessionInfoDidChange = { [weak self] sessionId, info in
             self?.patchListedSession(sessionId, with: info)

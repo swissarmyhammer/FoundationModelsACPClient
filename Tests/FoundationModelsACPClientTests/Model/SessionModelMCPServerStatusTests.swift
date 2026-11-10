@@ -122,7 +122,7 @@ private enum StatusFixtures {
     @MainActor
     static func modelWithClientServers() -> SessionModel {
         let model = SessionModelFixtures.immediateModel()
-        model.setMCPServers([docsServer, filesServer])
+        model.extensionState(MCPServerStatusExtension.self)?.replaceServers(with: [docsServer, filesServer])
         return model
     }
 
@@ -344,5 +344,29 @@ struct SessionModelMCPServerStatusTests {
         model.apply(update)
 
         #expect(await tap.next() == update)
+    }
+
+    // MARK: - Observation and the built-in extension
+
+    @Test func anObserverOfTheListGetsTheItemOfANewServer() async throws {
+        let model = StatusFixtures.modelWithClientServers()
+        let update = try StatusFixtures.searchUpdate(transport: "http", status: "connected")
+        // The task runs on the main actor after the wait starts to track the
+        // list, so only the observation of the change ends the wait. No other
+        // event can tell that the observation never comes: a wrong model
+        // makes this wait hang (a known limit of rule T1).
+        let change = Task { model.apply(update) }
+
+        try await waitForObservation(until: { model.mcpServers.count == 3 }, orFailWhen: noFailureEvent)
+
+        await change.value
+    }
+
+    @Test func theListIsInTheSessionStateOfTheBuiltInExtension() throws {
+        let model = SessionModelFixtures.immediateModel()
+
+        model.apply(try StatusFixtures.searchUpdate(transport: "http", status: "connected"))
+
+        #expect(model.extensionState(MCPServerStatusExtension.self)?.servers.map(\.name) == [StatusFixtures.searchName])
     }
 }

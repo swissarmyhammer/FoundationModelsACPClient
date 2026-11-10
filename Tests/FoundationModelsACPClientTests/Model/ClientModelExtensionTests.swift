@@ -501,6 +501,21 @@ private struct RecordingExtension: ClientModelExtension {
 /// The shared setup of the session part.
 @MainActor
 private enum SessionExtensionFixtures {
+    /// The name of the MCP server of ``configServerStatus``.
+    nonisolated static let configServerName = "search"
+
+    /// An `_mcp_server_status` update of a server that only the
+    /// configuration of the agent gives. The built-in MCP server extension
+    /// takes it.
+    nonisolated static let configServerStatus = SessionUpdate.unknown(
+        "_mcp_server_status",
+        .object([
+            "name": .string(configServerName),
+            "origin": .string("config"),
+            "status": .string("connected"),
+        ])
+    )
+
     /// Makes an `_` session update with a text.
     ///
     /// - Parameters:
@@ -778,6 +793,32 @@ extension ClientModelExtensionTests {
             }
 
             #expect(try SessionExtensionFixtures.status(of: connected.root) === before)
+        }
+
+        // MARK: - Built-in extensions
+
+        @Test func aHostExtensionOfAPreviewDoesNotGetAnUpdateThatABuiltInExtensionTook() throws {
+            let model = SessionExtensionFixtures.model(with: [RecordingExtension()])
+
+            model.apply(SessionExtensionFixtures.configServerStatus)
+
+            #expect(try #require(model.extensionState(RecordingExtension.self)).seen.isEmpty)
+        }
+
+        @Test func aHostExtensionOfTheConnectionDoesNotGetAnUpdateThatABuiltInExtensionTook() async throws {
+            let connected = try await ResumeConnection.make(extensions: [RecordingExtension()])
+            defer { await connected.model.disconnect() }
+            let root = connected.root
+
+            try await connected.agent.send(SessionExtensionFixtures.configServerStatus)
+            try await waitForObservation {
+                root.mcpServers.contains { $0.name == SessionExtensionFixtures.configServerName }
+            } orFailWhen: {
+                root.isClosed
+            }
+
+            let seen = try #require(root.extensionState(RecordingExtension.self)).seen
+            #expect(!seen.contains(SessionExtensionFixtures.configServerStatus))
         }
     }
 }

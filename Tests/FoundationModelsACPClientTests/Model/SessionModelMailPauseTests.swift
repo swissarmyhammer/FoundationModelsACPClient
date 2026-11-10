@@ -236,4 +236,28 @@ struct SessionModelMailPauseTests {
 
         #expect(model.mailDeliveryPause == expectedPause)
     }
+
+    // MARK: - Observation and the built-in extension
+
+    @Test func anObserverOfThePauseGetsTheClearOfAUserMessage() async throws {
+        let model = SessionModelFixtures.immediateModel()
+        model.apply(pauseUpdate())
+        // The task runs on the main actor after the wait starts to track the
+        // pause, so only the observation of the change ends the wait. No
+        // other event can tell that the observation never comes: a wrong
+        // model makes this wait hang (a known limit of rule T1).
+        let change = Task { model.apply(userChunk(text: "next", message: "user-2")) }
+
+        try await waitForObservation(until: { model.mailDeliveryPause == nil }, orFailWhen: noFailureEvent)
+
+        await change.value
+    }
+
+    @Test func thePauseIsInTheSessionStateOfTheBuiltInExtension() {
+        let model = SessionModelFixtures.immediateModel()
+
+        model.apply(pauseUpdate())
+
+        #expect(model.extensionState(MailDeliveryPauseExtension.self)?.pause == expectedPause)
+    }
 }

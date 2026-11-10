@@ -29,15 +29,18 @@ import Observation
 /// ``transcript``: it is a live event, so the start of a resume and the close
 /// clear the list.
 ///
-/// The `_mcp_server_status` extension update of the agent is the one update
-/// that does not go to the engine: it sets the status of one item of
-/// ``mcpServers``, and it adds no transcript entry.
-///
 /// Each ``ClientModelExtension`` of the connection keeps one session state
 /// in the model; ``extensionState(_:)`` gives it. The model gives each update
 /// to the extensions first, in order. An update that an extension takes
 /// changes only the state of that extension: it does not go to the engine,
 /// and it adds no transcript entry.
+///
+/// Two built-in extensions come before each extension of the host. The MCP
+/// server extension takes each `_mcp_server_status` update: the update sets
+/// the status of one item of ``mcpServers``. The mail pause extension takes
+/// each `_mail_delivery_paused` update: the update sets
+/// ``mailDeliveryPause``. These two properties read the session states of
+/// the built-in extensions.
 ///
 /// The model also holds the pending permission requests and the pending
 /// session-scoped elicitations of the session, as ``pendingPermissions`` and
@@ -198,7 +201,16 @@ public final class SessionModel: Identifiable {
     /// schema revision does not know also gets its item this way, with no
     /// transport when the agent does not know the transport either. These
     /// updates add no transcript entry.
-    public internal(set) var mcpServers: [MCPServerItem] = []
+    ///
+    /// The list is the session state of the built-in MCP server extension.
+    /// The value is observable: an observer sees each change of the list and
+    /// each new session state of a replay with history. A model with no
+    /// built-in MCP server extension has an empty list, and a write to it
+    /// changes nothing.
+    public internal(set) var mcpServers: [MCPServerItem] {
+        get { extensionState(MCPServerStatusExtension.self)?.servers ?? [] }
+        set { extensionState(MCPServerStatusExtension.self)?.servers = newValue }
+    }
 
     /// The last pause of the mail delivery that the agent reported, or `nil`
     /// when the mail delivery of the session is not paused.
@@ -209,9 +221,22 @@ public final class SessionModel: Identifiable {
     /// Thus the model clears the value when ``prompt(_:meta:)`` sends a
     /// prompt, and when it folds a user message after the pause: the echo of
     /// a prompt, a prompt of another client of the session, or a user
-    /// message of a replay. A replay keeps the value until it gives a later
-    /// user message, and the close keeps it.
-    public internal(set) var mailDeliveryPause: MailDeliveryPause?
+    /// message of a replay.
+    ///
+    /// A replay with history starts with no pause, because it gives each
+    /// update of the session again: a replayed pause sets the value again,
+    /// and a later replayed user message clears it. A failed replay gives the
+    /// earlier value back. A resume with no history and the close keep the
+    /// value.
+    ///
+    /// The value is the session state of the built-in mail pause extension.
+    /// It is observable: an observer sees each change. A model with no
+    /// built-in mail pause extension has no pause, and a write to it changes
+    /// nothing.
+    public internal(set) var mailDeliveryPause: MailDeliveryPause? {
+        get { extensionState(MailDeliveryPauseExtension.self)?.pause }
+        set { extensionState(MailDeliveryPauseExtension.self)?.pause = newValue }
+    }
 
     /// Whether the connection discarded updates of this session before the
     /// model subscribed. When this value is `true`, the transcript can lack
@@ -447,7 +472,9 @@ public final class SessionModel: Identifiable {
     ///   - logger: The diagnostic sink of the connection of the session;
     ///     never stdout.
     ///   - extensionFactories: Makes the session state of each extension of
-    ///     the connection, in the order of ``ConnectionModel/addExtension(_:)``.
+    ///     the connection, in order: the built-in extensions, and then the
+    ///     extensions of ``ConnectionModel/addExtension(_:)``. The default is
+    ///     the built-in extensions only.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
@@ -455,7 +482,7 @@ public final class SessionModel: Identifiable {
         clock: any Clock<Duration> = ContinuousClock(),
         now: @escaping @Sendable () -> Date = Date.init,
         logger: ACPLogger = .disabled,
-        extensionFactories: [SessionExtensionFactory] = []
+        extensionFactories: [SessionExtensionFactory] = BuiltInClientModelExtensions.sessionFactories
     ) {
         self.sessionId = sessionId
         sessionExtensions = SessionExtensions(extensionFactories, for: sessionId)
@@ -546,14 +573,10 @@ public final class SessionModel: Identifiable {
     ///
     /// Each update goes to the extensions first, in order. An update that an
     /// extension takes goes nowhere else. The buffered chunks come through
-    /// here in the same order, so each extension sees the arrival order.
-    ///
-    /// An `_mcp_server_status` update never goes to the engine, because the
-    /// engine makes an unknown transcript entry from it. A valid one changes
-    /// ``mcpServers``, and an update that ``MCPServerStatusUpdate`` ignores
-    /// changes nothing. A `_mail_delivery_paused` update never goes to the
-    /// engine either: a valid one sets ``mailDeliveryPause``. Each user
-    /// message clears ``mailDeliveryPause``.
+    /// here in the same order, so each extension sees the arrival order. The
+    /// built-in extensions take the `_mcp_server_status` and the
+    /// `_mail_delivery_paused` updates, so the engine makes no unknown
+    /// transcript entry from them.
     ///
     /// - Parameter updates: The updates to fold, in arrival order.
     func fold(_ updates: [SessionUpdate]) {
@@ -566,35 +589,14 @@ public final class SessionModel: Identifiable {
     /// Folds one update, and gives the change of the engine.
     ///
     /// The update goes to the extensions first. An update that an extension
-    /// takes gives no change. An `_mcp_server_status` update goes to
-    /// ``applyMCPServerStatus(_:)`` and a `_mail_delivery_paused` update goes
-    /// to ``mailDeliveryPause``, and not to the engine, so they give no
-    /// change. Each other update goes to the prompt correlator and then to
-    /// the engine.
+    /// takes gives no change. Each other update goes to the prompt correlator
+    /// and then to the engine.
     ///
     /// - Parameter update: The update to fold.
     /// - Returns: The change of the engine, or `nil` for an update that an
-    ///   extension took, and for an `_mcp_server_status` or a
-    ///   `_mail_delivery_paused` update.
+    ///   extension took.
     private func engineChange(folding update: SessionUpdate) -> SessionMergeEngine.Change? {
         guard !sessionExtensions.take(update) else { return nil }
-        guard !MCPServerStatusUpdate.isStatusUpdate(update) else {
-            if let status = MCPServerStatusUpdate.decode(update) {
-                applyMCPServerStatus(status)
-            }
-            return nil
-        }
-        guard !MailDeliveryPause.isPauseUpdate(update) else {
-            if let pause = MailDeliveryPause.decode(update) {
-                mailDeliveryPause = pause
-            }
-            return nil
-        }
-        if case .userMessage = update {
-            mailDeliveryPause = nil
-        } else if case .userMessageChunk = update {
-            mailDeliveryPause = nil
-        }
         if let link = promptCorrelator.observe(update) {
             linkPrompt(link)
         }
@@ -618,19 +620,6 @@ public final class SessionModel: Identifiable {
         }
     }
 
-    /// Replaces ``mcpServers`` with the servers that the client sends in a
-    /// `session/new` or `session/resume` request.
-    ///
-    /// Each HTTP or stdio server gives one ``MCPServerOrigin/client`` item,
-    /// in request order, with the status ``MCPServerStatus/notReported``. A
-    /// server with a transport that this schema revision does not know gives
-    /// no item.
-    ///
-    /// - Parameter servers: The `mcpServers` field of the request.
-    func setMCPServers(_ servers: [MCPServer]) {
-        mcpServers = servers.compactMap(MCPServerItem.init(clientServer:))
-    }
-
     /// Replaces ``cwd`` and ``additionalDirectories`` with the values of a
     /// `session/new` or `session/resume` request that the agent accepted.
     ///
@@ -643,34 +632,17 @@ public final class SessionModel: Identifiable {
         additionalDirectories = request.additionalDirectories ?? []
     }
 
-    /// Applies one `_mcp_server_status` update of the agent to
-    /// ``mcpServers``.
-    ///
-    /// The update replaces the status of the item with its name, and no other
-    /// item changes. The item keeps its transport, also when the update has
-    /// no transport. When no item has that name, the update appends a new
-    /// item with the name, the transport, the origin and the status of the
-    /// update, and with no configuration: the client does not have the
-    /// configuration of that server.
-    ///
-    /// - Parameter update: The decoded status update.
-    func applyMCPServerStatus(_ update: MCPServerStatusUpdate) {
-        guard let item = mcpServers.first(where: { $0.name == update.name }) else {
-            mcpServers.append(MCPServerItem(statusUpdate: update))
-            return
-        }
-        item.status = update.status
-    }
-
     /// The state that a replay with history clears, kept aside until the
     /// outcome of the resume is known. A failed resume gives it back.
     ///
     /// The rollback also keeps the session state objects of the extensions.
     /// A replay with history makes a new session state for each extension,
     /// because the replay gives each update of the session again, and a
-    /// failed replay puts the earlier state objects back. The rollback does
-    /// not keep ``mcpServers``: a refused request of
-    /// ``ConnectionModel/resumeSession(_:)`` gives the earlier list back.
+    /// failed replay puts the earlier state objects back, so it also gives
+    /// back ``mcpServers`` and ``mailDeliveryPause``. A resume with no
+    /// history makes no rollback: a refused request of
+    /// ``ConnectionModel/resumeSession(_:)`` gives the earlier
+    /// ``mcpServers`` back itself.
     struct ReplayRollback {
         fileprivate var transcript: [TranscriptEntry]
         fileprivate var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry]

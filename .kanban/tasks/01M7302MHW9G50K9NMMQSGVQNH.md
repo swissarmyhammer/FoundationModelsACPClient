@@ -42,10 +42,26 @@ comments:
     - evidence: swift build (only the allowed mlx metal warning); swift test 854/71 passed; swift test --package-path IntegrationTests 23/5 passed; card filter 70 passed. 14 files plus 1 new file (Model/OpenedSessionExtensions.swift).
     - next: /review
   timestamp: 2026-11-10T16:50:34.842087+00:00
+- actor: claude-code
+  id: 01m73660vzzbp2ep9e7281mxtc
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (43739d7): 0 findings, 0 confirmed, 3 refuted, 14 attempted, 0 failed. 13 files reviewed. Not reviewed: 4 .kanban files (ignore rule), WritingAClientModelExtension.md (no validator matches).
+    - next: none. The task moves to done.
+  timestamp: 2026-11-10T16:55:40.159384+00:00
+- actor: claude-code
+  id: 01m7366nngmvq9s44k4rpqaqz9
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 15 files (1 new)
+    - test: green — swift test 854/854, IntegrationTests 23/23
+    - commit: 43739d7 (pushed)
+    - review: clean — 0 findings; task in done
+  timestamp: 2026-11-10T16:56:01.456382+00:00
 depends_on:
 - 01M73027HMPC6MQ49AQ9QHD8D7
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ffa980
 title: 'ACPC-4: ClientModelExtension, the session part (state on each SessionModel, `_` session updates)'
 ---
 ## What

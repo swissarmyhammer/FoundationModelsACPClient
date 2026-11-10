@@ -122,6 +122,12 @@ public protocol ClientModelExtension: Sendable {
     /// the rules of the model, as with no extension: an `_` update that the
     /// model does not know becomes an ``UnknownEntry``.
     ///
+    /// The built-in extensions of the model get each update before the
+    /// extensions of ``ConnectionModel/addExtension(_:)``. They take each
+    /// `_mcp_server_status` update for ``SessionModel/mcpServers`` and each
+    /// `_mail_delivery_paused` update for ``SessionModel/mailDeliveryPause``.
+    /// Thus an extension of the host does not get these two updates.
+    ///
     /// The default gives `false`.
     ///
     /// - Parameters:
@@ -177,6 +183,31 @@ extension ClientModelExtension {
     ///   - request: The request that started the session.
     @MainActor public func didStartSession(state: SessionState, mcpServers request: any MCPServerListRequest) {}
 }
+
+/// The extensions that the client models have built in. They serve the `_`
+/// session updates that ``SessionModel`` shows as its own properties.
+///
+/// ``ConnectionModel`` puts them before each extension of the host, and a
+/// ``SessionModel`` that the host makes with no connection also has them.
+/// Thus each built-in extension sees each update before an extension of the
+/// host.
+enum BuiltInClientModelExtensions {
+    /// The built-in extensions, in order.
+    static var extensions: [any ClientModelExtension] {
+        [MCPServerStatusExtension(), MailDeliveryPauseExtension()]
+    }
+
+    /// The factory of the session state of each built-in extension, in
+    /// order.
+    @MainActor static var sessionFactories: [SessionExtensionFactory] {
+        extensions.map { OpenedSessionExtension.factory(for: $0) }
+    }
+}
+
+/// The connection state of an extension that keeps no state for the
+/// connection.
+@MainActor
+final class EmptyExtensionConnectionState {}
 
 /// Finds the model of a session of one connection on the main actor.
 typealias ExtensionSessionLookup = @MainActor @Sendable (SessionId) -> SessionModel?

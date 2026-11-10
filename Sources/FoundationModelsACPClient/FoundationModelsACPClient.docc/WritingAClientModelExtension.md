@@ -134,8 +134,13 @@ extension StatusExtension {
 
 Obey these rules:
 
-- The extension sees each update, also each standard update, in arrival
-  order. A buffered chunk comes after each update that arrived before it.
+- The extension sees each update that no built-in extension takes, also each
+  standard update, in arrival order. A buffered chunk comes after each update
+  that arrived before it.
+- The built-in extensions of the model get each update first. They take the
+  `_mcp_server_status` updates for ``SessionModel/mcpServers`` and the
+  `_mail_delivery_paused` updates for ``SessionModel/mailDeliveryPause``, so
+  an extension of the host does not see these two updates.
 - The extensions get the update in the order of
   ``ConnectionModel/addExtension(_:)``. The first extension that gives `true`
   takes the update. A later extension does not get it, and the model adds no
