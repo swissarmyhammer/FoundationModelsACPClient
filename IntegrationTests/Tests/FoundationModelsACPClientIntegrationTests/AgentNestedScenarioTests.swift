@@ -26,13 +26,14 @@ private let nestedSessionCount = 2
 private let childAMarker = "CHILD-A-MARKER"
 private let childBMarker = "CHILD-B-MARKER"
 
-/// A started agent process, the model over its traced connection, and the
-/// trace.
+/// A started agent process and its traced connection.
 @MainActor
 private struct TracedRun {
+    /// The agent process.
     let process: AgentProcess
-    let trace: TraceTransport
-    let model: ConnectionModel
+
+    /// The traced connection to the process: the trace and the model.
+    let connected: TracedConnection
 
     /// Starts an agent process, connects a model over a traced transport, and
     /// initializes it.
@@ -45,13 +46,13 @@ private struct TracedRun {
     static func start(_ run: NestedRun, connection: String) async throws -> TracedRun {
         let process = try await run.startAgent()
         let connected = try await run.connect(over: process, connection: connection)
-        return TracedRun(process: process, trace: connected.trace, model: connected.model)
+        return TracedRun(process: process, connected: connected)
     }
 
     /// Ends the agent process and closes the connection.
     func cleanUp() async {
         process.shutdown()
-        await model.disconnect()
+        await connected.model.disconnect()
     }
 
     /// Checks the recorded trace against the wire rules. The issue of a
@@ -59,7 +60,7 @@ private struct TracedRun {
     ///
     /// - Parameter sourceLocation: The place that an issue names.
     func expectValidTrace(sourceLocation: SourceLocation = #_sourceLocation) {
-        trace.expectValidTrace(sourceLocation: sourceLocation)
+        connected.trace.expectValidTrace(sourceLocation: sourceLocation)
     }
 }
 
@@ -160,7 +161,7 @@ private func startSession(
 @MainActor
 private func openSession(_ run: NestedRun) async throws -> (TracedRun, SessionModel) {
     let started = try await TracedRun.start(run, connection: firstConnection)
-    let session = try await started.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
+    let session = try await started.connected.model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
     return (started, session)
 }
 
@@ -174,7 +175,7 @@ private func openSession(_ run: NestedRun) async throws -> (TracedRun, SessionMo
 @MainActor
 private func resumeInNewProcess(_ run: NestedRun, rootId: SessionId) async throws -> (TracedRun, SessionModel) {
     let second = try await TracedRun.start(run, connection: secondConnection)
-    let session = try await NestedRun.resumeRoot(second.model, run, sessionId: rootId)
+    let session = try await NestedRun.resumeRoot(second.connected.model, run, sessionId: rootId)
     return (second, session)
 }
 
@@ -244,7 +245,7 @@ struct AgentNestedScenarioTests {
         // first. Cancel only when the second child is a background item of the
         // root. With only background work left, a root cancel sends no state
         // update, so the test does not wait for an idle root.
-        try await started.trace.waitForIncomingFrame(containing: "scripted-call-2")
+        try await started.connected.trace.waitForIncomingFrame(containing: "scripted-call-2")
         try await session.cancel()
         #expect(second.workState == .running)
         #expect(!second.isClosed)
@@ -336,7 +337,7 @@ struct AgentNestedScenarioTests {
         defer { await started.cleanUp() }
 
         // The same connection resumes the live session from the start.
-        let resumed = try await NestedRun.resumeRoot(started.model, run, sessionId: rootId)
+        let resumed = try await NestedRun.resumeRoot(started.connected.model, run, sessionId: rootId)
         #expect(resumed === session)
         #expect(!resumed.isReplaying)
         try await waitUntil({ session.descendants.count == nestedSessionCount }, orFailWhen: { session.isClosed })
@@ -362,7 +363,7 @@ struct AgentNestedScenarioTests {
         // The cleanup is idempotent: it covers a throw before the manual end.
         defer { await first.cleanUp() }
         first.process.shutdown()
-        await first.model.disconnect()
+        await first.connected.model.disconnect()
 
         // The definition of the child is gone when the agent starts again.
         try FileManager.default.removeItem(
@@ -398,7 +399,7 @@ struct AgentNestedScenarioTests {
         let pid = try #require(first.process.processIdentifier)
         kill(pid, SIGTERM)
         _ = try await first.process.waitForExit()
-        await first.model.disconnect()
+        await first.connected.model.disconnect()
         first.expectValidTrace()
 
         let (second, session) = try await resumeInNewProcess(run, rootId: rootId)
