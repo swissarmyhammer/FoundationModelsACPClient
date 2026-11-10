@@ -22,6 +22,15 @@ comments:
     - The two hangs (`anOrderlyQuit…`, `aKilledAgentResumes…`) are a cold resume in a new process. ACPAgent card ^bywxxvm. Probable cause (about 70% sure, no repro): after the restart, the restored scripted run gets the "process stopped" continue prompt. Thus the grandchild echoes it and goes idle at once. The test waits for the short `running` state, and no condition ends that wait. Probable fix in this repo: wait for `running` OR a later state, and give the wait a failure event.
     - The "session/update send failed" warnings are sends to the closed old connection. They fail at once and do not block.
   timestamp: 2026-11-10T18:59:21.576002+00:00
+- actor: claude-code
+  id: 01m73drfhmah7xg7tm5yptx2vn
+  text: |-
+    ### diagnosis of aKilledAgentResumesTheNestedRunWithItsTree (2026-11-10)
+    - The frame dump (commit 62a1bbc) shows that the grandchild comes back with `restoreFailure` "its task prompt was not recorded". The kill came after the grandchild was announced and running, but before its task prompt was recorded.
+    - foundationmodelsacpagent-ec: this is an agent fault (a run is announced and runs before its task prompt is recorded). Do NOT change the test to accept a restoreFailure: a run that the user saw running must come back after a kill. The preferred fix is in FoundationModelsAgents (record the prompt before the announcement). The fallback is in ACPAgent (give `prompts:` from the recorded `agents` call). They track it on an ACPAgent card.
+    - `anOrderlyQuit…` has no frame dump yet. It can be the short `running` wait (^bywxxvm).
+    - 10 full runs with ACPAgent 89152e3 (the hot-resume fix ^4273b5t) are in progress.
+  timestamp: 2026-11-10T19:08:05.044497+00:00
 position_column: todo
 position_ordinal: '8580'
 title: 'IntegrationTests: anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall sometimes exceeds its 120 s limit in the full run'

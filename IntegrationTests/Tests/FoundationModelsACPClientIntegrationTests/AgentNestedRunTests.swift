@@ -74,7 +74,7 @@ struct AgentNestedRunTests {
             defer { try? FileManager.default.removeItem(at: run.root) }
             let agentProcess = try await run.startAgent()
             defer { agentProcess.shutdown() }
-            let model = try await run.connect(over: agentProcess, connection: firstConnection)
+            let model = try await run.connect(over: agentProcess, connection: firstConnection).model
             defer { await model.disconnect() }
             let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
             let closed: @MainActor () -> Bool = { sessionEnded(session) }
@@ -125,7 +125,7 @@ struct AgentNestedRunTests {
             let run = try NestedRun.make()
             defer { try? FileManager.default.removeItem(at: run.root) }
             let first = try await run.startAgent()
-            let firstModel = try await run.connect(over: first, connection: firstConnection)
+            let firstModel = try await run.connect(over: first, connection: firstConnection).model
             let firstSession = try await firstModel.newSession(
                 NewSessionRequest(cwd: AbsolutePath(rawValue: run.workspace.path)))
             _ = try await firstSession.prompt([.text(TextContent(text: rootMarker))])
@@ -138,7 +138,7 @@ struct AgentNestedRunTests {
 
             let second = try await run.startAgent()
             defer { second.shutdown() }
-            let model = try await run.connect(over: second, connection: secondConnection)
+            let model = try await run.connect(over: second, connection: secondConnection).model
             defer { await model.disconnect() }
             let session = try await model.resumeSession(
                 ResumeSessionRequest(

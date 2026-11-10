@@ -44,9 +44,8 @@ private struct TracedRun {
     /// - Throws: The error of the start or of `initialize`.
     static func start(_ run: NestedRun, connection: String) async throws -> TracedRun {
         let process = try await run.startAgent()
-        let trace = TraceTransport(wrapping: process.transport, connection: connection)
-        let model = try await connectedModel(over: trace, clientName: nestedClientName)
-        return TracedRun(process: process, trace: trace, model: model)
+        let connected = try await run.connect(over: process, connection: connection)
+        return TracedRun(process: process, trace: connected.trace, model: connected.model)
     }
 
     /// Ends the agent process and closes the connection.

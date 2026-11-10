@@ -94,15 +94,19 @@ struct NestedRun {
     /// and initializes it. In a test with the ``WireFramesOnIssueTrait``, an
     /// issue of the test holds the last frames of the connection.
     ///
+    /// This is the one trace-and-connect step of the nested tests.
+    ///
     /// - Parameters:
     ///   - process: The agent process.
     ///   - connection: The name of the connection in the text of an issue.
-    /// - Returns: The connected model, after `initialize`.
+    /// - Returns: The trace of the connection, and the connected model after
+    ///   `initialize`.
     /// - Throws: The error of `initialize`.
     @MainActor
-    func connect(over process: AgentProcess, connection: String) async throws -> ConnectionModel {
-        try await connectedModel(
-            over: TraceTransport(wrapping: process.transport, connection: connection), clientName: nestedClientName)
+    func connect(over process: AgentProcess, connection: String) async throws -> TracedConnection {
+        let trace = TraceTransport(wrapping: process.transport, connection: connection)
+        let model = try await connectedModel(over: trace, clientName: nestedClientName)
+        return TracedConnection(trace: trace, model: model)
     }
 
     /// Opens a gate by name: the pass that waits for it goes on.
@@ -119,6 +123,17 @@ struct NestedRun {
     func openGate() throws {
         try openGate(named: "grandchild")
     }
+}
+
+/// A connection model over a traced transport: the trace of the frames, and
+/// the model.
+@MainActor
+struct TracedConnection {
+    /// The transport that records the frames of the connection.
+    let trace: TraceTransport
+
+    /// The connected model, after `initialize`.
+    let model: ConnectionModel
 }
 
 /// The builders of the stub script JSON.
