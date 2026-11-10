@@ -20,7 +20,9 @@ public enum IntegrationAgentHome {
     ///
     /// A custom home keeps the user layer in its synced root and the hook
     /// data in its local root, so the agent reads and writes no folder of
-    /// the real home.
+    /// the real home. The projects folder is the
+    /// `AgentHome.projectsFolderName` folder of the synced root, as the
+    /// `acp-agent` executable of FoundationModelsACPAgent puts it.
     ///
     /// - Parameters:
     ///   - stateDirectory: The state directory of the launch.
@@ -28,9 +30,11 @@ public enum IntegrationAgentHome {
     /// - Returns: The home.
     /// - Throws: The error of the directory creation or of the file write.
     public static func make(under stateDirectory: URL, userConfigYAML: String) throws -> AgentHome {
+        let synced = stateDirectory.appending(path: "user", directoryHint: .isDirectory)
         let home = AgentHome.makeCustom(
-            synced: stateDirectory.appending(path: "user", directoryHint: .isDirectory),
-            local: stateDirectory.appending(path: "local", directoryHint: .isDirectory))
+            synced: synced,
+            local: stateDirectory.appending(path: "local", directoryHint: .isDirectory),
+            projects: synced.appending(path: AgentHome.projectsFolderName, directoryHint: .isDirectory))
         try FileManager.default.createDirectory(at: home.synced, withIntermediateDirectories: true)
         try userConfigYAML.write(
             to: home.synced.appending(path: ConfigurationLoader.configFileName),

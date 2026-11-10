@@ -110,7 +110,7 @@ let package = Package(
         .executableTarget(
             name: serverProductName,
             dependencies: [.target(name: supportTargetName)]
-                + familyProducts([wirePackageName, agentPackageName, routerPackageName]),
+                + familyProducts([wirePackageName, agentPackageName, routerPackageName, extrasPackageName]),
             path: "Sources/\(serverProductName)"
         ),
         .executableTarget(
@@ -122,3 +122,16 @@ let package = Package(
         ),
     ]
 )
+
+// FoundationModelsRouter links llama.cpp through C++ modules (`LlamaCppCore`,
+// `LlamaCppCommon`, `LlamaCppMtmd`), which declare `requires cplusplus`. A
+// Swift target that imports a C++ module, directly or through a dependency,
+// must build with C++ interoperability, or the dependency scanner fails with
+// "module 'LlamaCppCore' requires feature 'cplusplus'". Each target here
+// reaches the router through FoundationModelsACPAgent, so each target takes
+// the mode, as the manifests of FoundationModelsRouter and
+// FoundationModelsACPAgent require of each consumer.
+// sah:allow duplication SwiftPM builds each manifest alone and a manifest cannot import a shared Swift file, so this loop is a known pair of the C++ interop loop of each family manifest
+for target in package.targets where target.type != .plugin {
+    target.swiftSettings = (target.swiftSettings ?? []) + [.interoperabilityMode(.Cxx)]
+}

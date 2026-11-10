@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModelsACP
 import FoundationModelsACPAgent
+import FoundationModelsExtras
 import FoundationModelsRouter
 import LiveAgentServerSupport
 
@@ -95,6 +96,7 @@ enum LiveAgentServer {
             hooks: hooks,
             configuration: configuration,
             home: home,
+            mode: .open,
             environment: [:])
     }
 }

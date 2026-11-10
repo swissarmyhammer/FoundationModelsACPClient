@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModelsACP
+import FoundationModelsExtras
 import FoundationModelsKanban
 import LiveAgentServerSupport
 
@@ -45,6 +46,7 @@ enum GraphQLTunnelServer {
             name: try DotfolderName(agentName),
             workingDirectory: arguments.workingDirectory,
             home: home,
+            mode: .open,
             environment: [:],
             modelSource: .stub)
         let board = try await KanbanHost.shared.session(workingDirectory: arguments.workingDirectory, actor: agentName)

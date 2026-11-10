@@ -32,11 +32,27 @@ comments:
     - evidence: 8 files. New: Sources/FoundationModelsACPClient/GraphQL/SAHGraphQLExtension.swift. Changed: GraphQL/ConnectionGraphQLBackend.swift, GraphQL/SAHGraphQLSubscriptions.swift, Model/ClientModelExtension.swift, Model/ConnectionModel.swift, Model/ConnectionModel+Initialize.swift, Model/ModelClient.swift, FoundationModelsACPClient.docc/WritingAClientModelExtension.md, Tests/.../Model/ClientModelExtensionTests.swift (1 new test). `swift build`: clean. `swift test`: 863/863 passed in each of the last 6 full runs. 2 earlier full runs each had 1 failure from the race of ^dfepvfb, which was already in the code. `swift test --package-path IntegrationTests`: 23/23 passed in the last 2 full runs. 2 earlier full runs had `aKilledAgentResumesTheNestedRunWithItsTree` over its 120 s limit, the same kind of fault as 01M737WW16; I recorded it there. No existing assertion changed.
     - next: /review. The task stays in doing.
   timestamp: 2026-11-10T18:02:49.937161+00:00
+- actor: claude-code
+  id: 01m73avt7wqeqx10x83gqb6sp7
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (4f95d2f): 0 findings (confirmed 0, refuted 0, attempted 7, failed 0). 8 files reviewed. 10 .kanban files ignored. The docc WritingAClientModelExtension.md file has no validator.
+    - next: none. The task is in done.
+  timestamp: 2026-11-10T18:17:28.572263+00:00
+- actor: claude-code
+  id: 01m73awpef0gp677ntr11r9r0c
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 9 files (1 new)
+    - test: green — swift test 863/863 x3; IntegrationTests 2 of 3 runs pass, 1 failure aHotResumeKeepsTheRunningChildRunning, which also fails 1 of 3 at HEAD (ACPAgent ^4273b5t, ACPClient 01M737WW16)
+    - commit: 4f95d2f (pushed)
+    - review: clean — 0 findings; task in done
+  timestamp: 2026-11-10T18:17:57.455678+00:00
 depends_on:
 - 01M73027HMPC6MQ49AQ9QHD8D7
 - 01M7301R14HFNZGPCXSBQJT8CS
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ffab80
 title: 'ACPC-4: move the SAH GraphQL tunnel (SAHGraphQLSubscriptions and _meta.sah) onto the extension point'
 ---
 ## What
