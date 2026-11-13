@@ -408,7 +408,8 @@ struct AgentNestedScenarioTests {
         defer { await second.cleanUp() }
         try await waitUntil({ session.descendants.count == nestedSessionCount }, orFailWhen: { session.isClosed })
         let (child, grandchild) = try childAndGrandchild(of: session)
-        try await waitUntil({ grandchild.workState == .running }, orFailWhen: { session.isClosed })
+        try await waitUntil(
+            { grandchild.workState == .running }, orFailWhen: { session.isClosed || isIdle(grandchild) })
 
         // The interrupted runs continue, and the original agents call ends.
         try run.openGate()

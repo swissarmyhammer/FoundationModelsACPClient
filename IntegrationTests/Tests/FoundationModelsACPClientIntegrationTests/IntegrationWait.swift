@@ -49,15 +49,13 @@ func waitUntil(
     guard condition() else { throw WaitEndedOnFailure(location: "\(fileID):\(line)") }
 }
 
-/// The failure event of a wait for the `running` state of a session in a
-/// fresh run: the session is idle. A child that has no confirmed state is
-/// `.unknown`, not idle, so a state of a replay never ends the wait. In a
-/// fresh run, a child that is idle before it runs does not run again without
-/// a new prompt, so a wait for `running` cannot succeed after it.
-///
-/// Do not use it after a cold resume. There, the current snapshot of a
-/// restored child is `idle` with `_meta.noWork`, and the restored run goes to
-/// `running` after it.
+/// The failure event of a wait for the `running` state of a session: the
+/// session is idle. A child that has no confirmed state is `.unknown`, not
+/// idle, so a state of a replay never ends the wait. A child that is idle
+/// before it runs does not run again without a new prompt, so a wait for
+/// `running` cannot succeed after it. After a cold resume, the agent gives a
+/// restored run that it drives again as `running` from its current snapshot
+/// on, with no `idle` before it.
 ///
 /// - Parameter session: The session that the wait watches.
 /// - Returns: `true` when the work state of the session is idle.

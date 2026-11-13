@@ -158,7 +158,7 @@ struct AgentNestedRunTests {
             try await waitUntil({ child.isWorkStateConfirmed && grandchild.isWorkStateConfirmed }, orFailWhen: closed)
 
             // 9. The interrupted runs continue when the gate opens.
-            try await waitUntil({ grandchild.workState == .running }, orFailWhen: closed)
+            try await waitUntil({ grandchild.workState == .running }, orFailWhen: { closed() || isIdle(grandchild) })
             try run.openGate()
 
             // 10. The original agents call completes, and the children leave.
