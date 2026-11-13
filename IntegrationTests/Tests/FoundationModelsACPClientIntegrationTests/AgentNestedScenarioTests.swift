@@ -221,7 +221,9 @@ struct AgentNestedScenarioTests {
         try await waitUntil({ session.children.count == siblingCount }, orFailWhen: ended)
         let first = try #require(session.children.first)
         let second = try #require(session.children.last)
-        try await waitUntil({ first.workState == .running && second.workState == .running }, orFailWhen: ended)
+        try await waitUntil(
+            { first.workState == .running && second.workState == .running },
+            orFailWhen: { ended() || isIdle(first) || isIdle(second) })
 
         // The cancel of the first child: it goes idle with the stop reason
         // `cancelled`, its tool call ends, and its sibling and the root go on.

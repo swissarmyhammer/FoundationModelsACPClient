@@ -91,7 +91,7 @@ struct AgentNestedRunTests {
             #expect(session.descendants.map(\.sessionId) == [child.sessionId, grandchild.sessionId])
 
             // 3. The grandchild runs while it waits at the gate.
-            try await waitUntil({ grandchild.workState == .running }, orFailWhen: closed)
+            try await waitUntil({ grandchild.workState == .running }, orFailWhen: { closed() || isIdle(grandchild) })
 
             // 4. The agents call of the root links the child.
             try await waitUntil({
