@@ -47,6 +47,62 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// The `_meta` field of the tool call.
     public internal(set) var meta: JSONValue?
 
+    /// The completion token of the background run of this tool call, from
+    /// `_meta.sah.backgroundRun.completionToken`, or `nil` when the call is
+    /// not a background run.
+    ///
+    /// The agent keeps a background call `in_progress` with this marker
+    /// until the work really ends. Then it sends the final status on the same
+    /// tool call id. Thus a call with a token and no final status is still
+    /// busy: the return of the start of the work is not the end of the call.
+    /// The value follows ``meta``, so it is observable.
+    public var backgroundRun: String? {
+        guard case .object(let members)? = meta,
+              case .object(let sah)? = members[SAH.metaKey],
+              case .object(let run)? = sah[Self.backgroundRunKey],
+              case .string(let token)? = run[Self.completionTokenKey]
+        else { return nil }
+        return token
+    }
+
+    /// The `_meta.sah` member name of the background run marker.
+    private static let backgroundRunKey = "backgroundRun"
+
+    /// The member name of the completion token in the background run marker.
+    private static let completionTokenKey = "completionToken"
+
+    /// The session that holds this entry in its transcript, or `nil` for an
+    /// entry that no session holds. It does not change after the session
+    /// appends the entry.
+    @ObservationIgnored weak var session: SessionModel?
+
+    /// Whether the agent no longer tracks this tool call, but the call has
+    /// no final status.
+    ///
+    /// The value is `true` for a call that has no final status when one of
+    /// these conditions is true:
+    ///
+    /// - The session is closed, for example because the connection to the
+    ///   agent ended.
+    /// - The session is idle, and its ``SessionModel/background`` list does
+    ///   not hold this call. An idle state that does not report background
+    ///   work holds no call.
+    ///
+    /// A UI uses this value to stop the busy indicator of a call that will
+    /// never get its final status. A call with a final status is never
+    /// stale. An entry that no session holds is not stale. The value is
+    /// observable.
+    public var isStale: Bool {
+        if let status, status.isFinal { return false }
+        guard let session else { return false }
+        if session.isClosed { return true }
+        guard case .idle = session.agentState else { return false }
+        let listed = (session.background ?? []).contains { work in
+            if case .toolCall(let call) = work { call.toolCallId == toolCallId } else { false }
+        }
+        return !listed
+    }
+
     /// The child session that this tool call started, from the
     /// `_meta.sah.agentRun` link of the tool call, or `nil` when the call has
     /// no link or the child was removed. The value is observable, so a view

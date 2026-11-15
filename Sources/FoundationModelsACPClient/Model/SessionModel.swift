@@ -139,6 +139,23 @@ public final class SessionModel: Identifiable {
     /// `StopReason.unknown`.
     public internal(set) var agentState: StateUpdate?
 
+    /// The background work of the session: the `background` list of
+    /// ``agentState``.
+    ///
+    /// `nil` means that the last state does not report background work, or
+    /// that the agent did not report a state. `nil` does not mean that no
+    /// work runs. An empty list means that no background work runs. A tool
+    /// call in this list is still busy when the session is idle. See
+    /// ``ToolCallEntry/isStale``.
+    public var background: [BackgroundWork]? {
+        switch agentState {
+        case .running(let state): state.background
+        case .idle(let state): state.background
+        case .requiresAction(let state): state.background
+        case .unknown, nil: nil
+        }
+    }
+
     /// The session information, folded as a patch. A field that no update
     /// gave stays `.unchanged`.
     public private(set) var sessionInfo = SessionInfoUpdate()
@@ -820,6 +837,9 @@ public final class SessionModel: Identifiable {
     /// - Parameter entry: The engine entry.
     private func appendWireEntry(_ entry: FoundationModelsACP.SessionEntry) {
         let object = TranscriptEntry(wire: entry)
+        if case .toolCall(let toolCall) = object {
+            toolCall.session = self
+        }
         wireEntries[entry.id] = object
         attachUnresolvedElicitationLinks(to: object)
         if !isReplayingHistory {
