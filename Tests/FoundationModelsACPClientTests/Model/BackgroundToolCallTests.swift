@@ -98,7 +98,7 @@ struct BackgroundToolCallTests {
         #expect(call.isStale)
     }
 
-    @Test func anIdleStateWithNoBackgroundReportMakesTheCallStale() throws {
+    @Test func anIdleStateWithNoBackgroundMemberMakesTheCallStale() throws {
         let model = timedModel()
 
         model.apply(startedInBackground)
@@ -153,7 +153,10 @@ struct BackgroundToolCallTests {
 
     @Test func theSessionGivesTheBackgroundListOfItsState() {
         let model = timedModel()
-        #expect(model.background == nil)
+        #expect(model.background == [])
+
+        model.apply(idle(background: nil))
+        #expect(model.background == [])
 
         model.apply(idle(background: listedCall))
         #expect(model.background == listedCall)

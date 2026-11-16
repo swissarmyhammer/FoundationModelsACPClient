@@ -142,18 +142,19 @@ public final class SessionModel: Identifiable {
     /// The background work of the session: the `background` list of
     /// ``agentState``.
     ///
-    /// `nil` means that the last state does not report background work, or
-    /// that the agent did not report a state. `nil` does not mean that no
-    /// work runs. An empty list means that no background work runs. A tool
-    /// call in this list is still busy when the session is idle. See
+    /// A state with no `background` member has no background work, the same
+    /// as an empty list. A session with no state also has no background
+    /// work. The model does not keep a different value for "not reported".
+    /// A tool call in this list is still busy when the session is idle. See
     /// ``ToolCallEntry/isStale``.
-    public var background: [BackgroundWork]? {
-        switch agentState {
+    public var background: [BackgroundWork] {
+        let list: [BackgroundWork]? = switch agentState {
         case .running(let state): state.background
         case .idle(let state): state.background
         case .requiresAction(let state): state.background
         case .unknown, nil: nil
         }
+        return list ?? []
     }
 
     /// The session information, folded as a patch. A field that no update

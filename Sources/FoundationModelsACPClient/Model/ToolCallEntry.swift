@@ -85,8 +85,8 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// - The session is closed, for example because the connection to the
     ///   agent ended.
     /// - The session is idle, and its ``SessionModel/background`` list does
-    ///   not hold this call. An idle state that does not report background
-    ///   work holds no call.
+    ///   not hold this call. An idle state with no `background` member has
+    ///   no background work, so it holds no call. Then all work is done.
     ///
     /// A UI uses this value to stop the busy indicator of a call that will
     /// never get its final status. A call with a final status is never
@@ -97,7 +97,7 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
         guard let session else { return false }
         if session.isClosed { return true }
         guard case .idle = session.agentState else { return false }
-        let listed = (session.background ?? []).contains { work in
+        let listed = session.background.contains { work in
             if case .toolCall(let call) = work { call.toolCallId == toolCallId } else { false }
         }
         return !listed
