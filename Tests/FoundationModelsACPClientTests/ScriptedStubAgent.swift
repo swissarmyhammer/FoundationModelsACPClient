@@ -59,7 +59,8 @@ import Synchronization
 /// client answered, which is how a test proves that a headless client
 /// refuses at once rather than waiting for a person. A stub built with a
 /// permission request asks for that permission first, in the same way, and
-/// records the outcome of the answer in ``permissionOutcomes``.
+/// records the outcome of the answer in ``permissionOutcomes``. The stub
+/// records each answer to its elicitation in ``elicitationResponses``.
 ///
 /// A stub built with a prompt error refuses each prompt with that error, and
 /// sends no update. `ContentSafetyTests` uses it to prove that the message
@@ -200,6 +201,15 @@ final class ScriptedStubAgent: Agent {
     /// answer order.
     var permissionOutcomes: [RequestPermissionOutcome] {
         permissionOutcomeRecord.elements
+    }
+
+    /// The record that ``elicitationResponses`` reads.
+    private let elicitationResponseRecord = ThreadSafeBuffer<CreateElicitationResponse>()
+
+    /// The answer of the client to each elicitation of this stub, in answer
+    /// order.
+    var elicitationResponses: [CreateElicitationResponse] {
+        elicitationResponseRecord.elements
     }
 
     /// The error to refuse each prompt with, or `nil` to answer each prompt.
@@ -572,7 +582,8 @@ final class ScriptedStubAgent: Agent {
             permissionOutcomeRecord.append(response.outcome)
         }
         if let elicitation {
-            _ = try await connection.createElicitation(elicitation)
+            let response = try await connection.createElicitation(elicitation)
+            elicitationResponseRecord.append(response)
         }
         for update in script {
             try await send(update)

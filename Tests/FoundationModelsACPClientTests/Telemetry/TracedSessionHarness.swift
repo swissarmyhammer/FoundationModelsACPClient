@@ -137,6 +137,7 @@ struct TracedSessionHarness {
     ///   - promptError: The error the stub refuses the prompt with, or `nil`
     ///     to answer the prompt.
     ///   - closeSessionError: The error the stub answers `session/close` with.
+    ///   - logger: The diagnostic sink of the connection model.
     init(
         prompt: String = tracedPromptText,
         cwd: String? = nil,
@@ -146,7 +147,8 @@ struct TracedSessionHarness {
         permissionRoute: PermissionRoute = .decline,
         elicitation: CreateElicitationRequest? = nil,
         promptError: RequestError? = nil,
-        closeSessionError: RequestError = .methodNotFound(ClientRequestSpan.Method.closeSession)
+        closeSessionError: RequestError = .methodNotFound(ClientRequestSpan.Method.closeSession),
+        logger: ACPLogger = .disabled
     ) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let builtAgents = ThreadSafeBuffer<ScriptedStubAgent>()
@@ -171,7 +173,7 @@ struct TracedSessionHarness {
             return stub
         }
         // A zero cadence, so each chunk is in the model when it arrives.
-        model = ConnectionModel(coalescingCadence: .zero, clock: ContinuousClock())
+        model = ConnectionModel(coalescingCadence: .zero, clock: ContinuousClock(), logger: logger)
         _ = await model.connect(over: clientEnd) { router in
             switch permissionRoute {
             case .decline: PermissionDecliningClient(router: router)
@@ -256,6 +258,12 @@ struct TracedSessionHarness {
     ///   order.
     func receivedMeta(of method: String) -> [JSONValue?] {
         builtAgents.elements.last?.receivedMeta(of: method) ?? []
+    }
+
+    /// The answer of the client to each elicitation of the agent, in answer
+    /// order.
+    var elicitationResponses: [CreateElicitationResponse] {
+        builtAgents.elements.last?.elicitationResponses ?? []
     }
 
     /// Closes the connection.
