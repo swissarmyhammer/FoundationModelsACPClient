@@ -20,8 +20,8 @@ import Synchronization
 /// them.
 ///
 /// Each mark ends with exactly one ``finish(_:)``, from the call of
-/// `newSession(_:)` that made the mark, after its register or after its
-/// failure. The agent already answered, so that call always ends, and no
+/// `newSession(_:)` or `forkSession(_:cut:)` that made the mark, after its
+/// register or after its failure. The agent already answered, so that call always ends, and no
 /// wait depends on the agent.
 final class OpeningSessions: Sendable {
     /// The callers that wait for one session that is opening.
@@ -39,7 +39,8 @@ final class OpeningSessions: Sendable {
     /// Marks a session as opening. A second mark of the same session keeps
     /// its waiters.
     ///
-    /// - Parameter sessionId: The id that the `session/new` answer gave.
+    /// - Parameter sessionId: The id that the `session/new` or the
+    ///   `session/fork` answer gave.
     func markOpening(_ sessionId: SessionId) {
         opening.withLock { opening in
             opening[sessionId] = opening[sessionId] ?? Opening()
@@ -106,8 +107,9 @@ final class OpeningSessions: Sendable {
     }
 }
 
-/// The session id that one `session/new` call marked as opening, if the
-/// agent answered it, and the highest event sequence when the answer came.
+/// The session id that one `session/new` or `session/fork` call marked as
+/// opening, if the agent answered it, and the highest event sequence when the
+/// answer came.
 ///
 /// The `onResponse` hook writes it on the reader, and the call reads it when
 /// it ends, so the call ends the open that it started.

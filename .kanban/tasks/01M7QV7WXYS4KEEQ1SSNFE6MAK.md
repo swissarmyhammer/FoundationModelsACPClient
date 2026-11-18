@@ -11,9 +11,54 @@ comments:
     - The cut: `SAH.ForkCut(messageId:side:)` with side `.before` or `.after`. Write it with `try cut.inject(into: request.meta)`. No cut means the last completed turn.
     - The method name is `forkSession` (as `deleteSession`), not `sessionFork`.
   timestamp: 2026-11-18T17:35:33.587245+00:00
+- actor: claude-code
+  id: 01m7qwc35xpz4qreszmkp9v5dv
+  text: |-
+    Research (implement step), with FoundationModelsACP cb9aee7 in `.build/checkouts`:
+    - The history decision: `ForkSessionResponse` has only `sessionId`, `availableCommands`, `configOptions` and `_meta`. The doc comments of `Agent.forkSession` and `ClientSideConnection.forkSession` do not say that the agent sends the history as updates. Thus the model gets the history with `session/resume` of the new id, with `replayFrom: .start`, through `resumeSession(_:)`. The fork model is registered before the resume, so the resume uses the open-model path (the replay clears the transcript and fills it again).
+    - `canForkSessions` is `agentCapabilities?.session?.fork != nil`, and `canResumeSessions` is `agentCapabilities?.session != nil`. Thus `canForkSessions` true gives `canResumeSessions` true now. The code still checks `canResumeSessions`, and the doc comment says that the fork then has no history.
+    - A gap in FoundationModelsACP: `ClientSideConnection` has `newSession(_:onResponse:)`, but no `forkSession(_:onResponse:)`. Thus the hook of the fork cannot mark the session as opening on the reader before the next frame. The shared helper calls the same hook when `forkSession` returns, on the main actor. The updates are not lost (the helper reads `latestEventSequence` after the answer, and the consumer keeps the updates of the session). But a permission request or an elicitation for the fork that comes between the answer and the hook gets cancel. A follow-up task records this.
+    - `SessionModel` keeps no system prompt, so the fork request sends no `systemPrompt`.
+    - The source: the MCP servers of the source are `source.mcpServers.compactMap(\.server)` (the client servers with their configuration). The cwd and the additional directories come from `source.cwd` and `source.additionalDirectories`.
+  timestamp: 2026-11-18T17:48:16.445092+00:00
+- actor: claude-code
+  id: 01m7qwwhnpfmg2qgpb7qawh05m
+  text: |-
+    Implementation landed (not committed):
+    - The history decision (also in the doc comment of `forkSession(_:cut:)`): `ForkSessionResponse` has no history, and the ACP contract does not tell the agent to send the history as updates. Thus `forkSession` registers the model of the fork, and then sends `resumeSession(_:)` for the fork id with `replayFrom: .start`, with the cwd, the additional directories and the MCP servers of the fork request. When `canResumeSessions` is `false`, it sends no resume and the model has no history. When the resume fails, the model of the fork goes out of `openSessions` and is closed, and the call throws the error of the resume (the fork stays on the agent).
+    - The shared helper: `openSession(sending:over:through:)` in `ConnectionModel+Sessions.swift`. `newSession` and `forkSession` both use it for the opening ticket, the seed, the wait for the applied events, and `register(_:openedOver:)`. New protocol `SessionOpeningResponse` (NewSessionResponse, ForkSessionResponse) and typealias `SessionOpeningRequest`.
+    - The fork hook runs when `connection.forkSession(_:)` returns, because FoundationModelsACP has no `forkSession(_:onResponse:)`. The follow-up task is ^mkmt6m.
+    - New error `ConnectionModelError.sessionNotOpen(sessionId:)`: the source is not open, or its model does not know its cwd yet. A child id gives `SubagentSessionError.notPermitted`.
+    - Tests: new `ConnectionModelForkTests` (10 tests). The stub agent answers `session/fork` (records the requests, an optional gate, an optional answer id). `HeldRequest` (new test file) holds the two helpers that the session tests and the fork tests share. `ModelRequestSpanTests` has a `session/fork` case, and `InitializeFixtures.fullCapabilities` advertises `fork`.
+    - TDD note: the RED run was a compile failure (no `forkSession`). A later check that disabled the replay made the two history tests fail, so these tests can fail.
+  timestamp: 2026-11-18T17:57:15.574250+00:00
+- actor: claude-code
+  id: 01m7qwx7ph77x1e6d0vb0nrnww
+  text: |-
+    Correction to the comment before: the short id of the follow-up task is ^f2kmt6m, not ^mkmt6m.
+
+    ### implement — changed
+    - evidence: `swift build` (only the allowed MLX warning); `swift test`: 909 tests in 76 suites passed, 0 failures (only the allowed MLX warning). Files: Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, ConnectionModel.swift, ConnectionModelError.swift, OpeningSessions.swift, ConnectionModel+Initialize.swift, ClientModelExtension.swift, MCPServerItem.swift, MCPServerStatusExtension.swift, SessionModel.swift, Telemetry/ClientRequestSpan.swift, Telemetry/TracedClientMessage.swift; Tests/FoundationModelsACPClientTests/Model/ConnectionModelForkTests.swift (new), Model/HeldRequest.swift (new), Model/ConnectedModel.swift, Model/ConnectionModelSessionTests.swift, Model/ConnectionModelInitializeTests.swift, ScriptedStubAgent.swift, Telemetry/ModelRequestSpanTests.swift.
+    - next: review. The acceptance item "Push main, and send the sha" stays open for the orchestrator.
+  timestamp: 2026-11-18T17:57:38.129281+00:00
+- actor: claude-code
+  id: 01m7qwzjdkfrja4mjbrdct2g4e
+  text: |-
+    ### test — green
+    - evidence: swift test (root) — 909 tests in 76 suites passed, 0 failed, 0 skipped. swift build --build-tests --package-path IntegrationTests — Build complete, exit 0.
+    - warnings: only the allowed MLX "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle, in both builds. No other warning.
+    - next: review
+  timestamp: 2026-11-18T17:58:54.643156+00:00
+- actor: claude-code
+  id: 01m7qx03jgpkfv7dfkdqtah3v4
+  text: |-
+    ### commit — changed
+    - evidence: local commit made with the code, tests and .kanban changes. Not pushed.
+    - next: none
+  timestamp: 2026-11-18T17:59:12.208082+00:00
 depends_on:
 - 01M7QV7G2QQBY03YWR4MWNXM2S
-position_column: todo
+position_column: doing
 position_ordinal: '8180'
 title: 'ConnectionModel.forkSession(_:cut:): fork a session with session/fork (D205)'
 ---
@@ -44,14 +89,14 @@ Brief: /Users/wballard/github/swissarmyhammer/.briefs/fork/acpc-brief.md. Overvi
 
 ## Tests (Swift Testing, with a scripted agent)
 
-- [ ] An agent with `fork: {}`: `forkSession` sends the request with `sessionId` and `cwd` and no cut, and gives a model with the new id in `openSessions`.
-- [ ] An agent with the cut flag: the request has `_meta.sah.forkCut` with the message id and the side.
-- [ ] An agent with no `fork`: the call throws `unsupported` before it sends.
-- [ ] An agent with `fork` and no cut flag: a call with a cut throws before it sends; a call with no cut works.
-- [ ] The new model shows the copied turns of the source.
-- [ ] A close of the connection during the call: the call throws `ConnectionError.closed`, and no model stays in `openSessions`.
+- [x] An agent with `fork: {}`: `forkSession` sends the request with `sessionId` and `cwd` and no cut, and gives a model with the new id in `openSessions`.
+- [x] An agent with the cut flag: the request has `_meta.sah.forkCut` with the message id and the side.
+- [x] An agent with no `fork`: the call throws `unsupported` before it sends.
+- [x] An agent with `fork` and no cut flag: a call with a cut throws before it sends; a call with no cut works.
+- [x] The new model shows the copied turns of the source.
+- [x] A close of the connection during the call: the call throws `ConnectionError.closed`, and no model stays in `openSessions`.
 
 ## Acceptance
 
-- [ ] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
+- [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d205

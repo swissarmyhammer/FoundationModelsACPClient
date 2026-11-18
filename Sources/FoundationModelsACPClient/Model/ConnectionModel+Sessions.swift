@@ -4,8 +4,8 @@ import Logging
 import Tracing
 
 // The session factory of `ConnectionModel`: the request that opens a new
-// session, the request that resumes a session, and the request that closes
-// an open session. Each method makes, registers, or closes the `SessionModel`
+// session, the request that forks a session, the request that resumes a
+// session, and the request that closes an open session. Each method makes, registers, or closes the `SessionModel`
 // of the session, so a host never subscribes to the updates of a session
 // itself.
 //
@@ -59,9 +59,45 @@ extension ConnectionModel {
         try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.newSession)
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
-        // The hook of the wire marks the session as opening on the reader,
-        // before the next frame. Each exit of this call ends that open, so a
-        // request that waits for it gets the model, or cancel on a failure.
+        return try await openSession(sending: sent, over: connection) { traced, didAnswer in
+            // The hook of the wire runs on the reader, before the next frame.
+            try await connection.newSession(traced) { answer in
+                didAnswer(answer.sessionId)
+            }
+        }
+    }
+
+    /// Sends one request that opens a session, and gives the model of the
+    /// session of the answer, in ``openSessions``.
+    ///
+    /// `send` sends the request, and gives the session id of the answer to
+    /// its hook. The hook records the last event that the connection read,
+    /// and marks the session as opening. Each exit of this call ends that
+    /// open, so a request of the agent that waits for it gets the model, or
+    /// cancel on a failure.
+    ///
+    /// The model subscribes to the updates of the session. The MCP servers
+    /// and the workspace of the request, and the commands and the
+    /// configuration options of the answer, seed the model. Before the model
+    /// attaches, the call waits until the consumer of the ordered event stream
+    /// applied the event that the hook recorded.
+    ///
+    /// - Parameters:
+    ///   - sent: The request that goes out, with only the MCP servers that
+    ///     the agent advertises.
+    ///   - connection: The open connection that sends the request.
+    ///   - send: Sends the request with the traced `_meta`, and calls its
+    ///     hook with the session id of the answer before it returns.
+    /// - Returns: The open model of the session.
+    /// - Throws: `ConnectionError.closed` when the connection of the request
+    ///   is no longer the open connection; the `RequestError` of the agent;
+    ///   or the error of the connection. On an error, the model registers no
+    ///   session.
+    private func openSession<Request: SessionOpeningRequest, Response: SessionOpeningResponse>(
+        sending sent: Request,
+        over connection: ClientSideConnection,
+        through send: (Request, @escaping @Sendable (SessionId) -> Void) async throws -> Response
+    ) async throws -> SessionModel {
         let ticket = OpeningTicket()
         let opening = openingSessions
         defer {
@@ -69,12 +105,10 @@ extension ConnectionModel {
                 opening.finish(opened)
             }
         }
-        let response = try await sendRecordingAuth(sent) {
-            try await connection.newSession($0) { answer in
-                // The hook runs before the next frame, so this is the last
-                // event that the agent sent before its answer.
-                ticket.record(answer.sessionId, latestEventSequence: connection.latestEventSequence)
-                opening.markOpening(answer.sessionId)
+        let response = try await sendRecordingAuth(sent) { traced in
+            try await send(traced) { sessionId in
+                ticket.record(sessionId, latestEventSequence: connection.latestEventSequence)
+                opening.markOpening(sessionId)
             }
         }
         let session = makeSubscribedSessionModel(sessionId: response.sessionId, over: connection)
@@ -115,6 +149,133 @@ extension ConnectionModel {
         }
         await openingSessions.waitWhileOpening(sessionId)
         return session(for: sessionId) ?? childSession(for: sessionId)
+    }
+
+    // MARK: - Fork session
+
+    /// Sends `session/fork` for an open session, and gives the model of the
+    /// new session with the history that the agent copied.
+    ///
+    /// A fork is a new top-level session. The agent copies the history of the
+    /// source session up to the cut into it. With no cut, the agent copies
+    /// the history up to the last completed turn. After the fork, the two
+    /// sessions are independent.
+    ///
+    /// The request sends the `cwd`, the additional directories and the
+    /// client MCP servers of the model of the source session. It sends only
+    /// the MCP servers whose transport the agent advertises, in the same way
+    /// as ``newSession(_:)``. The client keeps no system prompt, so the
+    /// request sends no system prompt. A cut goes into `_meta.sah.forkCut`.
+    ///
+    /// The model of the fork opens through the same steps as the model of
+    /// ``newSession(_:)``: the commands and the configuration options of the
+    /// response seed the model, the request gives its MCP servers and its
+    /// workspace, and the model goes into ``openSessions``. When the
+    /// connection closes, or a new connection takes its place, after the
+    /// response arrives but before this call reads it, the model of the fork
+    /// is closed and does not go into ``openSessions``. The wire gives the
+    /// fork response no hook on the reader. Thus the session is opening only
+    /// from the time that this call reads the response. The router answers
+    /// cancel to a permission request or an elicitation of the fork that
+    /// comes before that time.
+    ///
+    /// The history: the `session/fork` response has no history, and the ACP
+    /// contract does not tell the agent to send the history as updates. Thus
+    /// the call then sends ``resumeSession(_:)`` for the fork, with a replay
+    /// from the start, and the model holds the copied turns when the call
+    /// returns. When ``canResumeSessions`` is `false`, the call sends no
+    /// resume, and the model of the fork has no history. When the resume
+    /// fails, the model of the fork goes out of ``openSessions`` and is
+    /// closed, and the call throws the error of the resume. The session of
+    /// the fork stays on the agent.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The id of the source session. Its model must be in
+    ///     ``openSessions``.
+    ///   - cut: The cut point of the fork, or `nil` to fork at the last
+    ///     completed turn.
+    /// - Returns: The open model of the fork.
+    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
+    ///   ``canForkSessions`` is `false`, when `cut` is not `nil` and
+    ///   ``canForkWithCut`` is `false`, or when the source has additional
+    ///   directories and ``canUseAdditionalDirectories`` is `false`;
+    ///   ``SubagentSessionError/notPermitted(operation:)`` when `sessionId`
+    ///   names a child session; ``ConnectionModelError/sessionNotOpen(sessionId:)``
+    ///   when the source is not open, or its model does not know its `cwd`
+    ///   yet; `EncodingError` when the cut cannot be encoded. In these cases
+    ///   the call sends nothing. The call also throws
+    ///   `ConnectionError.closed` when no connection is open, or when the
+    ///   connection of the request is no longer the open connection; the
+    ///   `RequestError` of the agent; or the error of the connection. On an
+    ///   error, no model of the fork stays in ``openSessions``.
+    public func forkSession(_ sessionId: SessionId, cut: SAH.ForkCut? = nil) async throws -> SessionModel {
+        try requireCapability(canForkSessions, method: ClientRequestSpan.Method.forkSession)
+        try requireCapability(cut == nil || canForkWithCut, method: ClientRequestSpan.Method.forkSession)
+        try refuseChild(sessionId, operation: ClientRequestSpan.Method.forkSession)
+        let request = try forkRequest(of: sessionId, cut: cut)
+        try requireAdditionalDirectoriesCapability(for: request, method: ClientRequestSpan.Method.forkSession)
+        let connection = try openConnection()
+        let sent = removingUnadvertisedMCPServers(from: request)
+        let fork = try await openSession(sending: sent, over: connection) { traced, didAnswer in
+            let answer = try await connection.forkSession(traced)
+            // The wire has no hook for the fork answer, so the open starts
+            // when this call reads the answer.
+            didAnswer(answer.sessionId)
+            return answer
+        }
+        try await replayHistory(into: fork, forkedWith: sent)
+        return fork
+    }
+
+    /// Makes the `session/fork` request of an open session from its model.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The id of the source session.
+    ///   - cut: The cut point of the fork, or `nil` for no cut.
+    /// - Returns: The request with the `cwd`, the additional directories and
+    ///   the client MCP servers of the source, and the cut in
+    ///   `_meta.sah.forkCut`.
+    /// - Throws: ``ConnectionModelError/sessionNotOpen(sessionId:)`` when the
+    ///   source is not in ``openSessions``, or its model does not know its
+    ///   `cwd` yet; `EncodingError` when the cut cannot be encoded.
+    private func forkRequest(of sessionId: SessionId, cut: SAH.ForkCut?) throws -> ForkSessionRequest {
+        guard let source = session(for: sessionId), let cwd = source.cwd else {
+            throw ConnectionModelError.sessionNotOpen(sessionId: sessionId)
+        }
+        return ForkSessionRequest(
+            cwd: cwd,
+            sessionId: sessionId,
+            additionalDirectories: source.additionalDirectories,
+            mcpServers: source.mcpServers.compactMap(\.server),
+            meta: try cut?.inject(into: nil)
+        )
+    }
+
+    /// Sends ``resumeSession(_:)`` for the open model of a fork, with a
+    /// replay from the start, so the model holds the history that the agent
+    /// copied. When ``canResumeSessions`` is `false`, the call does nothing.
+    ///
+    /// - Parameters:
+    ///   - fork: The open model of the fork.
+    ///   - request: The `session/fork` request that went out. The resume
+    ///     sends its `cwd`, its additional directories and its MCP servers.
+    /// - Throws: The error of the resume. The model of the fork is then out
+    ///   of ``openSessions`` and closed.
+    private func replayHistory(into fork: SessionModel, forkedWith request: ForkSessionRequest) async throws {
+        guard canResumeSessions else { return }
+        let resume = ResumeSessionRequest(
+            cwd: request.cwd,
+            sessionId: fork.sessionId,
+            additionalDirectories: request.additionalDirectories,
+            mcpServers: request.mcpServers,
+            replayFrom: .start(ReplayFromStart())
+        )
+        do {
+            _ = try await resumeSession(resume)
+        } catch {
+            unregisterAndClose(fork)
+            throw error
+        }
     }
 
     // MARK: - Resume session
@@ -434,8 +595,8 @@ extension ConnectionModel {
     /// agent can get, and logs one warning for each server that the copy
     /// does not send.
     ///
-    /// ``newSession(_:)`` and ``resumeSession(_:)`` send this copy. Each
-    /// other field of the copy is as the caller made it.
+    /// ``newSession(_:)``, ``forkSession(_:cut:)`` and ``resumeSession(_:)``
+    /// send this copy. Each other field of the copy is as the caller made it.
     ///
     /// - Parameter request: The request as the caller made it.
     /// - Returns: The copy of `request`, with the servers whose transport
@@ -479,9 +640,9 @@ extension ConnectionModel {
     /// Throws when a request has additional directories and the agent does
     /// not advertise `session.additionalDirectories`.
     ///
-    /// ``newSession(_:)`` and ``resumeSession(_:)`` call this before they
-    /// send the request, so a request that the agent cannot read sends
-    /// nothing. A request with an omitted or empty list needs no capability.
+    /// ``newSession(_:)``, ``forkSession(_:cut:)`` and ``resumeSession(_:)``
+    /// call this before they send the request, so a request that the agent
+    /// cannot read sends nothing. A request with an omitted or empty list needs no capability.
     ///
     /// - Parameters:
     ///   - request: The request as the caller made it.
@@ -552,7 +713,7 @@ extension ConnectionModel {
 }
 
 /// A request that sends a list of MCP servers to the agent: a
-/// `session/new` or a `session/resume` request.
+/// `session/new`, a `session/fork` or a `session/resume` request.
 ///
 /// ``ConnectionModel`` filters the list of each request of this kind, so the
 /// rule for the servers that go out is in one location.
@@ -565,6 +726,8 @@ public protocol MCPServerListRequest {
 }
 
 extension NewSessionRequest: MCPServerListRequest {}
+
+extension ForkSessionRequest: MCPServerListRequest {}
 
 extension ResumeSessionRequest: MCPServerListRequest {}
 
@@ -594,7 +757,38 @@ extension SessionWorkspaceRequest {
 
 extension NewSessionRequest: SessionWorkspaceRequest {}
 
+extension ForkSessionRequest: SessionWorkspaceRequest {}
+
 extension ResumeSessionRequest: SessionWorkspaceRequest {}
+
+/// A request that opens a new session: a `session/new` or a `session/fork`
+/// request.
+///
+/// ``ConnectionModel`` sends each request of this kind through one code
+/// path, which makes and registers the model of the new session.
+typealias SessionOpeningRequest = MCPServerListRequest & SessionWorkspaceRequest & TracedClientMessage
+
+/// The answer to a request that opens a new session: a `session/new` or a
+/// `session/fork` response.
+///
+/// ``ConnectionModel`` makes the model of the new session from these
+/// fields.
+protocol SessionOpeningResponse {
+    /// The id of the new session.
+    var sessionId: SessionId { get }
+
+    /// The commands of the new session, or `nil` when the answer has no
+    /// list.
+    var availableCommands: [AvailableCommand]? { get }
+
+    /// The configuration options of the new session, or `nil` when the
+    /// answer has no list.
+    var configOptions: [SessionConfigOption]? { get }
+}
+
+extension NewSessionResponse: SessionOpeningResponse {}
+
+extension ForkSessionResponse: SessionOpeningResponse {}
 
 extension MCPServer {
     /// The name and the wire transport of the server, for a log message.

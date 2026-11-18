@@ -289,13 +289,14 @@ public final class ConnectionModel {
     /// overlap would share one replay state.
     @ObservationIgnored let resumeTurns = KeyedTurnQueue<SessionId>()
 
-    /// The sessions whose `session/new` answer arrived and whose model is not
-    /// registered yet. The router waits for such a session, so a request of
+    /// The sessions whose `session/new` or `session/fork` answer arrived and
+    /// whose model is not registered yet. The router waits for such a session, so a request of
     /// the agent directly after the answer is not answered with cancel.
     @ObservationIgnored let openingSessions = OpeningSessions()
 
-    /// A test seam: it runs after the answer of a `session/new` request and
-    /// before ``newSession(_:)`` registers the model of the session. It is
+    /// A test seam: it runs after the answer of a `session/new` or a
+    /// `session/fork` request, and before ``newSession(_:)`` or
+    /// ``forkSession(_:cut:)`` registers the model of the session. It is
     /// `nil`, and does nothing, outside the tests. A test holds it to fix the
     /// order of the register and a request of the agent.
     @ObservationIgnored var beforeRegisteringNewSession: (@MainActor (SessionId) async -> Void)?

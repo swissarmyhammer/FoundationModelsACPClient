@@ -88,7 +88,8 @@ private enum ModelRequestFixtures {
                 resumeSessionError: nil,
                 capabilities: InitializeFixtures.fullCapabilities,
                 authMethods: [InitializeFixtures.agentMethod],
-                sessionListPages: emptySessionList
+                sessionListPages: emptySessionList,
+                forkSessionId: otherTestSession
             )
         }
     }
@@ -163,6 +164,9 @@ enum ModelRequest: CaseIterable, Sendable, CustomTestStringConvertible {
     /// `ConnectionModel.deleteSession(_:)`.
     case deleteSession
 
+    /// `ConnectionModel.forkSession(_:cut:)`.
+    case forkSession
+
     /// `ConnectionModel.login(_:)`.
     case login
 
@@ -187,6 +191,7 @@ enum ModelRequest: CaseIterable, Sendable, CustomTestStringConvertible {
         case .listSessions: ClientRequestSpan.Method.listSessions
         case .closeSession: ClientRequestSpan.Method.closeSession
         case .deleteSession: ClientRequestSpan.Method.deleteSession
+        case .forkSession: ClientRequestSpan.Method.forkSession
         case .login: ClientRequestSpan.Method.login
         case .logout: ClientRequestSpan.Method.logout
         case .prompt: ClientRequestSpan.Method.prompt
@@ -225,6 +230,8 @@ enum ModelRequest: CaseIterable, Sendable, CustomTestStringConvertible {
             try await model.close(model.newSession(ModelRequestFixtures.newSessionRequest))
         case .deleteSession:
             try await model.deleteSession(testSession)
+        case .forkSession:
+            _ = try await model.forkSession(model.newSession(ModelRequestFixtures.newSessionRequest).sessionId)
         case .login:
             try await model.login(InitializeFixtures.login)
         case .logout:

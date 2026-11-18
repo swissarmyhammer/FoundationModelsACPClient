@@ -92,6 +92,10 @@ public enum ClientRequestSpan {
         /// The request that deletes a session from the list of the agent.
         public static let deleteSession = "session/delete"
 
+        /// The request that makes a new session with a copy of the history
+        /// of a session.
+        public static let forkSession = "session/fork"
+
         /// The request that sends one prompt.
         public static let prompt = "session/prompt"
 

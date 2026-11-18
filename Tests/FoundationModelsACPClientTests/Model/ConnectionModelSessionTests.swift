@@ -352,33 +352,6 @@ private enum SessionFactoryFixtures {
         return connected
     }
 
-    /// Reads the outgoing-request events until the first request with a
-    /// wire method finished.
-    ///
-    /// The connection sends `finished` when it takes the answer of the agent,
-    /// before the caller of the request continues.
-    ///
-    /// - Parameters:
-    ///   - method: The wire method of the request.
-    ///   - events: The outgoing-request events of the connection, from a
-    ///     subscription made before the request started.
-    /// - Returns: `true` when the request finished, or `false` when the
-    ///   stream ended first.
-    static func requestFinished(_ method: String, in events: AsyncStream<OutgoingRequestEvent>) async -> Bool {
-        var requestId: RequestId?
-        for await event in events {
-            switch event {
-            case .started(let id, method):
-                requestId = id
-            case .finished(let id) where id == requestId:
-                return true
-            case .started, .finished:
-                continue
-            }
-        }
-        return false
-    }
-
     /// Counts the `session/resume` requests that the agent got.
     ///
     /// - Parameter connected: The connected model and its stub agent.
@@ -456,26 +429,6 @@ private enum SessionFactoryFixtures {
         }
         continuation.onTermination = { _ in relay.cancel() }
         return subscription
-    }
-
-    /// Runs one operation of the connection model under a task executor that
-    /// the test holds. The test then decides when the part of the call that
-    /// follows the answer of the agent runs.
-    ///
-    /// - Parameters:
-    ///   - executor: The executor that the test holds.
-    ///   - operation: The operation to run.
-    /// - Returns: The task of the operation.
-    @MainActor
-    static func runHeld<Output: Sendable>(
-        on executor: HoldableTaskExecutor,
-        _ operation: @escaping @MainActor () async throws -> Output
-    ) -> Task<Output, any Error> {
-        Task {
-            try await withTaskExecutorPreference(executor) {
-                try await operation()
-            }
-        }
     }
 }
 
@@ -609,7 +562,7 @@ struct ConnectionModelSessionTests {
         defer { await connected.model.disconnect() }
         let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
         let executor = HoldableTaskExecutor()
-        let creating = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
+        let creating = HeldRequest.run(on: executor) { [model = connected.model] in
             try await model.newSession(SessionFactoryFixtures.newSessionRequest)
         }
         // The task sends the request, and the gate holds the answer. When the
@@ -624,7 +577,7 @@ struct ConnectionModelSessionTests {
         // the answer.
         try await executor.whileHeld {
             answerGate.open()
-            #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.newSession, in: requestEvents))
+            #expect(await HeldRequest.finished(ClientRequestSpan.Method.newSession, in: requestEvents))
             connected.agentEnd.close()
             try await waitUntil { connected.model.state == .disconnected } orFailWhen: { connected.isConnectionFailed }
         }
@@ -782,7 +735,7 @@ struct ConnectionModelSessionTests {
         defer { await connected.model.disconnect() }
         let requestEvents = try #require(connected.model.connection).subscribeToOutgoingRequests()
         let executor = HoldableTaskExecutor()
-        let resuming = SessionFactoryFixtures.runHeld(on: executor) { [model = connected.model] in
+        let resuming = HeldRequest.run(on: executor) { [model = connected.model] in
             try await model.resumeSession(SessionFactoryFixtures.resumeRequest)
         }
         // The task sends the request, and the gate holds the answer. When the
@@ -797,7 +750,7 @@ struct ConnectionModelSessionTests {
         // reads the answer.
         try await executor.whileHeld {
             answerGate.open()
-            #expect(await SessionFactoryFixtures.requestFinished(ClientRequestSpan.Method.resumeSession, in: requestEvents))
+            #expect(await HeldRequest.finished(ClientRequestSpan.Method.resumeSession, in: requestEvents))
             connected.agentEnd.close()
             try await waitUntil { connected.model.state == .disconnected } orFailWhen: { connected.isConnectionFailed }
         }

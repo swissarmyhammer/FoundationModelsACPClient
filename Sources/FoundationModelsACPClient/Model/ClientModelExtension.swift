@@ -136,12 +136,13 @@ public protocol ClientModelExtension: Sendable {
     /// - Returns: `true` when the extension took the update.
     @MainActor func apply(_ update: SessionUpdate, to state: SessionState) -> Bool
 
-    /// Gets the request of a `session/new` or a `session/resume` of the
-    /// session, so the extension can seed its session state.
+    /// Gets the request of a `session/new`, a `session/fork` or a
+    /// `session/resume` of the session, so the extension can seed its
+    /// session state.
     ///
     /// The model calls it before it folds an update that follows the
-    /// request: after the agent accepted a `session/new`, and before a
-    /// `session/resume` goes out. A child session gets no call, because no
+    /// request: after the agent accepted a `session/new` or a
+    /// `session/fork`, and before a `session/resume` goes out. A child session gets no call, because no
     /// request of the client starts it.
     ///
     /// The default does nothing.

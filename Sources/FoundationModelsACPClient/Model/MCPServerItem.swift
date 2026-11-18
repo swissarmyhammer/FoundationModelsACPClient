@@ -21,8 +21,8 @@ public enum MCPServerTransport: String, Hashable, Sendable {
 
 /// The source of an MCP server of a session.
 public enum MCPServerOrigin: String, Hashable, Sendable {
-    /// The client sent the server in its `session/new` or `session/resume`
-    /// request. The wire value is `"client"`.
+    /// The client sent the server in its `session/new`, `session/fork` or
+    /// `session/resume` request. The wire value is `"client"`.
     case client
 
     /// The configuration of the agent gave the server. The wire value is

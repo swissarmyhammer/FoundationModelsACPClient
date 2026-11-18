@@ -77,7 +77,7 @@ public final class SessionModel: Identifiable {
     }
 
     /// The working directory of the session: the `cwd` of the last
-    /// successful `session/new` or `session/resume` request. `nil` means
+    /// successful `session/new`, `session/fork` or `session/resume` request. `nil` means
     /// only that no such request set it, for example in a model that a unit
     /// test makes directly.
     ///
@@ -99,8 +99,8 @@ public final class SessionModel: Identifiable {
     public internal(set) var cwd: AbsolutePath?
 
     /// The additional workspace roots of the session: the
-    /// `additionalDirectories` of the last successful `session/new` or
-    /// `session/resume` request, in request order. An empty list means that
+    /// `additionalDirectories` of the last successful `session/new`,
+    /// `session/fork` or `session/resume` request, in request order. An empty list means that
     /// the session has no additional root. See ``cwd`` for the resume
     /// contract.
     public internal(set) var additionalDirectories: [AbsolutePath] = []
@@ -207,7 +207,8 @@ public final class SessionModel: Identifiable {
 
     /// The MCP servers of the session, each with its last status. The list
     /// holds one ``MCPServerOrigin/client`` item for each HTTP or stdio server
-    /// of the `session/new` or `session/resume` request, in request order.
+    /// of the `session/new`, `session/fork` or `session/resume` request, in
+    /// request order.
     /// A `session/resume` request replaces the list, and each item starts
     /// again at ``MCPServerStatus/notReported``.
     ///
@@ -641,8 +642,8 @@ public final class SessionModel: Identifiable {
         return engine.apply(update)
     }
 
-    /// Sets the commands and the configuration options that a `session/new`
-    /// or `session/resume` response gives.
+    /// Sets the commands and the configuration options that a `session/new`,
+    /// `session/fork` or `session/resume` response gives.
     ///
     /// The engine applies its response rule: a `nil` or empty command list
     /// leaves ``availableCommands`` as it is, and a `nil` option list leaves
@@ -659,7 +660,8 @@ public final class SessionModel: Identifiable {
     }
 
     /// Replaces ``cwd`` and ``additionalDirectories`` with the values of a
-    /// `session/new` or `session/resume` request that the agent accepted.
+    /// `session/new`, `session/fork` or `session/resume` request that the
+    /// agent accepted.
     ///
     /// An omitted list gives an empty list, because the agent then activates
     /// no additional root.

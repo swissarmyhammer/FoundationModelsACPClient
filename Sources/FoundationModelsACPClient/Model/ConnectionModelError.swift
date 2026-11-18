@@ -1,3 +1,5 @@
+import FoundationModelsACP
+
 /// An error that ``ConnectionModel`` throws for an operation that it refuses
 /// or that failed outside the ACP wire.
 public enum ConnectionModelError: Error, Hashable, Sendable {
@@ -8,6 +10,14 @@ public enum ConnectionModelError: Error, Hashable, Sendable {
     ///   ``terminalAuthOperation`` for a terminal login, which has no wire
     ///   method.
     case unsupported(method: String)
+
+    /// The session is not in ``ConnectionModel/openSessions``, or its model
+    /// does not know the working directory of the session yet because its
+    /// first resume still runs. Thus the model cannot make a request that
+    /// needs the workspace of the session, and sent no request.
+    ///
+    /// - Parameter sessionId: The id of the session.
+    case sessionNotOpen(sessionId: SessionId)
 
     /// The terminal auth process did not exit with status zero.
     ///

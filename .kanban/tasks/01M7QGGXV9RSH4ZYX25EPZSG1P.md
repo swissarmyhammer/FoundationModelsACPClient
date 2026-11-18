@@ -16,6 +16,10 @@ comments:
     - Acceptance items 1 and 2 are checked. Item 3 (CI green on main, unit job and integration job) is open: it needs a push.
     - next: push a commit and check the CI run.
   timestamp: 2026-11-18T16:13:38.475006+00:00
+- actor: claude-code
+  id: 01m7qw67q3gp568a6hm5xbdphc
+  text: 'CI run 44344782311 (7f2c79d, Kanban 909c903): the unit job "Build & test" passed. The C++ interop error is gone. A newer push (cd18647) cancelled the integration job before it ended, after 1h30m. The integration job did not run on a fresh resolve yet: run 44324128382 skipped it because the unit job failed with the old error. Next: watch the CI run of the last D205 push to its end. Both jobs must be green.'
+  timestamp: 2026-11-18T17:45:04.483378+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'

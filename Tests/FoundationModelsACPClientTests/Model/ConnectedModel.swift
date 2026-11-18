@@ -49,6 +49,11 @@ struct ConnectedModel {
         builtAgents.elements.last?.deleteRequests ?? []
     }
 
+    /// Each `session/fork` request that the agent got, in arrival order.
+    var forkRequests: [ForkSessionRequest] {
+        builtAgents.elements.last?.forkRequests ?? []
+    }
+
     /// The working directory of the last `session/new` that the agent got,
     /// or `nil` when the agent got none.
     var lastWorkingDirectory: AbsolutePath? {

@@ -4,10 +4,10 @@ import Observation
 /// The built-in extension that keeps the MCP servers of a session and the
 /// status that the agent reports for each one.
 ///
-/// The request of a `session/new` or a `session/resume` seeds the list in
-/// ``didStartSession(state:mcpServers:)``. The extension takes each
-/// `_mcp_server_status` update, so the update never goes to the engine and
-/// adds no transcript entry. ``SessionModel/mcpServers`` reads the list.
+/// The request of a `session/new`, a `session/fork` or a `session/resume`
+/// seeds the list in ``didStartSession(state:mcpServers:)``. The extension
+/// takes each `_mcp_server_status` update, so the update never goes to the
+/// engine and adds no transcript entry. ``SessionModel/mcpServers`` reads the list.
 struct MCPServerStatusExtension: ClientModelExtension {
     /// The session state of the extension: the MCP servers of one session.
     @MainActor @Observable
@@ -18,7 +18,7 @@ struct MCPServerStatusExtension: ClientModelExtension {
         var servers: [MCPServerItem] = []
 
         /// Replaces the list with the servers that the client sends in a
-        /// `session/new` or `session/resume` request.
+        /// `session/new`, `session/fork` or `session/resume` request.
         ///
         /// Each HTTP or stdio server gives one ``MCPServerOrigin/client``
         /// item, in request order, with the status

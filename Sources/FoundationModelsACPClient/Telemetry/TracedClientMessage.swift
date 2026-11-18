@@ -156,6 +156,14 @@ extension DeleteSessionRequest: TracedClientMessage {
     var tracedSessionId: SessionId? { sessionId }
 }
 
+extension ForkSessionRequest: TracedClientMessage {
+    /// The `session/fork` method.
+    static let method = ClientRequestSpan.Method.forkSession
+
+    /// The source session: the agent gives the id of the fork in its answer.
+    var tracedSessionId: SessionId? { sessionId }
+}
+
 extension LoginAuthRequest: TracedClientMessage {
     /// The `auth/login` method.
     static let method = ClientRequestSpan.Method.login

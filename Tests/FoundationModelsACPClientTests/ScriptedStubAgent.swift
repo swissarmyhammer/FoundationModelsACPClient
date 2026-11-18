@@ -91,6 +91,13 @@ import Synchronization
 /// `ConnectionModelInitializeTests` closes the connection while a login or a
 /// logout waits at its gate.
 ///
+/// `session/fork` answers with the session the script belongs to, so the
+/// `resumeSessionScript` of a later resume of the fork goes to the fork. A
+/// stub built with a fork session id answers with that id instead. The
+/// stub records each fork request, so `ConnectionModelForkTests` can assert
+/// on its fields. A stub built with a fork gate holds each answer until the
+/// test opens that gate.
+///
 /// A stub built with a new-session gate holds each `session/new` until the
 /// test opens that gate, in the same way. `ConnectionModelSessionTests` holds
 /// the answer so that it can close the connection between the answer and the
@@ -338,6 +345,24 @@ final class ScriptedStubAgent: Agent {
         deleteRequestRecord.elements
     }
 
+    /// Each `session/fork` request this stub got, in arrival order.
+    ///
+    /// The connection serves each request on a task of its own, so the record
+    /// must tolerate a write from a thread other than the test body's.
+    private let forkRequestRecord = ThreadSafeBuffer<ForkSessionRequest>()
+
+    /// Each `session/fork` request this stub got, in arrival order.
+    var forkRequests: [ForkSessionRequest] {
+        forkRequestRecord.elements
+    }
+
+    /// The gate that must open before each `session/fork` answers, or `nil`
+    /// to answer each fork at once.
+    private let forkSessionGate: UpdateGate?
+
+    /// The session id of each `session/fork` answer.
+    private let forkSessionId: SessionId
+
     /// Creates the stub.
     ///
     /// - Parameters:
@@ -401,6 +426,10 @@ final class ScriptedStubAgent: Agent {
     ///     the cursor of the request; the `nil` key is the first page.
     ///   - sessionListGates: The gate that must open before the page of a
     ///     cursor answers, keyed by that cursor.
+    ///   - forkSessionGate: The gate that must open before each
+    ///     `session/fork` answers, or `nil` to answer each fork at once.
+    ///   - forkSessionId: The session id of each `session/fork` answer, or
+    ///     `nil` to answer with `session`.
     init(
         connection: AgentSideConnection,
         session: SessionId,
@@ -432,7 +461,9 @@ final class ScriptedStubAgent: Agent {
         logoutGate: UpdateGate? = nil,
         newSessionGate: UpdateGate? = nil,
         sessionListPages: [SessionListCursor?: ListSessionsResponse] = [:],
-        sessionListGates: [SessionListCursor?: UpdateGate] = [:]
+        sessionListGates: [SessionListCursor?: UpdateGate] = [:],
+        forkSessionGate: UpdateGate? = nil,
+        forkSessionId: SessionId? = nil
     ) {
         self.connection = connection
         self.session = session
@@ -465,6 +496,8 @@ final class ScriptedStubAgent: Agent {
         self.newSessionGate = newSessionGate
         self.sessionListPages = sessionListPages
         self.sessionListGates = sessionListGates
+        self.forkSessionGate = forkSessionGate
+        self.forkSessionId = forkSessionId ?? session
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -554,6 +587,13 @@ final class ScriptedStubAgent: Agent {
             throw resumeSessionError
         }
         return ResumeSessionResponse(availableCommands: resumeSessionCommands)
+    }
+
+    func forkSession(_ params: ForkSessionRequest) async throws -> ForkSessionResponse {
+        record(params.meta, of: ClientRequestSpan.Method.forkSession)
+        forkRequestRecord.append(params)
+        await forkSessionGate?.wait()
+        return ForkSessionResponse(sessionId: forkSessionId)
     }
 
     func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {

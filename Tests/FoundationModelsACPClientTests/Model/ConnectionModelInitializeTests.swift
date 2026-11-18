@@ -20,7 +20,7 @@ enum InitializeFixtures {
     /// The capabilities of an agent that advertises each optional session
     /// method.
     static let fullCapabilities = AgentCapabilities(
-        session: SessionCapabilities(delete: SessionDeleteCapabilities())
+        session: SessionCapabilities(delete: SessionDeleteCapabilities(), fork: SessionForkCapabilities())
     )
 
     /// The capabilities of an agent that advertises the session baseline and
