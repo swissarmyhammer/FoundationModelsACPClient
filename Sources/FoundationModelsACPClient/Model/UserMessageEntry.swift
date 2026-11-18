@@ -31,6 +31,17 @@ public final class UserMessageEntry: MessageTranscriptEntry {
     /// The `_meta` field of the message.
     public internal(set) var meta: JSONValue?
 
+    /// The typed `_meta.sah.message` object of the message, or `nil`.
+    ///
+    /// A host can use this object to name the source of a user message: its
+    /// kind, its session, its title, its agent and its folder. The value is
+    /// `nil` when the message has no `_meta`, or when `_meta` has no valid
+    /// `sah.message`. The property reads ``meta`` each time, so a view that
+    /// reads it updates when ``meta`` changes.
+    public var sahMessage: SAH.SessionMessage? {
+        SAH.SessionMessage.extract(from: meta)
+    }
+
     /// Makes a local user message for a prompt that the client sends.
     ///
     /// - Parameters:
