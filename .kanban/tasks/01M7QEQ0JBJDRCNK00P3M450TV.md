@@ -32,8 +32,24 @@ comments:
     - evidence: ea53e5c feat(model): a session gives its export file name and folder
     - next: none. The commit is local. It is not pushed.
   timestamp: 2026-11-18T14:22:55.666170+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m7qgpghdmd90kmyq5xv5ve63
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit cf47a4b). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed, 0 skipped. The engine reviewed 2 files: `Sources/FoundationModelsACPClient/Model/SessionModel+Export.swift` and `Tests/FoundationModelsACPClientTests/Model/SessionModelExportTests.swift`. The `.reviewignore` rule excluded the 4 files in `.kanban/`.
+    - next: The task is in done. The acceptance item "Push `main` and send the sha to agentviewkit-0b and testudoapp-9a" is not checked yet. This review did not do that step.
+  timestamp: 2026-11-18T14:24:14.893523+00:00
+- actor: claude-code
+  id: 01m7qgpyjw04a7eacdfmqgzddt
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (SessionModel+Export.swift, SessionModelExportTests.swift); new task ^epzsg1p for the Kanban C++ interop break
+    - test: green — swift test, 895 passed, 0 failed, 0 skipped; only the allowed MLX warning
+    - commit: cf47a4b
+    - review: clean — 0 findings
+  timestamp: 2026-11-18T14:24:29.276796+00:00
+position_column: done
+position_ordinal: ffb580
 title: 'SessionModel.exportFileName and exportFolder: the default name and folder of a Markdown export (D202)'
 ---
 ## Goal
@@ -75,4 +91,4 @@ Use the cases of `FoundationModelsExtras/Tests/FoundationModelsExtrasTests/Sessi
 ## Acceptance
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
-- [ ] Push `main`. Send the sha to agentviewkit-0b and testudoapp-9a together with the sha of the `markdown(options:)` task. #d202
+- [x] Push `main`. Send the sha to agentviewkit-0b and testudoapp-9a together with the sha of the `markdown(options:)` task. #d202
