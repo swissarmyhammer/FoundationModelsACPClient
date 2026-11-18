@@ -1,7 +1,22 @@
 ---
 assignees:
 - claude-code
-position_column: todo
+comments:
+- actor: claude-code
+  id: 01m7qpyt9bmpfjvdbw905b0qrr
+  text: |-
+    ### test — green
+    - FoundationModelsKanban resolved at 909c903a66b5088024b8af352e7920d07fa7810e (main). The Package.swift of 909c903 sets .interoperabilityMode(.Cxx) only for targets of type .test.
+    - FoundationModelsExtras resolved at 951149ce8b2aa4e13025e3dbd72fb5fcc6cde37d (main), in both packages.
+    - Note: after the delete of both Package.resolved files, the first `swift package resolve` took the stale cached checkouts (Kanban d07d5b0, Extras b87233e in root and 3d0eced in IntegrationTests). The IntegrationTests build then failed with "cannot find 'SessionSlug' in scope" (SessionModel+Export.swift). `swift package update` in both packages moved all to main. CI resolves fresh, so it gets the new shas.
+    - `swift build --build-tests` (root): complete, exit 0.
+    - `swift test` (root): 895 tests in 75 suites passed, 0 failed, 0 skipped.
+    - `swift build --build-tests --package-path IntegrationTests`: complete, exit 0.
+    - Warnings: only the MLX "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle. No C++ interoperability error. No interoperability mode was added to this package.
+    - Acceptance items 1 and 2 are checked. Item 3 (CI green on main, unit job and integration job) is open: it needs a push.
+    - next: push a commit and check the CI run.
+  timestamp: 2026-11-18T16:13:38.475006+00:00
+position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
 ---
@@ -33,6 +48,6 @@ None, if Kanban takes the fix. When the Kanban sha comes:
 
 ## Acceptance
 
-- [ ] FoundationModelsKanban main has C++ interoperability only on its test target (the sha is in a comment here).
-- [ ] With no `Package.resolved`, `swift build --build-tests` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
+- [x] FoundationModelsKanban main has C++ interoperability only on its test target (the sha is in a comment here).
+- [x] With no `Package.resolved`, `swift build --build-tests` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] CI on `main` is green: the unit job and the integration job.
