@@ -33,6 +33,22 @@ enum InitializeFixtures {
         session: SessionCapabilities(additionalDirectories: SessionAdditionalDirectoriesCapabilities())
     )
 
+    /// The capabilities of an agent that advertises `session/fork` with no
+    /// `_meta.sah.forkCut` flag.
+    static let forkCapabilities = AgentCapabilities(
+        session: SessionCapabilities(fork: SessionForkCapabilities())
+    )
+
+    /// Gives the capabilities of an agent that advertises `session/fork` and
+    /// the `_meta.sah.forkCut` flag.
+    ///
+    /// - Returns: The capabilities, with the flag that `SAH.ForkCut` writes.
+    /// - Throws: `EncodingError` when the flag cannot be encoded.
+    static func forkCutCapabilities() throws -> AgentCapabilities {
+        let fork = SessionForkCapabilities(meta: try SAH.ForkCut.advertise(into: nil))
+        return AgentCapabilities(session: SessionCapabilities(fork: fork))
+    }
+
     /// The id of the auth method that the agent handles through `auth/login`.
     static let agentMethodId = AuthMethodId(rawValue: "api-key")
 
@@ -214,6 +230,38 @@ extension CapabilityFlags {
     }
 }
 
+/// The fork flags of a model, in one value, so a test compares them with one
+/// expectation.
+private struct ForkFlags: Equatable {
+    /// ``ConnectionModel/canForkSessions``.
+    let canForkSessions: Bool
+
+    /// ``ConnectionModel/canForkWithCut``.
+    let canForkWithCut: Bool
+
+    /// The flags with each one false.
+    static let none = ForkFlags(canForkSessions: false, canForkWithCut: false)
+
+    /// The flags of an agent that forks and takes no cut.
+    static let forkOnly = ForkFlags(canForkSessions: true, canForkWithCut: false)
+
+    /// The flags with each one true.
+    static let all = ForkFlags(canForkSessions: true, canForkWithCut: true)
+}
+
+extension ForkFlags {
+    /// Reads the fork flags of a model.
+    ///
+    /// The initializer stands in an extension, so the struct keeps its
+    /// memberwise initializer.
+    ///
+    /// - Parameter model: The model to read.
+    @MainActor
+    init(of model: ConnectionModel) {
+        self.init(canForkSessions: model.canForkSessions, canForkWithCut: model.canForkWithCut)
+    }
+}
+
 /// The initialize and auth tests of the connection model, in one suite so
 /// that `swift test --filter ConnectionModelInitializeTests` selects them.
 @MainActor
@@ -285,6 +333,40 @@ struct ConnectionModelInitializeTests {
 
         #expect(!baseline.model.canUseAdditionalDirectories)
         #expect(advertising.model.canUseAdditionalDirectories)
+    }
+
+    @Test func theForkFlagsAreFalseBeforeInitialize() async throws {
+        let connected = await ConnectedModel(capabilities: try InitializeFixtures.forkCutCapabilities())
+        defer { await connected.model.disconnect() }
+
+        #expect(ForkFlags(of: connected.model) == .none)
+    }
+
+    @Test func anAgentWithNoForkCannotFork() async throws {
+        let connected = await ConnectedModel(capabilities: InitializeFixtures.baselineCapabilities)
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(ForkFlags(of: connected.model) == .none)
+    }
+
+    @Test func anAgentWithAnEmptyForkCanForkWithNoCut() async throws {
+        let connected = await ConnectedModel(capabilities: InitializeFixtures.forkCapabilities)
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(ForkFlags(of: connected.model) == .forkOnly)
+    }
+
+    @Test func anAgentWithTheForkCutFlagCanForkWithACut() async throws {
+        let connected = await ConnectedModel(capabilities: try InitializeFixtures.forkCutCapabilities())
+        defer { await connected.model.disconnect() }
+
+        try await connected.initialize()
+
+        #expect(ForkFlags(of: connected.model) == .all)
     }
 
     @Test func aTerminalOnlyAgentCanLogOutButNotLogIn() async throws {

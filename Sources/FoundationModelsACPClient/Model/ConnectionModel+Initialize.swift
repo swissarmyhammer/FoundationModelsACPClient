@@ -12,6 +12,9 @@ import FoundationModelsExtras
 // - A `capabilities.session` object advertises the session baseline, which
 //   holds `session/list`, `session/resume`, and `session/close`.
 // - `capabilities.session.delete` advertises `session/delete`.
+// - `capabilities.session.fork` advertises `session/fork`. The flag
+//   `_meta.sah.forkCut = true` on it advertises that the agent takes the cut
+//   point of a fork (`SAH.ForkCut`).
 // - `capabilities.session.mcp.http` and `capabilities.session.mcp.stdio`
 //   advertise the MCP transports that the agent can use. The client sends
 //   only the MCP servers of these transports.
@@ -68,6 +71,20 @@ extension ConnectionModel {
     /// ``initialize(_:)`` succeeds.
     public var canDeleteSessions: Bool {
         agentCapabilities?.session?.delete != nil
+    }
+
+    /// Tells whether the agent serves `session/fork`. It is `false` before
+    /// ``initialize(_:)`` succeeds.
+    public var canForkSessions: Bool {
+        agentCapabilities?.session?.fork != nil
+    }
+
+    /// Tells whether the agent serves `session/fork` and takes a cut point
+    /// in `_meta.sah.forkCut` of the request: the fork capability of the
+    /// agent has the flag `_meta.sah.forkCut = true`. It is `false` before
+    /// ``initialize(_:)`` succeeds.
+    public var canForkWithCut: Bool {
+        canForkSessions && SAH.ForkCut.isAdvertised(by: agentCapabilities?.session?.fork)
     }
 
     /// Tells whether the agent accepts the `additionalDirectories` field of
