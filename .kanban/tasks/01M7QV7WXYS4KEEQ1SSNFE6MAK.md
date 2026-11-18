@@ -56,6 +56,52 @@ comments:
     - evidence: local commit made with the code, tests and .kanban changes. Not pushed.
     - next: none
   timestamp: 2026-11-18T17:59:12.208082+00:00
+- actor: claude-code
+  id: 01m7qx5agk2t81f1t9a7zn1ykz
+  text: |-
+    ### review — findings
+    - evidence: `review sha HEAD~1..HEAD` (commit 5e56296). 1 finding (1 confirmed, 4 refuted, 21 attempted, 0 failed). Tests/FoundationModelsACPClientTests/Model/ConnectionModelForkTests.swift:143 `reuse/reuse`.
+    - next: Move the `messageTexts(of:)` helper to one shared test location. Make `SessionFactoryFixtures` and `ForkFixtures` call it. Then run the review again.
+  timestamp: 2026-11-18T18:02:03.155310+00:00
+- actor: claude-code
+  id: 01m7qx5rn81h5h9f1s9dsw49q9
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 18 files (11 Sources, 7 Tests)
+    - test: green — swift test, 909 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: 5e56296
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/ConnectionModelForkTests.swift:143
+  timestamp: 2026-11-18T18:02:17.640603+00:00
+- actor: claude-code
+  id: 01m7qxbcxdp7fvb35415bjc8t1
+  text: |-
+    The reuse finding is fixed (pulled back to doing):
+    - The two copies (`ForkFixtures.messageTexts(of:)` and `SessionFactoryFixtures.messageTexts(of:)`) were identical. Thus the helper has no parameter.
+    - The shared helper is now the computed property `SessionModel.agentMessageTexts: [String?]` in `Tests/FoundationModelsACPClientTests/Model/TranscriptEntryTestSupport.swift`, beside the shared accessors of the transcript entries. Both fixture functions are removed.
+    - The search of the test target found more copies of the same transcript-to-text mapping. They now use the shared helper: the inline map in `ConnectionModelSessionTests` (`session.transcript.map { $0.agentMessage?.content.joinedText }`), the `contains` predicate in `Telemetry/ReplaySpanTests.swift`, and `agentText` in `SessionModelMailOrderTests.swift` (it joined the text blocks of all agent messages by hand; now `agentMessageTexts.compactMap(\.self).joined()`, the same result).
+    - The reads of one entry (`transcript.first?.agentMessage ... .joinedText`) do not map the transcript, so they stay.
+    - TDD note: this is a refactor of test code only, with no new behavior. The tests that use the helper are the check.
+
+    ### implement — changed
+    - evidence: 6 files — Tests/FoundationModelsACPClientTests/Model/TranscriptEntryTestSupport.swift, Model/ConnectionModelForkTests.swift, Model/ConnectionModelSessionTests.swift, Model/SessionModelMailOrderTests.swift, Telemetry/ReplaySpanTests.swift, and this task. `swift build --build-tests`: Build complete. `swift test`: 909 tests in 76 suites passed, 0 failed. The only warning is the allowed MLX "missing creator for mutated node" warning.
+    - next: review. The acceptance item "Push main, and send the sha" stays open.
+  timestamp: 2026-11-18T18:05:22.221556+00:00
+- actor: claude-code
+  id: 01m7qxed5bwk4cq8hrcmttyek9
+  text: |-
+    ### test — green
+    - evidence: swift test (root) — 909 tests in 76 suites passed, 0 failed, 0 skipped; swift build --build-tests --package-path IntegrationTests — Build complete, exit 0
+    - warnings: only the allowed MLX "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle
+    - change checked: shared helper SessionModel.agentMessageTexts in TranscriptEntryTestSupport.swift, used by the four test files
+    - next: review
+  timestamp: 2026-11-18T18:07:00.779984+00:00
+- actor: claude-code
+  id: 01m7qxewzt74rbcqk25cv9fjrc
+  text: |-
+    ### commit — changed
+    - evidence: 623216f test(model): share one agentMessageTexts test helper
+    - next: review
+  timestamp: 2026-11-18T18:07:16.986805+00:00
 depends_on:
 - 01M7QV7G2QQBY03YWR4MWNXM2S
 position_column: doing
@@ -100,3 +146,12 @@ Brief: /Users/wballard/github/swissarmyhammer/.briefs/fork/acpc-brief.md. Overvi
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d205
+
+## Review Findings (2026-11-18 11:59)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 18 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/ConnectionModelForkTests.swift:143` `reuse/reuse` — ForkFixtures.messageTexts(of:) repeats a helper that already exists. The same name is defined as SessionFactoryFixtures.messageTexts in the sibling test file, so the fork tests get a second copy of the same transcript-to-text mapping that can drift apart. Move the helper to a shared test location, such as HeldRequest.swift or a common fixtures file, and have both SessionFactoryFixtures and ForkFixtures call it. If the two differ in some detail, parameterize that difference instead of copying the function.

@@ -65,10 +65,7 @@ private struct MailOrderSession {
 
     /// The text of each agent message of the transcript, joined.
     var agentText: String {
-        session.transcript.compactMap(\.agentMessage).flatMap(\.content).compactMap { block in
-            guard case .text(let content) = block else { return nil }
-            return content.text
-        }.joined()
+        session.agentMessageTexts.compactMap(\.self).joined()
     }
 }
 

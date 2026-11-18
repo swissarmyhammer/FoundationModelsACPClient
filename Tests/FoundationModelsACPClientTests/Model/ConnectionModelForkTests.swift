@@ -132,17 +132,6 @@ private enum ForkFixtures {
         try await connected.initialize()
         return connected.receivedMethods.contains(ClientRequestSpan.Method.forkSession)
     }
-
-    /// Gives the text of each agent message of a session model, in
-    /// transcript order.
-    ///
-    /// - Parameter session: The session model.
-    /// - Returns: The joined text of each entry, or `nil` for an entry that
-    ///   is not an agent message.
-    @MainActor
-    static func messageTexts(of session: SessionModel) -> [String?] {
-        session.transcript.map { $0.agentMessage?.content.joinedText }
-    }
 }
 
 /// The fields of a `session/fork` request that the tests compare.
@@ -264,7 +253,7 @@ struct ConnectionModelForkTests {
 
         let fork = try await connected.model.forkSession(testSession)
 
-        #expect(ForkFixtures.messageTexts(of: fork) == [ForkFixtures.replayedText])
+        #expect(fork.agentMessageTexts == [ForkFixtures.replayedText])
     }
 
     @Test func aRefusedReplayClosesTheForkAndThrowsItsError() async throws {

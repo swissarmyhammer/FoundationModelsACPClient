@@ -5,8 +5,8 @@ import Synchronization
 @testable import FoundationModelsACPClient
 
 // This file holds the shared helpers of the transcript model tests: one
-// accessor for each kind of observable entry object, and the observation
-// probe.
+// accessor for each kind of observable entry object, the agent-message texts
+// of a session, and the observation probe.
 
 extension TranscriptEntry {
     /// The user-message object, or `nil` for another kind.
@@ -57,6 +57,17 @@ extension TranscriptEntry {
     /// The error object, or `nil` for another kind.
     var error: ErrorEntry? {
         if case .error(let object) = self { object } else { nil }
+    }
+}
+
+extension SessionModel {
+    /// The text of each agent message of the transcript, in transcript order.
+    ///
+    /// Each item is the joined text of one entry, or `nil` for an entry that
+    /// is not an agent message. All the tests that compare the agent messages
+    /// of a transcript use this one mapping.
+    var agentMessageTexts: [String?] {
+        transcript.map { $0.agentMessage?.content.joinedText }
     }
 }
 

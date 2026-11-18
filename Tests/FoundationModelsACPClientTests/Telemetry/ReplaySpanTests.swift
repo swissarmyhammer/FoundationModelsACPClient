@@ -292,7 +292,7 @@ struct ReplaySpanTests {
 
             _ = try await session.prompt(ReplaySpanFixtures.promptContent)
             try await waitUntil {
-                session.transcript.contains { $0.agentMessage?.content.joinedText == ReplaySpanFixtures.liveText }
+                session.agentMessageTexts.contains(ReplaySpanFixtures.liveText)
             } orFailWhen: {
                 session.isClosed
             }

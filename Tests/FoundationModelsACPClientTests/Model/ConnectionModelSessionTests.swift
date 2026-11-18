@@ -377,17 +377,6 @@ private enum SessionFactoryFixtures {
         }
     }
 
-    /// Gives the text of each agent message of a session model, in
-    /// transcript order.
-    ///
-    /// - Parameter session: The session model.
-    /// - Returns: The joined text of each entry, or `nil` for an entry that
-    ///   is not an agent message.
-    @MainActor
-    static func messageTexts(of session: SessionModel) -> [String?] {
-        session.transcript.map { $0.agentMessage?.content.joinedText }
-    }
-
     /// Reads a session stream until it gave a number of updates. The request
     /// markers of the stream do not count.
     ///
@@ -463,7 +452,7 @@ struct ConnectionModelSessionTests {
         } orFailWhen: {
             session.isClosed
         }
-        #expect(session.transcript.map { $0.agentMessage?.content.joinedText } == ["first", "second"])
+        #expect(session.agentMessageTexts == ["first", "second"])
         #expect(!session.hasMissedUpdates)
     }
 
@@ -599,7 +588,7 @@ struct ConnectionModelSessionTests {
         let session = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
         #expect(connected.model.session(for: testSession) === session)
-        #expect(SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText])
+        #expect(session.agentMessageTexts == [SessionFactoryFixtures.replayedText])
         #expect(!session.isReplaying)
         #expect(session.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
     }
@@ -620,7 +609,7 @@ struct ConnectionModelSessionTests {
         let resumingEnd = TaskEnd(of: resuming)
 
         try await waitUntil {
-            SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText]
+            session.agentMessageTexts == [SessionFactoryFixtures.replayedText]
         } orFailWhen: {
             resumingEnd.hasEnded || session.isClosed
         }
@@ -641,7 +630,7 @@ struct ConnectionModelSessionTests {
         let second = try await connected.model.resumeSession(SessionFactoryFixtures.resumeRequest)
 
         #expect(second === first)
-        #expect(SessionFactoryFixtures.messageTexts(of: second) == [SessionFactoryFixtures.replayedText])
+        #expect(second.agentMessageTexts == [SessionFactoryFixtures.replayedText])
     }
 
     @Test func eachReplayedUpdateIsInTheModelWhenTheResumeReturns() async throws {
@@ -670,7 +659,7 @@ struct ConnectionModelSessionTests {
 
         #expect(resumed === session)
         #expect(!session.hasMissedUpdates)
-        #expect(SessionFactoryFixtures.messageTexts(of: session) == [SessionFactoryFixtures.replayedText])
+        #expect(session.agentMessageTexts == [SessionFactoryFixtures.replayedText])
     }
 
     @Test func aResumeAnswerWithACommandListSeedsTheCommands() async throws {
@@ -835,7 +824,7 @@ struct ConnectionModelSessionTests {
         let secondModel = try await second.value
         #expect(secondModel === firstModel)
         #expect(connected.model.session(for: testSession) === firstModel)
-        #expect(SessionFactoryFixtures.messageTexts(of: firstModel) == [SessionFactoryFixtures.replayedText])
+        #expect(firstModel.agentMessageTexts == [SessionFactoryFixtures.replayedText])
         #expect(!firstModel.isReplaying)
         #expect(firstModel.history == .retained(replayFrom: SessionModelFixtures.replayFromStart))
         #expect(SessionFactoryFixtures.resumeRequestCount(of: connected) == SessionFactoryFixtures.concurrentResumeCount)
@@ -1280,8 +1269,8 @@ struct ConnectionModelSessionTests {
         try await waitUntil { !first.transcript.isEmpty && !second.transcript.isEmpty } orFailWhen: {
             first.isClosed || second.isClosed
         }
-        #expect(SessionFactoryFixtures.messageTexts(of: first) == ["first"])
-        #expect(SessionFactoryFixtures.messageTexts(of: second) == ["second"])
+        #expect(first.agentMessageTexts == ["first"])
+        #expect(second.agentMessageTexts == ["second"])
     }
 
     @Test func aWrapThatForwardsEachCallKeepsTheTranscriptCurrent() async throws {
@@ -1299,7 +1288,7 @@ struct ConnectionModelSessionTests {
         _ = try await session.prompt([textBlock("Hello")])
 
         try await waitUntil {
-            SessionFactoryFixtures.messageTexts(of: session).compactMap(\.self) == ["first", "second"]
+            session.agentMessageTexts.compactMap(\.self) == ["first", "second"]
         } orFailWhen: {
             session.isClosed
         }
