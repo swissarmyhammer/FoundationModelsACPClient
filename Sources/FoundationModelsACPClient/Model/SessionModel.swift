@@ -378,6 +378,26 @@ public final class SessionModel: Identifiable {
     /// client makes itself.
     @ObservationIgnored private(set) var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
 
+    /// The merged engine entries of the transcript, in the order of
+    /// ``transcript``.
+    ///
+    /// An entry is in the list when it has an engine entry: an entry from the
+    /// wire, and a local user message that the agent linked and echoed. A
+    /// local entry that the agent did not get is not in the list: a pending
+    /// or failed prompt, and a local error. Thus the list holds only the
+    /// history of the session that the agent also has.
+    var engineTranscript: [FoundationModelsACP.SessionEntry] {
+        // A local user message keeps its local identity after the link, so
+        // the engine identity of each object comes from ``wireEntries``.
+        let engineIDs = Dictionary(
+            wireEntries.map { engineID, object in (object.id, engineID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return transcript.compactMap { object in
+            engineIDs[object.id].flatMap(engine.entry(withID:))
+        }
+    }
+
     /// The pending permission requests and the continuation of each one.
     /// The queue is observable, so a read of ``pendingPermissions`` tracks it.
     /// It shares one arrival space with ``elicitations``, so
