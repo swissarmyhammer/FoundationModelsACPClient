@@ -230,8 +230,16 @@ comments:
   id: 01m7tg08n0q78xatyp20bs85r8
   text: 'foundationmodelsacpagent-9e: if CI shows the two local stops (aConnectionModelRunsOneTurnAgainstARealAgent, anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall), or they reproduce serially, send them the run id and a log with wire frames; they make an agent task. Their ^jstmpxs (ACPAgent main 97903c2) fixed an ordering race of a restored run after a cold resume (a stale `running` report after the child''s idle); it can be related to the resume test. CI run 44584505762 resolves ACPAgent when its integration job starts.'
   timestamp: 2026-11-19T18:09:49.216821+00:00
-position_column: review
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m7tr1dzybs7dv8ed0dtb6x6w
+  text: |-
+    ### finish — done
+    - CI run 44603959466 (a66a9f8): success. Unit job green (928 tests). Integration job green (28 tests in 6 suites, the 1 known issue of WireTraceReportTests). The integration job was last green on 2026-11-13.
+    - The causes, in order: FoundationModelsKanban C++ interop on the library (fixed there, 909c903); the scripted stub replayed a pass after a Router compaction stop (ACPAgent b039be6, 2531740); our test waited for the start frame of an inline call and expected the old cancel rule (deec585); a cancelled agents call got no final status (ACPAgent 6790fef); our live server wrote the old profile map (dedb35a).
+    - The review was clean. Every acceptance item is checked.
+  timestamp: 2026-11-19T20:30:16.062822+00:00
+position_column: done
+position_ordinal: ffbd80
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
 ---
 ## Problem
@@ -264,4 +272,4 @@ None, if Kanban takes the fix. When the Kanban sha comes:
 
 - [x] FoundationModelsKanban main has C++ interoperability only on its test target (the sha is in a comment here).
 - [x] With no `Package.resolved`, `swift build --build-tests` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
-- [ ] CI on `main` is green: the unit job and the integration job.
+- [x] CI on `main` is green: the unit job and the integration job.
