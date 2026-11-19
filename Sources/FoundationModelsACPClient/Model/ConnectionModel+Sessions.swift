@@ -136,9 +136,9 @@ extension ConnectionModel {
     /// is opening.
     ///
     /// The router calls this for each request of the agent that names a
-    /// session. When the `session/new` answer of the session arrived and its
-    /// model is not registered yet, the call waits until the open ends, and
-    /// then reads the open sessions again. For each other session that is not
+    /// session. When the `session/new` or the `session/fork` answer of the
+    /// session arrived and its model is not registered yet, the call waits
+    /// until the open ends, and then reads the open sessions again. For each other session that is not
     /// open, it returns `nil` at once.
     ///
     /// - Parameter sessionId: The id of the session.
@@ -173,11 +173,11 @@ extension ConnectionModel {
     /// workspace, and the model goes into ``openSessions``. When the
     /// connection closes, or a new connection takes its place, after the
     /// response arrives but before this call reads it, the model of the fork
-    /// is closed and does not go into ``openSessions``. The wire gives the
-    /// fork response no hook on the reader. Thus the session is opening only
-    /// from the time that this call reads the response. The router answers
-    /// cancel to a permission request or an elicitation of the fork that
-    /// comes before that time.
+    /// is closed and does not go into ``openSessions``. The hook of the fork
+    /// response marks the fork as opening on the reader, before the next
+    /// frame. Thus a permission request or an elicitation of the fork that
+    /// comes directly after the response waits until the model of the fork
+    /// is registered, and does not get cancel.
     ///
     /// The history: the `session/fork` response has no history, and the ACP
     /// contract does not tell the agent to send the history as updates. Thus
@@ -217,11 +217,10 @@ extension ConnectionModel {
         let connection = try openConnection()
         let sent = removingUnadvertisedMCPServers(from: request)
         let fork = try await openSession(sending: sent, over: connection) { traced, didAnswer in
-            let answer = try await connection.forkSession(traced)
-            // The wire has no hook for the fork answer, so the open starts
-            // when this call reads the answer.
-            didAnswer(answer.sessionId)
-            return answer
+            // The hook of the wire runs on the reader, before the next frame.
+            try await connection.forkSession(traced) { answer in
+                didAnswer(answer.sessionId)
+            }
         }
         try await replayHistory(into: fork, forkedWith: sent)
         return fork

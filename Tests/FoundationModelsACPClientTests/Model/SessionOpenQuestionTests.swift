@@ -187,11 +187,24 @@ extension ConnectionModel {
     }
 }
 
+/// The answer that opens the test session. The raw agent sends its question
+/// for the test session directly after this answer.
+private enum OpeningAnswer: Sendable {
+    /// The `session/new` answer opens the test session.
+    case newSession
+
+    /// The `session/new` answer opens the source session
+    /// ``otherTestSession``, with no question. The `session/fork` answer of
+    /// that source opens the test session.
+    case forkSession
+}
+
 /// An agent that writes raw NDJSON frames on the agent end of an in-memory
-/// pair. It answers `initialize`, and it answers `session/new` with the test
-/// session AND sends a permission request for that session in the SAME
-/// transport write. Thus the reader of the client decodes the response and
-/// then the request in one read, with no frame between them.
+/// pair. It answers `initialize`, and it advertises `session/fork`. It
+/// answers the request that opens the test session AND sends a permission
+/// request for that session in the SAME transport write. Thus the reader of
+/// the client decodes the response and then the request in one read, with no
+/// frame between them.
 private final class RawOpenQuestionAgent: Sendable {
     /// The wire id of the permission request of the agent.
     static let questionId = "agent-question-1"
@@ -202,14 +215,19 @@ private final class RawOpenQuestionAgent: Sendable {
     /// The record of the answers.
     private let answers: AgentAnswers
 
+    /// The answer that opens the test session.
+    private let opening: OpeningAnswer
+
     /// Makes the agent.
     ///
     /// - Parameters:
     ///   - transport: The agent end of the pair.
     ///   - answers: The record of the answers.
-    init(transport: InMemoryTransport, answers: AgentAnswers) {
+    ///   - opening: The answer that opens the test session.
+    init(transport: InMemoryTransport, answers: AgentAnswers, opening: OpeningAnswer) {
         self.transport = transport
         self.answers = answers
+        self.opening = opening
     }
 
     /// Reads the frames of the client until the stream ends, and answers
@@ -250,25 +268,59 @@ private final class RawOpenQuestionAgent: Sendable {
             let response = InitializeResponse(
                 info: Implementation(name: "raw-open-question-agent", version: "1.0.0"),
                 protocolVersion: request.protocolVersion,
-                capabilities: AgentCapabilities()
+                capabilities: AgentCapabilities(session: SessionCapabilities(fork: SessionForkCapabilities()))
             )
-            try await transport.write(Self.frame(["jsonrpc": "2.0", "id": frame["id"]!, "result": Self.json(response)]))
+            try await transport.write(Self.response(to: frame, result: response))
+        case ClientRequestSpan.Method.newSession? where opening == .forkSession:
+            try await transport.write(Self.response(to: frame, result: NewSessionResponse(sessionId: otherTestSession)))
         case ClientRequestSpan.Method.newSession?:
-            // One write holds the response and the request, in this order.
-            let response = Self.frame(["jsonrpc": "2.0", "id": frame["id"]!, "result": try Self.json(NewSessionResponse(sessionId: testSession))])
-            let question = Self.frame([
-                "jsonrpc": "2.0", "id": Self.questionId, "method": ClientRequestSpan.Method.requestPermission,
-                "params": try Self.json(SessionModelFixtures.permissionRequest()),
-            ])
-            try await transport.write(response + question)
+            try await answerAndAsk(frame, result: NewSessionResponse(sessionId: testSession))
+        case ClientRequestSpan.Method.forkSession?:
+            try await answerAndAsk(frame, result: ForkSessionResponse(sessionId: testSession))
+        case ClientRequestSpan.Method.resumeSession?:
+            // The fork call replays the history of the fork with a resume.
+            // The agent has no history to replay.
+            try await transport.write(Self.response(to: frame, result: ResumeSessionResponse()))
         case nil where frame["id"] as? String == Self.questionId:
             let result = try JSONSerialization.data(withJSONObject: frame["result"] ?? [:])
             let outcome = try JSONDecoder().decode(RequestPermissionResponse.self, from: result).outcome
             let answers = self.answers
             await MainActor.run { answers.outcomes.append(outcome) }
+        case let method? where frame["id"] != nil:
+            // Each other request gets an error, so no call of the client
+            // waits for ever.
+            let error = ACPError(code: .methodNotFound, message: "The raw agent does not serve \(method).")
+            try await transport.write(Self.frame(["jsonrpc": "2.0", "id": frame["id"]!, "error": try Self.json(error)]))
         default:
             break
         }
+    }
+
+    /// Answers the request that opens the test session, and asks the
+    /// question for the test session in the same transport write.
+    ///
+    /// - Parameters:
+    ///   - frame: The decoded request frame.
+    ///   - result: The answer that opens the test session.
+    /// - Throws: The error of the encoder or of the transport.
+    private func answerAndAsk(_ frame: [String: Any], result: some Encodable) async throws {
+        // One write holds the response and the request, in this order.
+        let question = Self.frame([
+            "jsonrpc": "2.0", "id": Self.questionId, "method": ClientRequestSpan.Method.requestPermission,
+            "params": try Self.json(SessionModelFixtures.permissionRequest()),
+        ])
+        try await transport.write(Self.response(to: frame, result: result) + question)
+    }
+
+    /// Gives the NDJSON response frame to one request frame.
+    ///
+    /// - Parameters:
+    ///   - frame: The decoded request frame.
+    ///   - result: The result of the response.
+    /// - Returns: The JSON text of the response and the newline.
+    /// - Throws: The error of the encoder.
+    private static func response(to frame: [String: Any], result: some Encodable) throws -> Data {
+        Self.frame(["jsonrpc": "2.0", "id": frame["id"]!, "result": try json(result)])
     }
 
     /// Gives the JSON text of the `params` member of a frame.
@@ -361,29 +413,13 @@ struct SessionOpenQuestionTests {
     /// with no hold. ``aQuestionThatReachesTheRouterBeforeTheNewSessionRegisterWaitsForIt()``
     /// fixes the order.
     @Test func aQuestionInTheSameWriteAsTheNewSessionAnswerIsPendingOnTheSessionModel() async throws {
-        let answers = AgentAnswers()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agent = RawOpenQuestionAgent(transport: agentEnd, answers: answers)
-        let agentRun = Task { try await agent.run() }
-        defer { agentRun.cancel() }
-        let model = ConnectionModel(coalescingCadence: .zero)
-        defer { await model.disconnect() }
-        _ = await model.connect(over: clientEnd)
-        _ = try await model.initialize(makeInitializeRequest())
+        let connected = try await RawOpenQuestionConnection(opening: .newSession, holdsTheRegister: false)
+        defer { connected.agentRun.cancel() }
+        defer { await connected.model.disconnect() }
 
-        let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        try await waitUntil {
-            !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil
-        } orFailWhen: {
-            session.isClosed
-        }
+        let session = try await connected.model.newSession(RawOpenQuestionConnection.newSessionRequest)
 
-        #expect(answers.agentEnd == nil, "The agent ended: \(answers.agentEnd ?? "")")
-        #expect(answers.outcomes.isEmpty, "The client answered the question before the user did.")
-        let pending = try #require(session.pendingPermissions.first)
-        await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
-        try await waitUntil { !answers.outcomes.isEmpty || answers.agentEnd != nil } orFailWhen: { session.isClosed }
-        #expect(answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
+        try await connected.expectTheQuestionIsPending(on: session)
     }
 
     /// The agent sends the `session/new` answer and a question for the new
@@ -397,16 +433,102 @@ struct SessionOpenQuestionTests {
     /// the agent got an answer. With no hold in the router, the router
     /// answers cancel at once, and the test fails.
     @Test func aQuestionThatReachesTheRouterBeforeTheNewSessionRegisterWaitsForIt() async throws {
+        let connected = try await RawOpenQuestionConnection(opening: .newSession, holdsTheRegister: true)
+        defer { connected.agentRun.cancel() }
+        defer { await connected.model.disconnect() }
+
+        let session = try await connected.model.newSession(RawOpenQuestionConnection.newSessionRequest)
+
+        try await connected.expectTheQuestionIsPending(on: session)
+    }
+
+    /// The agent sends the `session/fork` answer and a question for the fork
+    /// in one transport write. The test holds the register of the model of
+    /// the fork until the question reached the router. The router must wait
+    /// for the open of the fork, and the question must then be pending on
+    /// the model of the fork.
+    ///
+    /// This test does NOT prove the order. It has the same limit as
+    /// ``aQuestionInTheSameWriteAsTheNewSessionAnswerIsPendingOnTheSessionModel()``.
+    /// The fork call and the router both run on the main actor, and the fork
+    /// call usually gets there first. Thus the test passes also on the code
+    /// with no hook, which marks the fork as opening only when the main
+    /// actor reads the answer. The `onResponse` hook of
+    /// `ClientSideConnection.forkSession(_:onResponse:)` gives the order: it
+    /// marks the fork as opening on the reader, before the question goes to
+    /// the router.
+    @Test func aQuestionDirectlyAfterTheForkAnswerIsPendingOnTheForkModel() async throws {
+        let connected = try await RawOpenQuestionConnection(opening: .forkSession, holdsTheRegister: true)
+        defer { connected.agentRun.cancel() }
+        defer { await connected.model.disconnect() }
+        _ = try await connected.model.newSession(RawOpenQuestionConnection.newSessionRequest)
+
+        let fork = try await connected.model.forkSession(otherTestSession)
+
+        try await connected.expectTheQuestionIsPending(on: fork)
+    }
+}
+
+/// A connection model over the real ACP wire to a ``RawOpenQuestionAgent``.
+@MainActor
+private struct RawOpenQuestionConnection {
+    /// The model under test.
+    let model: ConnectionModel
+
+    /// The record of the answers that the agent got.
+    let answers: AgentAnswers
+
+    /// The task that runs the agent. The test cancels it at its end.
+    let agentRun: Task<Void, any Error>
+
+    /// The new-session request of the tests.
+    static let newSessionRequest = NewSessionRequest(cwd: AbsolutePath(rawValue: "/"))
+
+    /// Connects a model to a raw agent, and initializes the connection. On a
+    /// failure, the model disconnects and the agent stops.
+    ///
+    /// - Parameters:
+    ///   - opening: The answer that opens the test session.
+    ///   - holdsTheRegister: Whether the register of the model of the test
+    ///     session waits until the question of the agent waits for the open
+    ///     of that session. This fixes the order: the router looks up the
+    ///     test session before its model is registered.
+    /// - Throws: The error of `initialize`.
+    init(opening: OpeningAnswer, holdsTheRegister: Bool) async throws {
         let answers = AgentAnswers()
-        let routeState = RouteState()
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agent = RawOpenQuestionAgent(transport: agentEnd, answers: answers)
+        let agent = RawOpenQuestionAgent(transport: agentEnd, answers: answers, opening: opening)
         let agentRun = Task { try await agent.run() }
-        defer { agentRun.cancel() }
         let model = ConnectionModel(coalescingCadence: .zero)
-        defer { await model.disconnect() }
+        if holdsTheRegister {
+            Self.holdTheRegisterOfTheTestSession(of: model, answers: answers)
+        }
+        _ = await model.connect(over: clientEnd)
+        do {
+            _ = try await model.initialize(makeInitializeRequest())
+        } catch {
+            await model.disconnect()
+            agentRun.cancel()
+            throw error
+        }
+        self.model = model
+        self.answers = answers
+        self.agentRun = agentRun
+    }
+
+    /// Holds the register of the model of the test session until the
+    /// question of the agent waits for the open of that session, or until
+    /// the agent got an answer. The register of each other session does not
+    /// wait.
+    ///
+    /// - Parameters:
+    ///   - model: The model under test.
+    ///   - answers: The record of the answers that the agent got.
+    private static func holdTheRegisterOfTheTestSession(of model: ConnectionModel, answers: AgentAnswers) {
+        let routeState = RouteState()
         let opening = model.openingSessions
         model.beforeRegisteringNewSession = { [weak model] sessionId in
+            guard sessionId == testSession else { return }
             Task {
                 await opening.waitForAWaiter(on: sessionId)
                 await MainActor.run { routeState.questionWaits = true }
@@ -419,25 +541,42 @@ struct SessionOpenQuestionTests {
                 model?.hasClosedConnection ?? true
             }
         }
-        _ = await model.connect(over: clientEnd)
-        _ = try await model.initialize(makeInitializeRequest())
+    }
 
-        let session = try await model.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: "/")))
-        try await waitUntil {
-            !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil
-        } orFailWhen: {
-            session.isClosed
-        }
-
-        #expect(answers.agentEnd == nil, "The agent ended: \(answers.agentEnd ?? "")")
-        #expect(answers.outcomes.isEmpty, "The client answered the question before the user did.")
-        let pending = try #require(session.pendingPermissions.first)
+    /// Expects that the question of the agent is pending on a session model,
+    /// that the client did not answer it, and that the choice of the user
+    /// goes to the agent.
+    ///
+    /// - Parameters:
+    ///   - session: The model of the test session.
+    ///   - sourceLocation: The location of the caller, for each failure.
+    /// - Throws: ``WaitEndedOnFailure`` when the session closed during a
+    ///   wait, or the error of `#require` when no question is pending.
+    func expectTheQuestionIsPending(
+        on session: SessionModel,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws {
+        let answers = self.answers
+        try await waitUntil(
+            { !session.pendingPermissions.isEmpty || !answers.outcomes.isEmpty || answers.agentEnd != nil },
+            orFailWhen: { session.isClosed },
+            sourceLocation: sourceLocation
+        )
+        #expect(answers.agentEnd == nil, "The agent ended: \(answers.agentEnd ?? "")", sourceLocation: sourceLocation)
+        #expect(answers.outcomes.isEmpty, "The client answered the question before the user did.", sourceLocation: sourceLocation)
+        let pending = try #require(session.pendingPermissions.first, sourceLocation: sourceLocation)
         await session.selectPermission(pending.id, option: SessionModelFixtures.allowOption.optionId)
-        try await waitUntil { !answers.outcomes.isEmpty || answers.agentEnd != nil } orFailWhen: { session.isClosed }
-        #expect(answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))])
+        try await waitUntil(
+            { !answers.outcomes.isEmpty || answers.agentEnd != nil },
+            orFailWhen: { session.isClosed },
+            sourceLocation: sourceLocation
+        )
+        #expect(
+            answers.outcomes == [.selected(SelectedPermissionOutcome(optionId: SessionModelFixtures.allowOption.optionId))],
+            sourceLocation: sourceLocation
+        )
     }
 }
-
 /// Records that a routed question waits for its opening session. It is
 /// observable, so the seam of the test waits for it with no poll.
 @MainActor @Observable

@@ -20,6 +20,19 @@ comments:
   id: 01m7qw67q3gp568a6hm5xbdphc
   text: 'CI run 44344782311 (7f2c79d, Kanban 909c903): the unit job "Build & test" passed. The C++ interop error is gone. A newer push (cd18647) cancelled the integration job before it ended, after 1h30m. The integration job did not run on a fresh resolve yet: run 44324128382 skipped it because the unit job failed with the old error. Next: watch the CI run of the last D205 push to its end. Both jobs must be green.'
   timestamp: 2026-11-18T17:45:04.483378+00:00
+- actor: claude-code
+  id: 01m7rf7m89fmcsrrkm46t6w630
+  text: |-
+    CI run 44366478943 (fed61b9, fresh resolve): the unit job passed. The integration job FAILED: 28 tests in 6 suites, 1 issue. `AgentNestedScenarioTests/aCancelOfOneChildEndsOnlyThatChild()` passed its time limit (IntegrationTests AgentNestedScenarioTests.swift:212, "Time limit was exceeded: 120.000 seconds"). The log also has "A session/update send failed" (ConnectionError) warnings of FoundationModelsACPAgent at the same time. The known issue in WireTraceReportTests is expected.
+
+    History: the integration job was last green on 2026-11-13 (4a53c2d). From 2026-11-15 to 2026-11-18 it was skipped, because the unit job failed. Thus the cause can be any change after 4a53c2d: our own commits (for example 41cd2c4 "a background tool call stays busy until its real end") or the new mains of the dependencies (FoundationModelsACPAgent, Router, Extras).
+
+    Next: run that test locally in IntegrationTests on the fresh resolve, find whether it is a real failure or a slow runner, and fix the cause. Do this after ^f2kmt6m, one task at a time. Full log: scratchpad integ-ci.log of session 1f1ff490.
+  timestamp: 2026-11-18T23:17:53.033547+00:00
+- actor: claude-code
+  id: 01m7rn5rr00s7m1cpxe410n2b1
+  text: 'Lead from testudoapp-9a: FoundationModelsRouter 020d4e20 (^szyxq9z, 2026-11-19 01:01 UTC) fixed a real race. The MLX transcript reader could miss the last transcript write of a pass, so the repetition watch did not stop the call and the session waited without end, more often under load. The failed integration job of run 44366478943 started at 2026-11-18 19:27 UTC, before that fix. Next: the CI run of the ^f2kmt6m push resolves Router main (with 020d4e20). Watch its integration job before looking for a cause in our commits.'
+  timestamp: 2026-11-19T01:01:43.552353+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
