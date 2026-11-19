@@ -416,6 +416,17 @@ public final class SessionModel: Identifiable {
         engine.entries
     }
 
+    /// The entries of ``wireEntries`` as session updates: one update for
+    /// each entry, in engine order.
+    ///
+    /// The merge engine makes these updates from the same entries as
+    /// ``wireEntries``. When an empty merge engine applies them, it gets the
+    /// same entries. ``snapshot(options:)`` gives them to the builder of the
+    /// share snapshot. They hold no session information update.
+    var wireTranscriptUpdates: [SessionUpdate] {
+        engine.transcriptUpdates
+    }
+
     /// Gives the transcript entry of a wire id.
     ///
     /// A search hit names its entry by the wire id that the merge engine

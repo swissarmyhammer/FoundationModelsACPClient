@@ -82,8 +82,9 @@ let package = Package(
             name: "FoundationModelsACPClient",
             dependencies: [
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
-                // The Markdown renderer of a session, for
-                // `SessionModel.markdown(options:)`. It depends only on the
+                // The Markdown renderer and the share snapshot of a session,
+                // for `SessionModel.markdown(options:)` and
+                // `SessionModel.snapshot(options:)`. It depends only on the
                 // ACP wire.
                 .product(name: "ACPMarkdown", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
@@ -107,8 +108,9 @@ let package = Package(
             dependencies: [
                 "FoundationModelsACPClient",
                 .product(name: "FoundationModelsACP", package: "FoundationModelsACP"),
-                // The tests of `SessionModel.markdown(options:)` compare its
-                // text with the text of the renderer for the same updates.
+                // The tests of `SessionModel.markdown(options:)` and
+                // `SessionModel.snapshot(options:)` compare their result with
+                // the result of `ACPMarkdown` for the same updates.
                 .product(name: "ACPMarkdown", package: "FoundationModelsACP"),
                 .product(name: "FoundationModelsExtras", package: "FoundationModelsExtras"),
                 // The in-memory tracer, log handler and metrics factory of the

@@ -1,0 +1,1 @@
+{"id":"01M7TXXY992WV569TXGA0YJVAS","timestamp":"2026-11-19T22:13:13.129092Z","op":"create","item_id":"01M7TXXY988GV886MVBTY1BVF1","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 0e8a16\n+tag_name: d208\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 0e8a16\n-tag_name: d208\n","transaction_id":null}
