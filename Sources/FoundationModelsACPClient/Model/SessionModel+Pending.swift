@@ -372,7 +372,7 @@ extension SessionModel {
     /// same tool call then takes the links, so a pending elicitation stays
     /// linked across the reset.
     func detachElicitationLinksFromToolCalls() {
-        for case .toolCall(let entry) in wireEntries.values where !entry.linkedElicitationIDs.isEmpty {
+        for case .toolCall(let entry) in transcriptEntriesByWireID.values where !entry.linkedElicitationIDs.isEmpty {
             unresolvedElicitationLinks[entry.toolCallId, default: []].append(contentsOf: entry.linkedElicitationIDs)
         }
     }
@@ -431,7 +431,7 @@ extension SessionModel {
     /// - Returns: The entry, or `nil` before the agent adds the tool call, and
     ///   after a transcript reset until the replay adds the tool call again.
     public func toolCallEntry(for toolCallId: ToolCallId) -> ToolCallEntry? {
-        guard case .toolCall(let entry) = wireEntries[.toolCall(toolCallId)] else { return nil }
+        guard case .toolCall(let entry) = transcriptEntriesByWireID[.toolCall(toolCallId)] else { return nil }
         return entry
     }
 }

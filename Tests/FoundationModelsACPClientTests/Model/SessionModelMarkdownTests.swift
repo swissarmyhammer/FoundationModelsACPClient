@@ -98,6 +98,16 @@ struct SessionModelMarkdownTests {
         #expect(model.markdown() == SessionMarkdown.render(updates: [promptEcho]))
     }
 
+    @Test func theDocumentKeepsTheEngineOrderWhenAnEchoArrivesAfterAnAgentMessage() async throws {
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
+        model.applyEach(agentReady + [promptEcho])
+        sender.answerPrompt(with: testPromptResponse)
+        _ = try await call.value
+
+        #expect(model.markdown() == SessionMarkdown.render(updates: agentReady + [promptEcho]))
+    }
+
     @Test func aReplayIntoANewModelGivesTheTextOfTheLiveModel() {
         let live = liveModel(scriptedUpdates)
         let replayed = SessionModelFixtures.makeModel(sender: FakeSessionRequestSender())

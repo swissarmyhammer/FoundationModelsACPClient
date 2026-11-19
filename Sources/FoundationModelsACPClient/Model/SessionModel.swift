@@ -377,26 +377,46 @@ public final class SessionModel: Identifiable {
     /// The model finds the object of a changed entry by identity and not by
     /// the engine index, because the transcript can also hold entries that the
     /// client makes itself.
-    @ObservationIgnored private(set) var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
+    @ObservationIgnored private(set) var transcriptEntriesByWireID: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
 
-    /// The merged engine entries of the transcript, in the order of
-    /// ``transcript``.
+    /// The merged entries of the merge engine, in engine order: the order of
+    /// first appearance on the wire.
     ///
-    /// An entry is in the list when it has an engine entry: an entry from the
-    /// wire, and a local user message that the agent linked and echoed. A
-    /// local entry that the agent did not get is not in the list: a pending
-    /// or failed prompt, and a local error. Thus the list holds only the
-    /// history of the session that the agent also has.
-    var engineTranscript: [FoundationModelsACP.SessionEntry] {
-        // A local user message keeps its local identity after the link, so
-        // the engine identity of each object comes from ``wireEntries``.
-        let engineIDs = Dictionary(
-            wireEntries.map { engineID, object in (object.id, engineID) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return transcript.compactMap { object in
-            engineIDs[object.id].flatMap(engine.entry(withID:))
-        }
+    /// The list is a copy, so a later update does not change it. It holds
+    /// each entry that the agent also has: each entry from the wire, and the
+    /// echo of each prompt that the agent inserted. A local entry that the
+    /// agent did not get is not in the list: a pending or failed prompt, and
+    /// a local error. A replay of the same updates, for example after
+    /// `session/load` or `session/resume`, gives the same list.
+    ///
+    /// The engine order is the order of the agent. It can be different from
+    /// the order of ``transcript``: the transcript shows a local prompt when
+    /// the client sends it, and the engine adds its echo when the echo
+    /// arrives.
+    ///
+    /// The local search index of an app gives this list to
+    /// `SessionSearchChunker.chunks(of:)` of FoundationModelsACP. Observation
+    /// does not track a read of this list. To know when a turn ended, observe
+    /// ``agentState``: the agent sets it to `idle` when its foreground work
+    /// ends. Then read this list again.
+    public var wireEntries: [FoundationModelsACP.SessionEntry] {
+        engine.entries
+    }
+
+    /// Gives the transcript entry of a wire id.
+    ///
+    /// A search hit names its entry by the wire id that the merge engine
+    /// keeps. Use this call to find the entry, for example to show the
+    /// transcript at the hit. The entry of a linked prompt is the local user
+    /// message of that prompt.
+    ///
+    /// - Parameter id: The wire id of the entry.
+    /// - Returns: The transcript entry, or `nil` when the model has no entry
+    ///   for the id. An unknown id gives `nil`. The id of an entry that a
+    ///   failed replay removed gives `nil`. An echo that the model holds
+    ///   until the response of its prompt arrives gives `nil` until then.
+    public func entry(forWireID id: FoundationModelsACP.SessionEntry.ID) -> TranscriptEntry? {
+        transcriptEntriesByWireID[id]
     }
 
     /// The pending permission requests and the continuation of each one.
@@ -685,7 +705,7 @@ public final class SessionModel: Identifiable {
     /// ``mcpServers`` back itself.
     struct ReplayRollback {
         fileprivate var transcript: [TranscriptEntry]
-        fileprivate var wireEntries: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry]
+        fileprivate var transcriptEntriesByWireID: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry]
         fileprivate var heldEchoes: Set<FoundationModelsACP.SessionEntry.ID>
         fileprivate var unlinkedPrompts: [TranscriptEntry.ID: UserMessageEntry]
         fileprivate var engine: SessionMergeEngine
@@ -714,7 +734,7 @@ public final class SessionModel: Identifiable {
     func makeReplayRollback() -> ReplayRollback {
         ReplayRollback(
             transcript: transcript,
-            wireEntries: wireEntries,
+            transcriptEntriesByWireID: transcriptEntriesByWireID,
             heldEchoes: heldEchoes,
             unlinkedPrompts: unlinkedPrompts,
             engine: engine,
@@ -737,7 +757,7 @@ public final class SessionModel: Identifiable {
     /// - Parameter rollback: The state that ``makeReplayRollback()`` kept.
     func restore(_ rollback: ReplayRollback) {
         transcript = rollback.transcript
-        wireEntries = rollback.wireEntries
+        transcriptEntriesByWireID = rollback.transcriptEntriesByWireID
         heldEchoes = rollback.heldEchoes
         unlinkedPrompts = rollback.unlinkedPrompts
         engine = rollback.engine
@@ -771,7 +791,7 @@ public final class SessionModel: Identifiable {
         detachElicitationLinksFromToolCalls()
         engine.reset()
         transcript.removeAll()
-        wireEntries.removeAll()
+        transcriptEntriesByWireID.removeAll()
         heldEchoes.removeAll()
         unlinkedPrompts.removeAll()
         timekeeper.reset()
@@ -840,7 +860,7 @@ public final class SessionModel: Identifiable {
     ///
     /// - Parameter entry: The engine entry that the engine added.
     private func addEntry(_ entry: FoundationModelsACP.SessionEntry) {
-        if let linked = wireEntries[entry.id] {
+        if let linked = transcriptEntriesByWireID[entry.id] {
             linked.update(from: entry)
             return
         }
@@ -863,7 +883,7 @@ public final class SessionModel: Identifiable {
         if case .toolCall(let toolCall) = object {
             toolCall.session = self
         }
-        wireEntries[entry.id] = object
+        transcriptEntriesByWireID[entry.id] = object
         attachUnresolvedElicitationLinks(to: object)
         if !isReplayingHistory {
             timekeeper.entryDidStart(object)
@@ -883,7 +903,7 @@ public final class SessionModel: Identifiable {
     /// - Parameter entry: The engine entry that the engine changed.
     private func changeEntry(_ entry: FoundationModelsACP.SessionEntry) {
         guard !heldEchoes.contains(entry.id) else { return }
-        guard let object = wireEntries[entry.id] else {
+        guard let object = transcriptEntriesByWireID[entry.id] else {
             recordDefect(
                 "the engine changed an entry that the model does not have: \(entry.id)",
                 log: "The merge engine changed a transcript entry that the session model does not have; the model stays unchanged."
@@ -1050,7 +1070,7 @@ public final class SessionModel: Identifiable {
             )
             return
         }
-        wireEntries[link.entryID] = .userMessage(entry)
+        transcriptEntriesByWireID[link.entryID] = .userMessage(entry)
         entry.assign(Optional(link.messageId), to: \.messageId)
         entry.assign(.sent, to: \.sendState)
         guard heldEchoes.remove(link.entryID) != nil, let echo = engine.entry(withID: link.entryID) else { return }
