@@ -57,8 +57,24 @@ comments:
     - evidence: 1e47f43 fix(model): the fork of a session uses forkSession of the ACP package
     - next: review
   timestamp: 2026-11-19T13:08:18.432906+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m7sytjcepqz35aqhxn3g28v0
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (55bfbee). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. Reviewed files: Sources/FoundationModelsACPClient/Model/ConnectionModel+Sessions.swift, Tests/FoundationModelsACPClientTests/Model/SessionOpenQuestionTests.swift. The review did not examine 10 .kanban files because of .reviewignore.
+    - next: none. The task is in done.
+  timestamp: 2026-11-19T13:09:36.782313+00:00
+- actor: claude-code
+  id: 01m7sytwaxr7bv4c6caw7kdq8r
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (ConnectionModel+Sessions.swift, SessionOpenQuestionTests.swift); first pass stuck (no RED, 18 h hang of the test agent), decision option B
+    - test: green — swift test, 910 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: 55bfbee
+    - review: clean — 0 findings
+  timestamp: 2026-11-19T13:09:46.973490+00:00
+position_column: done
+position_ordinal: ffb880
 title: 'forkSession(_:cut:): mark the fork as opening on the reader when FoundationModelsACP gives forkSession(_:onResponse:)'
 ---
 ## Problem
@@ -75,4 +91,4 @@ The result: a permission request or an elicitation of the agent for the fork tha
 
 ## Acceptance
 
-- [ ] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning. #d205
+- [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning. #d205
