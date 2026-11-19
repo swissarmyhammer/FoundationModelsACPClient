@@ -191,6 +191,19 @@ private func childAndGrandchild(of session: SessionModel) throws -> (child: Sess
     return (child, grandchild)
 }
 
+/// Whether the background list of a session holds a tool call.
+///
+/// - Parameters:
+///   - call: The tool call.
+///   - session: The session that has the background list.
+/// - Returns: `true` when the background list of the session holds the call.
+@MainActor
+private func isBackgroundWork(_ call: ToolCallEntry, of session: SessionModel) -> Bool {
+    session.background.contains { work in
+        if case .toolCall(let listed) = work { listed.toolCallId == call.toolCallId } else { false }
+    }
+}
+
 /// The first half of a nested run: a started agent, a session with the root
 /// prompt, and the wait for the child and the grandchild.
 ///
@@ -207,11 +220,12 @@ private func startNestedRun(_ run: NestedRun) async throws -> (TracedRun, Sessio
 
 @Suite(.acpAgentStubBuilt)
 struct AgentNestedScenarioTests {
-    /// A cancel of one child ends only that child. A cancel of the parent
-    /// leaves a background child running.
+    /// A cancel of one child ends only that child. A cancel of the root ends
+    /// the background child too, because FoundationModelsACPAgent stops all
+    /// work of a session, inline and in the background, on a root cancel.
     @Test(.timeLimit(.minutes(2)))
     @MainActor
-    func aCancelOfOneChildEndsOnlyThatChild() async throws {
+    func aCancelOfOneChildEndsOnlyThatChildAndARootCancelEndsTheBackgroundChild() async throws {
         let (run, started, session) = try await startSession(script: siblingScript)
         defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
@@ -242,19 +256,27 @@ struct AgentNestedScenarioTests {
             Issue.record("the root went idle with a running child")
         }
 
-        // The cancel of the parent leaves the running background child. The
-        // second child starts about 5.7 seconds after the first, inline at
-        // first. Cancel only when the second child is a background item of the
-        // root. With only background work left, a root cancel sends no state
-        // update, so the test does not wait for an idle root.
-        try await started.connected.trace.waitForIncomingFrame(containing: "scripted-call-2")
+        // The cancel of the root. By the design of FoundationModelsACPAgent, a
+        // root cancel stops all work of the session, inline and in the
+        // background. This test examines the background half. The second
+        // child starts about 5.7 seconds after the first, inline at first. The
+        // start frame of its agents call comes at once, while the child is
+        // still inline. Thus cancel only when the background list of the root
+        // holds the agents call of the second child.
+        let secondCall = try #require(agentsCalls(in: session).first { $0.childSession === second })
+        try await waitUntil({ isBackgroundWork(secondCall, of: session) }, orFailWhen: ended)
         try await session.cancel()
-        #expect(second.workState == .running)
-        #expect(!second.isClosed)
 
-        // The sibling ends when its gate opens, and the trace is complete.
-        try run.openGate(named: "b")
-        try await waitUntil({ second.isClosed }, orFailWhen: { session.isClosed })
+        // The background child goes idle with the stop reason `cancelled`. The
+        // agent sends one final update with the status `cancelled` for its
+        // linked agents call, and the child closes. The
+        // gate of the second child stays closed, so only the root cancel can
+        // end the child.
+        let rootClosed: @MainActor () -> Bool = { session.isClosed }
+        try await waitUntil({ second.workState == .idle(stopReason: .cancelled, error: nil) }, orFailWhen: rootClosed)
+        try await waitUntil({ secondCall.status == .cancelled }, orFailWhen: rootClosed)
+        try await waitUntil({ second.isClosed }, orFailWhen: rootClosed)
+        #expect(!session.children.contains { $0 === second })
         started.expectValidTrace()
     }
 
