@@ -410,6 +410,14 @@ public final class SessionModel: Identifiable {
     /// transcript at the hit. The entry of a linked prompt is the local user
     /// message of that prompt.
     ///
+    /// A search hit gives the wire id as text, in the one text form of
+    /// FoundationModelsACP: `SessionEntry.ID.searchHitID`, for example
+    /// `tool:<toolCallId>`. Read the text with
+    /// `SessionEntry.ID(searchHitID:)` of FoundationModelsACP (the
+    /// `LosslessStringConvertible` initializer gives the same result), then
+    /// give the id to this call. The parse gives `nil` for a text that is not
+    /// in the form. This package keeps no copy of the form.
+    ///
     /// - Parameter id: The wire id of the entry.
     /// - Returns: The transcript entry, or `nil` when the model has no entry
     ///   for the id. An unknown id gives `nil`. The id of an entry that a

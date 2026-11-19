@@ -78,8 +78,25 @@ comments:
     - evidence: 351cf01 refactor(model): the entry lookups use entry(forWireID:) and the tests share helpers (local, not pushed)
     - next: review
   timestamp: 2026-11-19T13:22:07.157712+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m7szkhkh9twajews36ttmsje
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (4be1081). 0 findings, 0 confirmed, 0 refuted. 7 pairs attempted, 0 failed. 5 files reviewed. The review did not examine 2 .kanban files because of an ignore rule. The 3 items of the review of 2026-11-19 07:16 are checked.
+    - next: The task is in done. The acceptance item "Push main, and send the sha to agentviewkit-0b and testudoapp-9a" is not checked. That item is not a review finding.
+  timestamp: 2026-11-19T13:23:15.185992+00:00
+- actor: claude-code
+  id: 01m7szkvgc963dzdbbfb9zmp8a
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 5 files (SessionModel+Pending.swift, SessionModel.swift, SessionModelFixtures.swift, SessionModelWireEntryTests.swift, SessionModelMarkdownTests.swift)
+    - test: green — swift test, 917 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: 4be1081 (local; the commit comment names 351cf01, the sha before the amend)
+    - review: clean — 0 findings; the 3 earlier findings are checked
+    - push: held until CI run 44530736484 ends (a push cancels it)
+  timestamp: 2026-11-19T13:23:25.324102+00:00
+position_column: done
+position_ordinal: ffb980
 title: 'SessionModel: the entry of a wire id, and a public read of the merged engine entries (D207)'
 ---
 ## Goal

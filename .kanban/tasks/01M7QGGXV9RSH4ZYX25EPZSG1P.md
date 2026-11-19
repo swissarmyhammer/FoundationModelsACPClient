@@ -33,6 +33,10 @@ comments:
   id: 01m7rn5rr00s7m1cpxe410n2b1
   text: 'Lead from testudoapp-9a: FoundationModelsRouter 020d4e20 (^szyxq9z, 2026-11-19 01:01 UTC) fixed a real race. The MLX transcript reader could miss the last transcript write of a pass, so the repetition watch did not stop the call and the session waited without end, more often under load. The failed integration job of run 44366478943 started at 2026-11-18 19:27 UTC, before that fix. Next: the CI run of the ^f2kmt6m push resolves Router main (with 020d4e20). Watch its integration job before looking for a cause in our commits.'
   timestamp: 2026-11-19T01:01:43.552353+00:00
+- actor: claude-code
+  id: 01m7t1s73yp1cqr9wh0c85kqkg
+  text: 'Local evidence (2026-11-19, during ^bzrxhgb, fresh pins incl. Router main with 020d4e20 and FoundationModelsACP dd3a981): `timeout 1800 swift test --package-path IntegrationTests`, run 2 passed 28 tests in 6 suites, with only the old known issue of WireTraceReportTests. `aCancelOfOneChildEndsOnlyThatChild` passed. Run 1 stopped at the 1800 s timeout during the real model weight load (`FoundationModelsExtras.model.load.weights`), with no test failure, while other sessions ran release builds and benchmarks on the same Mac. CI run 44530736484 is still queued; its integration job is the acceptance check.'
+  timestamp: 2026-11-19T14:01:18.206566+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
