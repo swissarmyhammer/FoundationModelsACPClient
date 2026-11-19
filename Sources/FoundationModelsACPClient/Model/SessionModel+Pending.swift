@@ -422,7 +422,7 @@ extension SessionModel {
     /// Finds the transcript entry of one tool call by the ACP id that the
     /// agent sent.
     ///
-    /// The lookup reads the index of the wire entries, so it does not scan
+    /// The lookup uses ``entry(forWireID:)``, so it does not scan
     /// ``transcript``. A transcript reset removes the entry. The replay then
     /// adds a new object for the same tool call, and this lookup gives that
     /// new object.
@@ -431,7 +431,7 @@ extension SessionModel {
     /// - Returns: The entry, or `nil` before the agent adds the tool call, and
     ///   after a transcript reset until the replay adds the tool call again.
     public func toolCallEntry(for toolCallId: ToolCallId) -> ToolCallEntry? {
-        guard case .toolCall(let entry) = transcriptEntriesByWireID[.toolCall(toolCallId)] else { return nil }
-        return entry
+        guard case .toolCall(let toolCall) = entry(forWireID: .toolCall(toolCallId)) else { return nil }
+        return toolCall
     }
 }

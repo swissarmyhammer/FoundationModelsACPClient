@@ -860,7 +860,7 @@ public final class SessionModel: Identifiable {
     ///
     /// - Parameter entry: The engine entry that the engine added.
     private func addEntry(_ entry: FoundationModelsACP.SessionEntry) {
-        if let linked = transcriptEntriesByWireID[entry.id] {
+        if let linked = self.entry(forWireID: entry.id) {
             linked.update(from: entry)
             return
         }
@@ -903,7 +903,7 @@ public final class SessionModel: Identifiable {
     /// - Parameter entry: The engine entry that the engine changed.
     private func changeEntry(_ entry: FoundationModelsACP.SessionEntry) {
         guard !heldEchoes.contains(entry.id) else { return }
-        guard let object = transcriptEntriesByWireID[entry.id] else {
+        guard let object = self.entry(forWireID: entry.id) else {
             recordDefect(
                 "the engine changed an entry that the model does not have: \(entry.id)",
                 log: "The merge engine changed a transcript entry that the session model does not have; the model stays unchanged."

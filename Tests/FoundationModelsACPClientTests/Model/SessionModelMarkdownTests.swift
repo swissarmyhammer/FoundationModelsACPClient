@@ -9,14 +9,11 @@ import Testing
 // of the model must be the text of the renderer for the same updates. A local
 // entry that the agent did not get is not in the text.
 
-/// The text of the prompt that the tests send.
-private let promptText = "Please list the files."
-
 /// The update stream of a short session: a title, a user message, a
 /// thought, an agent message in two chunks, and a tool call.
 private let scriptedUpdates: [SessionUpdate] = [
     .sessionInfoUpdate(SessionInfoUpdate(title: .value("Listing files"))),
-    userChunk(text: promptText),
+    userChunk(text: SessionModelFixtures.promptText),
     thoughtChunk(text: "The user wants a list."),
     agentChunk(text: "Here are "),
     agentChunk(text: "the **files**:\n\n- a.swift\n"),
@@ -24,10 +21,7 @@ private let scriptedUpdates: [SessionUpdate] = [
 ]
 
 /// The update stream of a session where the agent sent one message.
-private let agentReady = [agentChunk(text: "Ready.")]
-
-/// The echo of the prompt that the agent inserts for the prompt of the tests.
-private let promptEcho = userChunk(text: promptText, message: testPromptResponse.messageId.rawValue)
+private let agentReady = [SessionModelFixtures.agentReadyMessage]
 
 /// The tests of the Markdown document of a session model.
 @MainActor
@@ -61,7 +55,7 @@ struct SessionModelMarkdownTests {
 
     @Test func aPendingLocalUserMessageIsNotInTheDocument() async {
         let model = liveModel(agentReady)
-        let call = await model.startPrompt(promptText, heldBy: sender)
+        let call = await model.startPrompt(SessionModelFixtures.promptText, heldBy: sender)
 
         let documentWhilePending = model.markdown()
 
@@ -72,7 +66,7 @@ struct SessionModelMarkdownTests {
 
     @Test func aFailedLocalUserMessageIsNotInTheDocument() async {
         let model = liveModel(agentReady)
-        let call = await model.startPrompt(promptText, heldBy: sender)
+        let call = await model.startPrompt(SessionModelFixtures.promptText, heldBy: sender)
         sender.failPrompt(with: ConnectionError.closed)
         await #expect(throws: ConnectionError.closed) { try await call.value }
 
@@ -89,34 +83,26 @@ struct SessionModelMarkdownTests {
 
     @Test func aLinkedLocalUserMessageIsInTheDocument() async throws {
         let model = SessionModelFixtures.makeModel(sender: sender)
-        let call = await model.startPrompt(promptText, heldBy: sender)
+        let call = await model.startPrompt(SessionModelFixtures.promptText, heldBy: sender)
         sender.answerPrompt(with: testPromptResponse)
         _ = try await call.value
 
-        model.apply(promptEcho)
+        model.apply(SessionModelFixtures.promptEcho)
 
-        #expect(model.markdown() == SessionMarkdown.render(updates: [promptEcho]))
+        #expect(model.markdown() == SessionMarkdown.render(updates: [SessionModelFixtures.promptEcho]))
     }
 
     @Test func theDocumentKeepsTheEngineOrderWhenAnEchoArrivesAfterAnAgentMessage() async throws {
-        let model = SessionModelFixtures.makeModel(sender: sender)
-        let call = await model.startPrompt(promptText, heldBy: sender)
-        model.applyEach(agentReady + [promptEcho])
-        sender.answerPrompt(with: testPromptResponse)
-        _ = try await call.value
+        let model = try await SessionModelFixtures.echoAfterAgentMessageModel()
 
-        #expect(model.markdown() == SessionMarkdown.render(updates: agentReady + [promptEcho]))
+        let expected = SessionMarkdown.render(updates: SessionModelFixtures.echoAfterAgentMessageUpdates)
+        #expect(model.markdown() == expected)
     }
 
     @Test func aReplayIntoANewModelGivesTheTextOfTheLiveModel() {
-        let live = liveModel(scriptedUpdates)
-        let replayed = SessionModelFixtures.makeModel(sender: FakeSessionRequestSender())
+        let models = SessionModelFixtures.liveAndReplayedModels(of: scriptedUpdates)
 
-        replayed.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
-        replayed.applyEach(scriptedUpdates)
-        replayed.endReplay(succeeded: true)
-
-        #expect(replayed.markdown() == live.markdown())
+        #expect(models.replayed.markdown() == models.live.markdown())
     }
 
     @Test func twoCallsOnTheSameModelGiveTheSameText() {

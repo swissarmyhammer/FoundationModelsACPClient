@@ -176,6 +176,61 @@ enum SessionModelFixtures {
     static func noticeUpdate(_ notice: Notice) -> SessionUpdate {
         .notice(notice)
     }
+
+    // MARK: - A prompt echo after an agent message
+
+    /// The text of the prompt that the prompt tests send.
+    static let promptText = "Please list the files."
+
+    /// The agent message that arrives while the prompt waits for its
+    /// response.
+    static let agentReadyMessage = agentChunk(text: "Ready.")
+
+    /// The echo of the prompt that the agent inserts for the prompt of the
+    /// tests.
+    static let promptEcho = userChunk(text: promptText, message: testPromptResponse.messageId.rawValue)
+
+    /// The updates that arrive while the prompt waits: an agent message,
+    /// then the echo of the prompt. The engine keeps this order.
+    static let echoAfterAgentMessageUpdates = [agentReadyMessage, promptEcho]
+
+    /// Makes a model that sent a prompt, got an agent message and then the
+    /// echo of the prompt while the prompt waited, and then got the response.
+    ///
+    /// The transcript shows the local prompt at its send position. The
+    /// engine keeps the echo at its arrival position, after the agent
+    /// message.
+    ///
+    /// - Returns: The model.
+    /// - Throws: The error of the prompt call.
+    @MainActor
+    static func echoAfterAgentMessageModel() async throws -> SessionModel {
+        let sender = FakeSessionRequestSender()
+        let model = makeModel(sender: sender)
+        let call = await model.startPrompt(promptText, heldBy: sender)
+        model.applyEach(echoAfterAgentMessageUpdates)
+        sender.answerPrompt(with: testPromptResponse)
+        _ = try await call.value
+        return model
+    }
+
+    // MARK: - A live model and its replay
+
+    /// Makes a model that folded the given updates live, and a new model
+    /// that got the same updates in a successful replay.
+    ///
+    /// - Parameter updates: The updates to fold, in order.
+    /// - Returns: The live model and the replayed model.
+    @MainActor
+    static func liveAndReplayedModels(
+        of updates: [SessionUpdate]
+    ) -> (live: SessionModel, replayed: SessionModel) {
+        let live = immediateModel()
+        live.applyEach(updates)
+        let replayed = immediateModel()
+        replayed.replay(updates, succeeded: true)
+        return (live, replayed)
+    }
 }
 
 extension SessionModel {
@@ -186,6 +241,18 @@ extension SessionModel {
         for update in updates {
             apply(update)
         }
+    }
+
+    /// Replays the given updates from the start of the retained history.
+    ///
+    /// - Parameters:
+    ///   - updates: The updates of the replay, in order.
+    ///   - succeeded: `true` when the replay ends with success. `false` makes
+    ///     the model roll back to its state before the replay.
+    func replay(_ updates: [SessionUpdate], succeeded: Bool) {
+        beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
+        applyEach(updates)
+        endReplay(succeeded: succeeded)
     }
 
     /// Starts a prompt of one text block, and waits until the fake sender
