@@ -226,7 +226,11 @@ struct SessionModelWireEntryTests {
         let model = liveModel()
 
         let fired = observationFires(
-            reading: { model.transcript.forEach { _ = $0.wireID } },
+            reading: {
+                for entry in model.transcript {
+                    _ = entry.wireID
+                }
+            },
             during: { model.apply(agentChunk(text: " More text.")) }
         )
 

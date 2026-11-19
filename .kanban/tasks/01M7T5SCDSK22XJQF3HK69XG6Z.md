@@ -54,6 +54,48 @@ comments:
     - evidence: local commit feat(model): each transcript entry shows an observed wireID (not pushed)
     - next: push after CI check
   timestamp: 2026-11-19T15:18:55.525824+00:00
+- actor: claude-code
+  id: 01m7t6abbpbswva8qekcme5c9s
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (1c06d3f): 1 finding, 1 confirmed, 0 refuted. Tests/FoundationModelsACPClientTests/Model/SessionModelWireEntryTests.swift:229 (code-hygiene/idioms-swift, ReplaceForEachWithForLoop). The line is in the new test code of this commit.
+    - next: Replace each `.forEach { ... }` in the changed code of SessionModelWireEntryTests.swift with a for-in loop. Then run `swift build` and `swift test`, commit, and review again.
+  timestamp: 2026-11-19T15:20:33.910804+00:00
+- actor: claude-code
+  id: 01m7t6areeebfdn3hx1e2cs6ws
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 13 files (TranscriptEntry.swift, SessionModel.swift, 10 entry classes, SessionModelWireEntryTests.swift)
+    - test: green — swift test, 928 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: 1c06d3f
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/SessionModelWireEntryTests.swift:229
+  timestamp: 2026-11-19T15:20:47.310651+00:00
+- actor: claude-code
+  id: 01m7t6b6tmgadj8qmkdn12nwmn
+  text: Picked up the review finding. A search of SessionModelWireEntryTests.swift found one `.forEach { ... }` only (in aStreamedAgentChunkDoesNotFireTheObservationOfAnyWireID). It is now a for-in loop. The loop stays inside the `reading` closure, thus `withObservationTracking` tracks each read of `wireID` as before.
+  timestamp: 2026-11-19T15:21:02.036046+00:00
+- actor: claude-code
+  id: 01m7t6cqx80576tbpyyscfanz1
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPClientTests/Model/SessionModelWireEntryTests.swift (the one `.forEach` in the file is now a for-in loop inside the `reading` closure). `timeout 1200 swift build --build-tests`: build complete. `timeout 1800 swift test`: 928 tests in 77 suites passed, exit 0. The only warning is the MLX "missing creator for mutated node" warning.
+    - next: /review. The acceptance item "Push main, and send the sha" stays open. Not committed, not pushed.
+  timestamp: 2026-11-19T15:21:52.296875+00:00
+- actor: claude-code
+  id: 01m7t6ep5akefjbaq3phbqr9wr
+  text: |-
+    ### test — green
+    - evidence: swift test (root package) — 928 tests in 77 suites passed, 0 failed, 0 skipped. swift build --build-tests --package-path IntegrationTests — Build complete.
+    - warnings: only the allowed MLX "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle. No other warning.
+    - next: review or commit.
+  timestamp: 2026-11-19T15:22:56.042775+00:00
+- actor: claude-code
+  id: 01m7t6f6dcdcrhyjsj8k62qtsh
+  text: |-
+    ### commit — changed
+    - evidence: local commit made with the for-in fix and the .kanban files. No push.
+    - next: review the commit.
+  timestamp: 2026-11-19T15:23:12.684301+00:00
 position_column: doing
 position_ordinal: '8180'
 title: Each transcript entry shows its wire id as observable state (D207, for AgentViewKit)
@@ -93,3 +135,12 @@ AgentViewKit proposed `public private(set) var wireLinkRevision: Int`. Do NOT ad
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] Push `main`, and send the sha to agentviewkit-0b. #d207
+
+## Review Findings (2026-11-19 09:19)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 13 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelWireEntryTests.swift:229` `code-hygiene/idioms-swift` — ReplaceForEachWithForLoop: replace use of '.forEach { ... }' with for-in loop.

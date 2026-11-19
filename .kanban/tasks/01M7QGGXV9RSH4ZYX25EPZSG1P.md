@@ -98,6 +98,10 @@ comments:
   id: 01m7t45my0w4ahffrgz99ajgdf
   text: 'FoundationModelsACPAgent accepted the brief: task ^dxtwmw0 (#bug #scripted) in foundationmodelsacpagent-9e. The scripted session will continue the open pass after a Router continuation on a new backend. `Progress(continuing:)` counts the steps that were played from the seeded entries, and `playedToolCallCount` starts from the seeded `.toolCalls`. It includes a stub test and a check of `aCancelOfOneChildEndsOnlyThatChild` with fresh pins. It starts after their D207 work. Next here: when the sha comes, run the integration job again (push, or re-run CI), and close this task when both jobs are green.'
   timestamp: 2026-11-19T14:43:02.720876+00:00
+- actor: claude-code
+  id: 01m7t6c2scv97zfndj1x0h1vnb
+  text: 'FoundationModelsACPAgent ^dxtwmw0 is on main: b039be6 (fix a33d8e7), on Router e437cda. After a Router compaction stop, `Progress(continuing:)` plays only the steps after the last played tool call of the open pass, and `playedToolCallCount` starts from the seeded `.toolCalls`. They did not run our test. Next here: `swift package update` in IntegrationTests/LiveAgentServer, then `timeout 1800 swift test --package-path IntegrationTests --filter aCancelOfOneChildEndsOnlyThatChild`. If it still fails, the possible cause is their card ^ptasrrj: `ScriptedSessionBackend.play` does not check for a cancel between steps, so the old backend can play one more step after a Router stop.'
+  timestamp: 2026-11-19T15:21:30.668903+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
