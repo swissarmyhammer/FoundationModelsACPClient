@@ -15,8 +15,18 @@ public enum IntegrationAgentHome {
             marketplaces: []
         """
 
+    /// The folder of the profile files in a layer, as the README of
+    /// FoundationModelsACPAgent ("Profile files") gives it:
+    /// `<layer>/profiles/<name>.yaml`. The type of the agent that holds this
+    /// name is internal, so this server names the folder itself.
+    public static let profilesFolderName = "profiles"
+
+    /// The extension of a profile file. The name of the file without this
+    /// extension is the name of the profile.
+    public static let profileFileExtension = "yaml"
+
     /// Makes a custom home under `stateDirectory`, and writes the user-layer
-    /// `config.yaml` of the agent into it.
+    /// `config.yaml` and the user-layer profile files of the agent into it.
     ///
     /// A custom home keeps the user layer in its synced root and the hook
     /// data in its local root, so the agent reads and writes no folder of
@@ -27,9 +37,13 @@ public enum IntegrationAgentHome {
     /// - Parameters:
     ///   - stateDirectory: The state directory of the launch.
     ///   - userConfigYAML: The text of the user-layer `config.yaml`.
+    ///   - profiles: The text of each user-layer profile file, by the name of
+    ///     its profile. The default is no profile file.
     /// - Returns: The home.
-    /// - Throws: The error of the directory creation or of the file write.
-    public static func make(under stateDirectory: URL, userConfigYAML: String) throws -> AgentHome {
+    /// - Throws: The error of the directory creation or of a file write.
+    public static func make(
+        under stateDirectory: URL, userConfigYAML: String, profiles: [String: String] = [:]
+    ) throws -> AgentHome {
         let synced = stateDirectory.appending(path: "user", directoryHint: .isDirectory)
         let home = AgentHome.makeCustom(
             synced: synced,
@@ -39,6 +53,26 @@ public enum IntegrationAgentHome {
         try userConfigYAML.write(
             to: home.synced.appending(path: ConfigurationLoader.configFileName),
             atomically: true, encoding: .utf8)
+        try writeProfiles(profiles, into: home.synced)
         return home
+    }
+
+    /// Writes each profile file into the profiles folder of a layer.
+    ///
+    /// - Parameters:
+    ///   - profiles: The text of each profile file, by the name of its
+    ///     profile.
+    ///   - layerRoot: The root folder of the layer: the folder of its
+    ///     `config.yaml`.
+    /// - Throws: The error of the directory creation or of a file write.
+    private static func writeProfiles(_ profiles: [String: String], into layerRoot: URL) throws {
+        guard !profiles.isEmpty else { return }
+        let folder = layerRoot.appending(path: profilesFolderName, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (name, yaml) in profiles {
+            try yaml.write(
+                to: folder.appending(path: "\(name).\(profileFileExtension)"),
+                atomically: true, encoding: .utf8)
+        }
     }
 }

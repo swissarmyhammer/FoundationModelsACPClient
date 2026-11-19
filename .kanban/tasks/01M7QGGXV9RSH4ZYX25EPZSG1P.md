@@ -226,6 +226,10 @@ comments:
     - review: clean — 0 findings
     - next: push, then the CI integration job decides the last acceptance item
   timestamp: 2026-11-19T18:07:47.449723+00:00
+- actor: claude-code
+  id: 01m7tg08n0q78xatyp20bs85r8
+  text: 'foundationmodelsacpagent-9e: if CI shows the two local stops (aConnectionModelRunsOneTurnAgainstARealAgent, anOrderlyQuitResumesTheRunsAndCompletesTheOriginalAgentsCall), or they reproduce serially, send them the run id and a log with wire frames; they make an agent task. Their ^jstmpxs (ACPAgent main 97903c2) fixed an ordering race of a restored run after a cold resume (a stale `running` report after the child''s idle); it can be related to the resume test. CI run 44584505762 resolves ACPAgent when its integration job starts.'
+  timestamp: 2026-11-19T18:09:49.216821+00:00
 position_column: review
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'

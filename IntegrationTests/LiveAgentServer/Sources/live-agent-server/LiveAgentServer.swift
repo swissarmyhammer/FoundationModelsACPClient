@@ -32,19 +32,51 @@ enum LiveAgentServer {
     /// `TierThreeFixture` resolves.
     static let standardModel = "mlx-community/Qwen3-4B-4bit"
 
-    /// The model of the `flash` slot. The router refuses a profile that names
-    /// one model for the `standard` slot and the `flash` slot, so this slot
-    /// names a smaller model. The `agents-demo` example of
-    /// FoundationModelsAgents uses the same pair.
+    /// The model of the `flash` slot: a model that is smaller than
+    /// ``standardModel``, so that the slot costs little memory. The
+    /// `agents-demo` example of FoundationModelsAgents uses the same pair,
+    /// and the CI runner keeps both models in its cache.
     static let flashModel = "mlx-community/Qwen3-1.7B-4bit"
 
+    /// The model of the `embedding` slot. It is the smallest embedding model
+    /// that FoundationModelsACPAgent uses (about 0.31 GB): each shipped
+    /// profile and the `EmbeddingModelTests` fixture name it.
+    static let embeddingModel = "erjigit17/embeddinggemma-300m-ane-coreml"
+
+    /// The model of the `decision` slot: the `h2o-lightning-4b` GGUF of the
+    /// shipped profiles, at its pinned revision. FoundationModelsACPAgent
+    /// tests no smaller decision model.
+    static let decisionModel =
+        "h2oai/h2o-lightning-4b-gguf/h2o-lightning-4b-Q4_K_M.gguf@61f8d8b7a8c2d84426d0d143ca187f65d235934b"
+
+    /// The context of the `decision` slot, in tokens: the value of the
+    /// shipped profiles.
+    static let decisionContext = 16_384
+
+    /// The name of the test profile: the name of its file in the user layer.
+    static let profileName = "integration"
+
+    /// The user-layer profile file of the test profile, in the format of
+    /// Router's `ProfileDefinition`.
+    ///
+    /// The file names each model slot. A key that a profile file leaves out
+    /// takes its value from the shipped profile `large`, and the models of
+    /// `large` do not fit the memory of a CI runner. So each slot names a
+    /// small model, and the profile fits a CI runner.
+    static let profileYAML = """
+        description: Small models for the integration test of FoundationModelsACPClient.
+        standard: ["\(standardModel)"]
+        flash: ["\(flashModel)"]
+        embedding: ["\(embeddingModel)"]
+        decision: ["\(decisionModel)"]
+        decisionContext: \(decisionContext)
+        """
+
     /// The user-layer `config.yaml` of the agent: the offline tools section
-    /// of each test server, and a profile that names two small models.
+    /// of each test server, and the name of the test profile.
     static let userConfigYAML = """
         \(IntegrationAgentHome.offlineToolsYAML)
-        profile:
-          standard: ["\(standardModel)"]
-          flash: ["\(flashModel)"]
+        profile: \(profileName)
         """
 
     /// Makes the agent, serves it on stdin and stdout, and returns when the
@@ -63,8 +95,8 @@ enum LiveAgentServer {
         await agent.waitForConnectionTeardown()
     }
 
-    /// Makes the real agent: writes ``userConfigYAML`` into a user layer
-    /// under the state directory, loads the configuration, and resolves the
+    /// Makes the real agent: writes ``userConfigYAML`` and ``profileYAML``
+    /// into a user layer under the state directory, loads the configuration, and resolves the
     /// profile through a router that loads the real model and decodes
     /// greedy.
     ///
@@ -73,7 +105,9 @@ enum LiveAgentServer {
     /// - Throws: The error of the file write, of the configuration load or of
     ///   the profile resolution.
     private static func makeAgent(_ arguments: LaunchArguments) async throws -> RoutedACPAgent {
-        let home = try IntegrationAgentHome.make(under: arguments.stateDirectory, userConfigYAML: userConfigYAML)
+        let home = try IntegrationAgentHome.make(
+            under: arguments.stateDirectory, userConfigYAML: userConfigYAML,
+            profiles: [profileName: profileYAML])
         let recordingsDirectory = arguments.stateDirectory.appending(
             path: "recordings", directoryHint: .isDirectory)
         let name = try DotfolderName(agentName)
