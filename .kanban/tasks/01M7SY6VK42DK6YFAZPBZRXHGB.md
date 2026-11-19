@@ -99,4 +99,4 @@ Brief: /Users/wballard/github/swissarmyhammer/.briefs/search/acpc-brief.md (item
 ## Acceptance
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
-- [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d207
+- [x] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d207

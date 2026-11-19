@@ -134,7 +134,7 @@ The text form of a wire id is NOT in this task: it belongs in FoundationModelsAC
 ## Acceptance
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
-- [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d207
+- [x] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d207
 
 ## Review Findings (2026-11-19 07:16)
 
