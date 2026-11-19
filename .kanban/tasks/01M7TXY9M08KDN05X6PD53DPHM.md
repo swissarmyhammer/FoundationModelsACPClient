@@ -111,10 +111,26 @@ comments:
     - evidence: 17cbd0f test(model): assert the read-only errors and name the turn numbers
     - next: review
   timestamp: 2026-11-19T23:03:17.322874+00:00
+- actor: claude-code
+  id: 01m7v0vhs70yw967ypmn7g70hm
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 6f61b1a). The review examined 2 files. It found 0 findings: 0 confirmed, 0 refuted, 7 validator runs, 0 failed. The 3 earlier items in "Review Findings (2026-11-19 16:56)" are all checked.
+    - next: The task is in done. The acceptance item "Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a" is not checked yet. It is not a review finding.
+  timestamp: 2026-11-19T23:04:20.519405+00:00
+- actor: claude-code
+  id: 01m7v0vvj828z5z0jb8nn57gjz
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 2 test files (`#expect(throws:)` in place of `try?`, named turn constants)
+    - test: green — swift test, 961 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: 6f61b1a
+    - review: clean — 0 findings; the 3 earlier findings are checked
+  timestamp: 2026-11-19T23:04:30.536451+00:00
 depends_on:
 - 01M7TXXY981MZ52MSTBDJ6NDT9
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: ffbf80
 title: A read-only SessionModel from a share snapshot, with replace(with:) (D208)
 ---
 ## External dependency: do not start before it is on main
@@ -150,7 +166,7 @@ Brief: /Users/wballard/github/swissarmyhammer/.briefs/share/acpc-brief.md (items
 ## Acceptance
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
-- [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d208
+- [x] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d208
 
 ## Review Findings (2026-11-19 16:56)
 
