@@ -208,7 +208,25 @@ comments:
     - evidence: local commit "test(integration): a root cancel ends the background child too". It holds AgentNestedScenarioTests.swift, WireFrameTrace.swift and the .kanban files. The commit is not pushed. The final sha is in the reply of the step, because an amend changes it.
     - next: push after CI check.
   timestamp: 2026-11-19T18:06:29.262304+00:00
-position_column: doing
+- actor: claude-code
+  id: 01m7tfw77hvh07742c0d1ymakb
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (deec585). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. The engine reviewed 2 files: AgentNestedScenarioTests.swift and WireFrameTrace.swift. The 2 .kanban files are excluded by .reviewignore.
+    - acceptance: The item "CI on main is green" is not proven, because commit deec585 is not pushed. This item stays unchecked. Thus the task stays in review, not done.
+    - next: The orchestrator pushes, sees the unit job and the integration job go green, checks the CI item, and moves the task to done.
+  timestamp: 2026-11-19T18:07:36.689661+00:00
+- actor: claude-code
+  id: 01m7tfwhqshdege8fyac538c4s
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (AgentNestedScenarioTests.swift, WireFrameTrace.swift); the test expects the ACPAgent design (root cancel stops inline and background work)
+    - test: green for the scope — aCancelOfOneChild... passed in 14.3 s with ACPAgent 6790fef; AgentNestedScenarioTests and AgentNestedRunTests passed (10 tests); root swift test 928 passed. The local FULL nested suite stopped twice in two other tests (parallel suites, load average about 25); CI runs it serially and is the check.
+    - commit: deec585
+    - review: clean — 0 findings
+    - next: push, then the CI integration job decides the last acceptance item
+  timestamp: 2026-11-19T18:07:47.449723+00:00
+position_column: review
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'
 ---
