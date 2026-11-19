@@ -695,11 +695,18 @@ extension ConnectionModel {
     /// model stays open. When the agent refuses the close, the model stays
     /// open too.
     ///
+    /// A read-only model (``SessionModel/isReadOnly``) has no session on
+    /// this agent, so the call refuses it before it sends anything. A model
+    /// of ``openSessions`` with the same session id stays open.
+    ///
     /// - Parameter session: The model of the session to close.
-    /// - Throws: ``ConnectionModelError/unsupported(method:)`` when
+    /// - Throws: ``SessionModelError/readOnly`` when `session` is read-only,
+    ///   and the call sends nothing;
+    ///   ``ConnectionModelError/unsupported(method:)`` when
     ///   ``canCloseSessions`` is `false`, `ConnectionError.closed` when no
     ///   connection is open, or the error of the agent or of the connection.
     public func close(_ session: SessionModel) async throws {
+        try session.requireWritable()
         try refuseChild(session.sessionId, operation: ClientRequestSpan.Method.closeSession)
         try requireCapability(canCloseSessions, method: ClientRequestSpan.Method.closeSession)
         let connection = try openConnection()

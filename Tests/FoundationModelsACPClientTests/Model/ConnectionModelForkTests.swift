@@ -1,3 +1,4 @@
+import ACPMarkdown
 import FoundationModelsACP
 import Testing
 
@@ -222,6 +223,17 @@ struct ConnectionModelForkTests {
 
         await #expect(throws: ForkFixtures.forkUnsupported) {
             try await connected.model.forkSession(testSession, cut: ForkFixtures.cut)
+        }
+        #expect(try await !ForkFixtures.agentGotAFork(on: connected))
+    }
+
+    @Test func aForkOfTheSessionIdOfAReadOnlyModelThrowsNotOpenAndSendsNothing() async throws {
+        let connected = try await ForkFixtures.connect()
+        defer { await connected.model.disconnect() }
+        let shared = SessionModel(snapshot: SessionSnapshot.build(updates: ForkFixtures.replay), sessionId: testSession)
+
+        await #expect(throws: ConnectionModelError.sessionNotOpen(sessionId: testSession)) {
+            try await connected.model.forkSession(shared.sessionId)
         }
         #expect(try await !ForkFixtures.agentGotAFork(on: connected))
     }

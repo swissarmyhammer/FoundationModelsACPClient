@@ -63,6 +63,12 @@ import Observation
 /// runs the replay of a `session/resume` request, and closes the model; the
 /// UI only reads ``hasMissedUpdates``, ``isReplaying``, ``history``, and
 /// ``isClosed``.
+///
+/// ``init(snapshot:sessionId:)`` makes a read-only model of a share
+/// snapshot, with no connection. ``isReadOnly`` tells the kind of the model.
+/// Each request to the agent on a read-only model throws
+/// ``SessionModelError/readOnly`` before it sends anything, and
+/// ``replace(with:)`` shows a newer snapshot of the same share.
 @MainActor @Observable
 public final class SessionModel: Identifiable {
     /// The identifier of the session.
@@ -75,6 +81,16 @@ public final class SessionModel: Identifiable {
     public nonisolated var id: SessionId {
         sessionId
     }
+
+    /// Whether the model is read-only: a model of a share snapshot, with no
+    /// connection. See ``init(snapshot:sessionId:)``.
+    ///
+    /// The value is a property of the kind of the model. It never changes
+    /// for the life of the model. It is `true` for a model of a snapshot, and
+    /// `false` for each model that a ``ConnectionModel`` makes. Each request
+    /// to the agent on a read-only model throws
+    /// ``SessionModelError/readOnly`` before it sends anything.
+    public nonisolated let isReadOnly: Bool
 
     /// The working directory of the session: the `cwd` of the last
     /// successful `session/new`, `session/fork` or `session/resume` request. `nil` means
@@ -572,6 +588,8 @@ public final class SessionModel: Identifiable {
     ///     the connection, in order: the built-in extensions, and then the
     ///     extensions of ``ConnectionModel/addExtension(_:)``. The default is
     ///     the built-in extensions only.
+    ///   - isReadOnly: Whether the model is read-only. Only the initializer
+    ///     of a snapshot gives `true`. See ``isReadOnly``.
     init(
         sessionId: SessionId,
         requestSender: any SessionRequestSender,
@@ -579,9 +597,11 @@ public final class SessionModel: Identifiable {
         clock: any Clock<Duration> = ContinuousClock(),
         now: @escaping @Sendable () -> Date = Date.init,
         logger: ACPLogger = .disabled,
-        extensionFactories: [SessionExtensionFactory] = BuiltInClientModelExtensions.sessionFactories
+        extensionFactories: [SessionExtensionFactory] = BuiltInClientModelExtensions.sessionFactories,
+        isReadOnly: Bool = false
     ) {
         self.sessionId = sessionId
+        self.isReadOnly = isReadOnly
         sessionExtensions = SessionExtensions(extensionFactories, for: sessionId)
         self.requestSender = requestSender
         self.coalescingCadence = coalescingCadence
@@ -921,7 +941,8 @@ public final class SessionModel: Identifiable {
     ///
     /// A new tool-call entry also takes the links of the pending
     /// elicitations that arrived before it. An entry that the model sees live
-    /// gets its start time; an entry of a replay keeps no time.
+    /// gets its start time. An entry of a replay keeps no time, and an entry
+    /// of a read-only model keeps no time: a share snapshot is history too.
     ///
     /// - Parameter entry: The engine entry.
     private func appendWireEntry(_ entry: FoundationModelsACP.SessionEntry) {
@@ -931,7 +952,7 @@ public final class SessionModel: Identifiable {
         }
         transcriptEntriesByWireID[entry.id] = object
         attachUnresolvedElicitationLinks(to: object)
-        if !isReplayingHistory {
+        if !isReplayingHistory, !isReadOnly {
             timekeeper.entryDidStart(object)
         }
         transcript.append(object)

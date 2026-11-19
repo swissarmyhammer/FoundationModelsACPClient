@@ -36,10 +36,13 @@ extension SessionModel {
     ///   - meta: The `_meta` field of the request, for example the trace
     ///     parent, or `nil`.
     /// - Returns: The response, which names the inserted user message.
-    /// - Throws: The error of the sender: `RequestError` on a peer error,
-    ///   `ConnectionError` on a disconnect or a timeout, or
-    ///   `CancellationError` when the calling task is cancelled.
+    /// - Throws: ``SessionModelError/readOnly`` on a read-only model, before
+    ///   the transcript changes and before anything goes out. Else the error
+    ///   of the sender: `RequestError` on a peer error, `ConnectionError` on a
+    ///   disconnect or a timeout, or `CancellationError` when the calling
+    ///   task is cancelled.
     public func prompt(_ content: [ContentBlock], meta: JSONValue? = nil) async throws -> PromptResponse {
+        try requireWritable()
         try requireAllowedOnChild(ClientRequestSpan.Method.prompt) { _ in false }
         let entry = UserMessageEntry(content: content, meta: meta)
         addPendingPrompt(entry)
@@ -136,9 +139,11 @@ extension SessionModel {
     /// trace context of the cancel span replaces its trace context members.
     ///
     /// - Parameter meta: The `_meta` field of the notification, or `nil`.
-    /// - Throws: The error of the sender: `ConnectionError` after a
-    ///   disconnect.
+    /// - Throws: ``SessionModelError/readOnly`` on a read-only model, before
+    ///   a pending request changes and before anything goes out. Else the
+    ///   error of the sender: `ConnectionError` after a disconnect.
     public func cancel(meta: JSONValue? = nil) async throws {
+        try requireWritable()
         try requireAllowedOnChild(ClientRequestSpan.Method.cancelSession) { $0.cancel != nil }
         permissions.cancelAll()
         cancelPendingElicitations(reason: ACPClient.clientCancelledReason)
@@ -153,9 +158,11 @@ extension SessionModel {
     /// session update, which sets ``configOptions``.
     ///
     /// - Parameter request: The set-config-option request.
-    /// - Throws: The error of the sender: `RequestError` on a peer error, or
-    ///   `ConnectionError` on a disconnect or a timeout.
+    /// - Throws: ``SessionModelError/readOnly`` on a read-only model, before
+    ///   anything goes out. Else the error of the sender: `RequestError` on a
+    ///   peer error, or `ConnectionError` on a disconnect or a timeout.
     public func setConfigOption(_ request: SetSessionConfigOptionRequest) async throws {
+        try requireWritable()
         try requireAllowedOnChild(ClientRequestSpan.Method.setConfigOption) { _ in false }
         try await requestSender.setConfigOption(request)
     }

@@ -1,3 +1,4 @@
+import ACPMarkdown
 import Foundation
 import FoundationModelsACP
 import Synchronization
@@ -1308,6 +1309,30 @@ struct ConnectionModelSessionTests {
         #expect(session.isClosed)
         #expect(connected.model.openSessions.isEmpty)
         #expect(connected.receivedMethods.last == ClientRequestSpan.Method.closeSession)
+    }
+
+    @Test func aCloseOfAReadOnlyModelThrowsReadOnlyAndSendsNothing() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
+        _ = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let shared = SessionModel(snapshot: SessionSnapshot.build(updates: SessionFactoryFixtures.twoMessages), sessionId: testSession)
+
+        await #expect(throws: SessionModelError.readOnly) { try await connected.model.close(shared) }
+        // A second initialize makes a round trip, so a close that went out
+        // before it is in the record of the agent.
+        _ = try await connected.initialize()
+        #expect(!connected.receivedMethods.contains(ClientRequestSpan.Method.closeSession))
+    }
+
+    @Test func aCloseOfAReadOnlyModelKeepsTheOpenModelOfTheSameSession() async throws {
+        let connected = try await SessionFactoryFixtures.connect()
+        defer { await connected.model.disconnect() }
+        let live = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
+        let shared = SessionModel(snapshot: SessionSnapshot.build(updates: SessionFactoryFixtures.twoMessages), sessionId: testSession)
+
+        try? await connected.model.close(shared)
+
+        #expect(connected.model.session(for: testSession) === live)
     }
 
     @Test func aClosedModelKeepsItsTranscript() async throws {
