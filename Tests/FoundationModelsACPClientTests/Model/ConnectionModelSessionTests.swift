@@ -1330,7 +1330,7 @@ struct ConnectionModelSessionTests {
         let live = try await connected.model.newSession(SessionFactoryFixtures.newSessionRequest)
         let shared = SessionModel(snapshot: SessionSnapshot.build(updates: SessionFactoryFixtures.twoMessages), sessionId: testSession)
 
-        try? await connected.model.close(shared)
+        await #expect(throws: SessionModelError.readOnly) { try await connected.model.close(shared) }
 
         #expect(connected.model.session(for: testSession) === live)
     }

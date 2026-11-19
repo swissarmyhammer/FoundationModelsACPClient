@@ -65,6 +65,52 @@ comments:
     - evidence: local commit made, subject "feat(model): add a read-only SessionModel from a snapshot". Not pushed.
     - next: review or push as the caller decides.
   timestamp: 2026-11-19T22:56:37.223792+00:00
+- actor: claude-code
+  id: 01m7v0hw9p76yrptnbxkfe7am0
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (5238304); 3 findings — Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift:1333, Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:31, Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:34
+    - next: implement the 3 findings in the "Review Findings (2026-11-19 16:56)" section. Then test, commit and review again.
+  timestamp: 2026-11-19T22:59:03.606012+00:00
+- actor: claude-code
+  id: 01m7v0jfc4sdxkm1brwd60nv31
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 4 new files and 5 changed files (first pass changed the answer methods and added a fork overload; both reverted by decision)
+    - test: green — swift test, 961 passed, 0 failed, 0 skipped; IntegrationTests build complete; no answer-method signature changed; only the allowed MLX warning
+    - commit: 5238304
+    - review: findings — Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift:1333, Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:31, Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:34
+  timestamp: 2026-11-19T22:59:23.140339+00:00
+- actor: claude-code
+  id: 01m7v0q9zaf086yy68tyqfw3fv
+  text: |-
+    Fixes of the 3 review findings (2026-11-19 16:56):
+    - ConnectionModelSessionTests.swift: `aCloseOfAReadOnlyModelKeepsTheOpenModelOfTheSameSession` now asserts `SessionModelError.readOnly` with `#expect(throws:)`, and keeps the identity assertion. The other new tests of the commit in this file had no other `try?`. ConnectionModelForkTests.swift has no `try?` in its new test.
+    - SessionModelReadOnlyTests.swift: the same cause (`try?` hides the refusal) was also in the "SendsNothing" tests (prompt two times, cancel, set mode) and in `aReplaceOnAModelOfAConnectionChangesNothing`. Each now asserts the error (`readOnly` or `notReadOnly`) with `#expect(throws:)`, and keeps its own assertion.
+    - SessionModelReadOnlyTests.swift: each turn number is now a named constant in `ReadOnlyFixtures` (`firstTurnNumber`, `secondTurnNumber`, `thirdTurnNumber`, `fourthTurnNumber`), in the `static let` style of the other test fixtures. No other literal number is in the file.
+  timestamp: 2026-11-19T23:02:01.450531+00:00
+- actor: claude-code
+  id: 01m7v0qc65tvp7z94w56z4e9jn
+  text: |-
+    ### implement — changed
+    - evidence: 2 files — Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift, Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift. `swift build --build-tests`: Build complete, only the allowed MLX warning. `swift test`: 961 tests in 79 suites passed, only the allowed MLX warning.
+    - next: test, commit, then review again. The acceptance item "Push main, and send the sha" stays open.
+  timestamp: 2026-11-19T23:02:03.717536+00:00
+- actor: claude-code
+  id: 01m7v0s5ejca38t665wd4dq650
+  text: |-
+    ### test — green
+    - evidence: swift test (root) — 961 tests in 79 suites passed, 0 failed, 0 skipped. swift build --build-tests --package-path IntegrationTests — Build complete, exit 0.
+    - warnings: only the allowed MLX "missing creator for mutated node" warning for mlx-swift_Cmlx.bundle. No other warning.
+    - next: review
+  timestamp: 2026-11-19T23:03:02.354792+00:00
+- actor: claude-code
+  id: 01m7v0sm2am7pwg0r3hvr6jzas
+  text: |-
+    ### commit — changed
+    - evidence: 17cbd0f test(model): assert the read-only errors and name the turn numbers
+    - next: review
+  timestamp: 2026-11-19T23:03:17.322874+00:00
 depends_on:
 - 01M7TXXY981MZ52MSTBDJ6NDT9
 position_column: doing
@@ -105,3 +151,14 @@ Brief: /Users/wballard/github/swissarmyhammer/.briefs/share/acpc-brief.md (items
 
 - [x] `swift build` and `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] Push `main`, and send the sha to agentviewkit-0b and testudoapp-9a. #d208
+
+## Review Findings (2026-11-19 16:56)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 9 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Tests/FoundationModelsACPClientTests/Model/ConnectionModelSessionTests.swift:1333` `test-integrity/no-test-cheating` — The test discards the error of `close(shared)` with `try?`, so it does not prove the refusal. The test passes if the close throws any error, including an unrelated one such as `ConnectionError.closed`, or if the close is refused for another reason. The test should assert that the call throws `SessionModelError.readOnly`, as the sibling test at line 1320 does. The surviving assertion on line 1335 still fails if the model is unregistered, so the test is not vacuous. The gap is that the refusal itself is never proven. Replace `try? await connected.model.close(shared)` with `await #expect(throws: SessionModelError.readOnly) { try await connected.model.close(shared) }`, and keep the identity assertion on line 1335.
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:31` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `Tests/FoundationModelsACPClientTests/Model/SessionModelReadOnlyTests.swift:34` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

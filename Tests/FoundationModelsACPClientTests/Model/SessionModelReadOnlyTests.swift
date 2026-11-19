@@ -15,6 +15,18 @@ private let shareTitle = "Listing files"
 
 /// The fixtures of the read-only tests.
 private enum ReadOnlyFixtures {
+    /// The number of the first turn of the session.
+    static let firstTurnNumber = 1
+
+    /// The number of the second turn of the session.
+    static let secondTurnNumber = 2
+
+    /// The number of the third turn: the first turn of a newer share.
+    static let thirdTurnNumber = 3
+
+    /// The number of the fourth turn: the last turn of a newer share.
+    static let fourthTurnNumber = 4
+
     /// The updates of one turn: a user message and an agent message.
     ///
     /// - Parameter number: The number of the turn. It makes the message ids
@@ -28,10 +40,11 @@ private enum ReadOnlyFixtures {
     }
 
     /// The updates of the first turns of the session.
-    static let firstTurns = turn(1) + [thoughtChunk(text: "The user wants a list.")] + turn(2)
+    static let firstTurns =
+        turn(firstTurnNumber) + [thoughtChunk(text: "The user wants a list.")] + turn(secondTurnNumber)
 
     /// The updates of the first turns and two more turns.
-    static let fourTurns = firstTurns + turn(3) + turn(4)
+    static let fourTurns = firstTurns + turn(thirdTurnNumber) + turn(fourthTurnNumber)
 
     /// The updates of a session whose last agent message is not complete.
     static let partialAnswer = [userChunk(text: "Question", message: "user-1"), agentChunk(text: "Hel", message: "agent-1")]
@@ -214,7 +227,7 @@ struct SessionModelReadOnlyTests {
     @Test func aPromptOnAReadOnlyModelSendsNothing() async {
         let shared = ReadOnlyFixtures.readOnlyModel(sender: sender)
 
-        _ = try? await shared.prompt([textBlock("Hello")])
+        await #expect(throws: SessionModelError.readOnly) { try await shared.prompt([textBlock("Hello")]) }
 
         #expect(sender.sentMethods.elements.isEmpty)
     }
@@ -223,7 +236,7 @@ struct SessionModelReadOnlyTests {
         let shared = ReadOnlyFixtures.readOnlyModel(sender: sender)
         let before = shared.transcriptRows
 
-        _ = try? await shared.prompt([textBlock("Hello")])
+        await #expect(throws: SessionModelError.readOnly) { try await shared.prompt([textBlock("Hello")]) }
 
         #expect(shared.transcriptRows == before)
     }
@@ -237,7 +250,7 @@ struct SessionModelReadOnlyTests {
     @Test func aCancelOnAReadOnlyModelSendsNothing() async {
         let shared = ReadOnlyFixtures.readOnlyModel(sender: sender)
 
-        try? await shared.cancel()
+        await #expect(throws: SessionModelError.readOnly) { try await shared.cancel() }
 
         #expect(sender.sentMethods.elements.isEmpty)
     }
@@ -253,7 +266,9 @@ struct SessionModelReadOnlyTests {
     @Test func aSetModeOnAReadOnlyModelSendsNothing() async {
         let shared = ReadOnlyFixtures.readOnlyModel(sender: sender)
 
-        try? await shared.setConfigOption(ReadOnlyFixtures.setModeRequest)
+        await #expect(throws: SessionModelError.readOnly) {
+            try await shared.setConfigOption(ReadOnlyFixtures.setModeRequest)
+        }
 
         #expect(sender.sentMethods.elements.isEmpty)
     }
@@ -305,8 +320,8 @@ struct SessionModelReadOnlyTests {
     }
 
     @Test func aReplaceWithADifferentStartShowsTheNewerTranscript() throws {
-        let shared = SessionModel(snapshot: ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.turn(1)), sessionId: testSession)
-        let newer = ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.turn(2))
+        let shared = SessionModel(snapshot: ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.turn(ReadOnlyFixtures.firstTurnNumber)), sessionId: testSession)
+        let newer = ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.turn(ReadOnlyFixtures.secondTurnNumber))
 
         try shared.replace(with: newer)
 
@@ -349,10 +364,12 @@ struct SessionModelReadOnlyTests {
 
     @Test func aReplaceOnAModelOfAConnectionChangesNothing() {
         let live = SessionModelFixtures.immediateModel()
-        live.applyEach(ReadOnlyFixtures.turn(1))
+        live.applyEach(ReadOnlyFixtures.turn(ReadOnlyFixtures.firstTurnNumber))
         let before = live.transcriptRows
 
-        try? live.replace(with: ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.fourTurns))
+        #expect(throws: SessionModelError.notReadOnly) {
+            try live.replace(with: ReadOnlyFixtures.snapshot(of: ReadOnlyFixtures.fourTurns))
+        }
 
         #expect(live.transcriptRows == before)
     }
