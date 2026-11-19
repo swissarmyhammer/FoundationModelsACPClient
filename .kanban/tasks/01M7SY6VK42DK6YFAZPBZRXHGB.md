@@ -53,10 +53,27 @@ comments:
     - evidence: 31bdff1 test(model): the nine ids of the wire entry make a round trip
     - next: none. The commit is local. No push.
   timestamp: 2026-11-19T14:02:19.787290+00:00
+- actor: claude-code
+  id: 01m7t1xd8fedk1rsywgrhecx96
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (e8b91e4). 0 findings, 0 confirmed, 0 refuted, 7 validator runs, 0 failed. The review examined 2 files. The ignore rule excluded 6 .kanban/ files.
+    - next: The task is in done. The acceptance item "Push main, and send the sha to agentviewkit-0b and testudoapp-9a" is not checked yet. The orchestrator must do it.
+  timestamp: 2026-11-19T14:03:35.567853+00:00
+- actor: claude-code
+  id: 01m7t1xnr93tjfp54aw1bctnrc
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (SessionModel.swift doc comment, SessionModelWireEntryTests.swift); no entry(forWireText:), by decision
+    - test: green — swift test, 919 passed, 0 failed, 0 skipped; IntegrationTests build complete; only the allowed MLX warning
+    - commit: e8b91e4 (local; the commit comment names 31bdff1, the sha before the amend)
+    - review: clean — 0 findings
+    - push: held until CI run 44530736484 ends (a push cancels it)
+  timestamp: 2026-11-19T14:03:44.265521+00:00
 depends_on:
 - 01M7SY6JA3QTH4HNRREV28T8MB
-position_column: doing
-position_ordinal: '8180'
+position_column: done
+position_ordinal: ffba80
 title: 'The text form of a wire id: adopt SessionEntry.ID text form of FoundationModelsACP for search hits (D207)'
 ---
 ## External dependency: do not start before it is on main
