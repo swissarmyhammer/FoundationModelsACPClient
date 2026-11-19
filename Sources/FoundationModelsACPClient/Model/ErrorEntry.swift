@@ -17,6 +17,11 @@ public final class ErrorEntry: ObservableTranscriptEntry {
     /// ends when the client adds it. See ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry. The engine has no error kind, so a local
+    /// error is never linked to an engine entry, and this is always `nil`.
+    /// See ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The JSON-RPC error code.
     public let code: ErrorCode
 

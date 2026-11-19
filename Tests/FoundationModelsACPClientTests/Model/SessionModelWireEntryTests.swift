@@ -79,6 +79,14 @@ private let everyKindIDs: [FoundationModelsACP.SessionEntry.ID] = [
     .unidentified(position: everyKindUpdates.count - 1),
 ]
 
+/// The wire id of the echo of the prompt of
+/// `SessionModelFixtures.echoAfterAgentMessageModel()`.
+private let promptEchoID = FoundationModelsACP.SessionEntry.ID.userMessage(testPromptResponse.messageId)
+
+/// The wire ids that the predicate on `TranscriptEntry.wireID` must find: a
+/// tool call, an agent message, and the echo of a linked local prompt.
+private let predicateIDs: [FoundationModelsACP.SessionEntry.ID] = [toolCallID, agentMessageID, promptEchoID]
+
 /// The tests of the wire-id reads of a session model.
 @MainActor
 @Suite
@@ -150,5 +158,104 @@ struct SessionModelWireEntryTests {
         let models = SessionModelFixtures.liveAndReplayedModels(of: scriptedUpdates)
 
         #expect(models.replayed.wireEntries == models.live.wireEntries)
+    }
+
+    // MARK: - The observed wire id of each entry
+
+    /// Makes a model with a linked local prompt, an agent message, and a
+    /// tool call.
+    ///
+    /// - Returns: The model.
+    /// - Throws: The error of the prompt call.
+    func linkedPromptModel() async throws -> SessionModel {
+        let model = try await SessionModelFixtures.echoAfterAgentMessageModel()
+        model.apply(toolCallStatus(id: "tool-1", .completed))
+        return model
+    }
+
+    /// Gives the local user message of the prompt of a model.
+    ///
+    /// - Parameter model: The model that sent the prompt.
+    /// - Returns: The local user message.
+    /// - Throws: An issue when the transcript has no local user message.
+    func localPrompt(of model: SessionModel) throws -> UserMessageEntry {
+        try #require(model.transcript.lazy.compactMap(\.userMessage).first { $0.origin == .local })
+    }
+
+    @Test(arguments: everyKindIDs)
+    func aWireEntryHasItsEngineIDAsItsWireID(_ id: FoundationModelsACP.SessionEntry.ID) {
+        let model = liveModel(of: everyKindUpdates)
+
+        #expect(model.entry(forWireID: id)?.wireID == id)
+    }
+
+    @Test func aLocalErrorEntryHasNoWireID() throws {
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        model.appendError(code: .internalError, message: "Failed", data: nil)
+
+        #expect(try #require(model.transcript.first).wireID == nil)
+    }
+
+    @Test func aLocalPromptHasNoWireIDBeforeItsLink() async throws {
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(SessionModelFixtures.promptText, heldBy: sender)
+        defer { call.cancel() }
+
+        #expect(try localPrompt(of: model).wireID == nil)
+    }
+
+    @Test func aLinkedLocalPromptHasTheWireIDOfItsEcho() async throws {
+        let model = try await SessionModelFixtures.echoAfterAgentMessageModel()
+
+        #expect(try localPrompt(of: model).wireID == promptEchoID)
+    }
+
+    @Test func theLinkOfAnEchoWithTheSameTextFiresTheObservationOfTheWireID() async throws {
+        let model = SessionModelFixtures.makeModel(sender: sender)
+        let call = await model.startPrompt(SessionModelFixtures.promptText, heldBy: sender)
+        sender.answerPrompt(with: testPromptResponse)
+        _ = try await call.value
+        let prompt = try localPrompt(of: model)
+
+        let fired = observationFires(reading: { _ = prompt.wireID }, during: { model.apply(SessionModelFixtures.promptEcho) })
+
+        #expect(fired)
+    }
+
+    @Test func aStreamedAgentChunkDoesNotFireTheObservationOfAnyWireID() {
+        let model = liveModel()
+
+        let fired = observationFires(
+            reading: { model.transcript.forEach { _ = $0.wireID } },
+            during: { model.apply(agentChunk(text: " More text.")) }
+        )
+
+        #expect(!fired)
+    }
+
+    @Test func aReplayWithHistoryRemovesTheWireIDOfALinkedLocalPrompt() async throws {
+        let model = try await SessionModelFixtures.echoAfterAgentMessageModel()
+        let prompt = try localPrompt(of: model)
+
+        model.beginReplay(replayFrom: SessionModelFixtures.replayFromStart)
+
+        #expect(prompt.wireID == nil)
+    }
+
+    @Test func aFailedReplaySetsTheWireIDOfALinkedLocalPromptBack() async throws {
+        let model = try await SessionModelFixtures.echoAfterAgentMessageModel()
+        let prompt = try localPrompt(of: model)
+
+        model.replay(SessionModelFixtures.echoAfterAgentMessageUpdates, succeeded: false)
+
+        #expect(prompt.wireID == promptEchoID)
+    }
+
+    @Test(arguments: predicateIDs)
+    func thePredicateOnTheWireIDFindsTheEntryOfTheID(_ id: FoundationModelsACP.SessionEntry.ID) async throws {
+        let model = try await linkedPromptModel()
+        let expected = try #require(model.entry(forWireID: id)?.id)
+
+        #expect(model.transcript.first { $0.wireID == id }?.id == expected)
     }
 }

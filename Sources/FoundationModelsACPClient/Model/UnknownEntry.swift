@@ -20,6 +20,12 @@ public final class UnknownEntry: ObservableTranscriptEntry {
     /// ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it. The value is set when the entry starts, and it does not
+    /// change. A streamed chunk does not change it. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The `sessionUpdate` type of the update.
     public internal(set) var type = ""
 
@@ -34,6 +40,7 @@ public final class UnknownEntry: ObservableTranscriptEntry {
     /// - Parameter entry: The engine entry of the update.
     init(wire entry: FoundationModelsACP.SessionEntry) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         update(from: entry)
     }
 

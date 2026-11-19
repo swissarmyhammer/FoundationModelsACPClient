@@ -28,6 +28,15 @@ public final class UserMessageEntry: MessageTranscriptEntry {
     /// The send state of the message.
     public internal(set) var sendState: SendState
 
+    /// The engine id of the message, or `nil` while no engine entry is
+    /// linked to it.
+    ///
+    /// A user message from the wire has its engine id from its start. A
+    /// local message has `nil` until the client links it to the echo of its
+    /// prompt. Then it has the engine id of that echo. A streamed chunk does
+    /// not change it. See ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The `_meta` field of the message.
     public internal(set) var meta: JSONValue?
 
@@ -52,6 +61,7 @@ public final class UserMessageEntry: MessageTranscriptEntry {
         self.content = content
         self.messageId = nil
         self.sendState = .pending
+        self.wireID = nil
         self.meta = meta
     }
 
@@ -60,6 +70,7 @@ public final class UserMessageEntry: MessageTranscriptEntry {
     /// - Parameter entry: The engine entry of the message.
     init(wire entry: FoundationModelsACP.SessionEntry) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         self.content = []
         self.messageId = nil
         self.sendState = .sent

@@ -379,6 +379,19 @@ public final class SessionModel: Identifiable {
     /// client makes itself.
     @ObservationIgnored private(set) var transcriptEntriesByWireID: [FoundationModelsACP.SessionEntry.ID: TranscriptEntry] = [:]
 
+    /// Each local user message that ``transcriptEntriesByWireID`` links to
+    /// the echo of its prompt, with the engine id of that echo.
+    ///
+    /// A replay with history removes these links, and a failed replay puts
+    /// them back. The ``UserMessageEntry/wireID`` of each message follows
+    /// its link.
+    private var linkedLocalPrompts: [(wireID: FoundationModelsACP.SessionEntry.ID, prompt: UserMessageEntry)] {
+        transcriptEntriesByWireID.compactMap { wireID, entry in
+            guard case .userMessage(let prompt) = entry, prompt.origin == .local else { return nil }
+            return (wireID, prompt)
+        }
+    }
+
     /// The merged entries of the merge engine, in engine order: the order of
     /// first appearance on the wire.
     ///
@@ -417,6 +430,12 @@ public final class SessionModel: Identifiable {
     /// `LosslessStringConvertible` initializer gives the same result), then
     /// give the id to this call. The parse gives `nil` for a text that is not
     /// in the form. This package keeps no copy of the form.
+    ///
+    /// Observation does not track this call. A hit can come before the echo
+    /// of its prompt, and the echo links later. To see a link that comes
+    /// later, a view reads the ``TranscriptEntry/wireID`` of the entries,
+    /// which is observable, for example
+    /// `transcript.first { $0.wireID == hitID }`.
     ///
     /// - Parameter id: The wire id of the entry.
     /// - Returns: The transcript entry, or `nil` when the model has no entry
@@ -760,12 +779,16 @@ public final class SessionModel: Identifiable {
     }
 
     /// Gives back the state that a failed replay cleared, also the earlier
-    /// session state objects of the extensions.
+    /// session state objects of the extensions. Each local user message that
+    /// the earlier map links gets its ``UserMessageEntry/wireID`` back.
     ///
     /// - Parameter rollback: The state that ``makeReplayRollback()`` kept.
     func restore(_ rollback: ReplayRollback) {
         transcript = rollback.transcript
         transcriptEntriesByWireID = rollback.transcriptEntriesByWireID
+        for link in linkedLocalPrompts {
+            link.prompt.assign(Optional(link.wireID), to: \.wireID)
+        }
         heldEchoes = rollback.heldEchoes
         unlinkedPrompts = rollback.unlinkedPrompts
         engine = rollback.engine
@@ -787,7 +810,8 @@ public final class SessionModel: Identifiable {
     /// whole history does not append its chunks to the text it already gave.
     ///
     /// The engine forgets each entry, and each replayed entry gets a new
-    /// object. The local prompts lose their link state. A pending elicitation
+    /// object. The local prompts lose their link state, and each linked local
+    /// prompt gets a `nil` ``UserMessageEntry/wireID``. A pending elicitation
     /// keeps its tool-call link: the link waits for the replayed entry of its
     /// tool call.
     ///
@@ -799,6 +823,9 @@ public final class SessionModel: Identifiable {
         detachElicitationLinksFromToolCalls()
         engine.reset()
         transcript.removeAll()
+        for link in linkedLocalPrompts {
+            link.prompt.assign(nil, to: \.wireID)
+        }
         transcriptEntriesByWireID.removeAll()
         heldEchoes.removeAll()
         unlinkedPrompts.removeAll()
@@ -1079,6 +1106,7 @@ public final class SessionModel: Identifiable {
             return
         }
         transcriptEntriesByWireID[link.entryID] = .userMessage(entry)
+        entry.assign(Optional(link.entryID), to: \.wireID)
         entry.assign(Optional(link.messageId), to: \.messageId)
         entry.assign(.sent, to: \.sendState)
         guard heldEchoes.remove(link.entryID) != nil, let echo = engine.entry(withID: link.entryID) else { return }

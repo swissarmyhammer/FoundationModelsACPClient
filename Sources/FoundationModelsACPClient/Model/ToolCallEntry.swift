@@ -17,6 +17,12 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     /// See ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it. The value is set when the entry starts, and it does not
+    /// change. A streamed chunk does not change it. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The ACP id of the tool call, as the agent sent it. It never changes.
     public nonisolated let toolCallId: ToolCallId
 
@@ -129,6 +135,7 @@ public final class ToolCallEntry: ObservableTranscriptEntry {
     ///   - toolCallId: The ACP id of the tool call, as the agent sent it.
     init(wire entry: FoundationModelsACP.SessionEntry, toolCallId: ToolCallId) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         self.toolCallId = toolCallId
         update(from: entry)
     }

@@ -37,6 +37,67 @@ comments:
   id: 01m7t1s73yp1cqr9wh0c85kqkg
   text: 'Local evidence (2026-11-19, during ^bzrxhgb, fresh pins incl. Router main with 020d4e20 and FoundationModelsACP dd3a981): `timeout 1800 swift test --package-path IntegrationTests`, run 2 passed 28 tests in 6 suites, with only the old known issue of WireTraceReportTests. `aCancelOfOneChildEndsOnlyThatChild` passed. Run 1 stopped at the 1800 s timeout during the real model weight load (`FoundationModelsExtras.model.load.weights`), with no test failure, while other sessions ran release builds and benchmarks on the same Mac. CI run 44530736484 is still queued; its integration job is the acceptance check.'
   timestamp: 2026-11-19T14:01:18.206566+00:00
+- actor: claude-code
+  id: 01m7t436kv74s3hes9vd5jzanq
+  text: |-
+    ### Diagnosis of the `aCancelOfOneChildEndsOnlyThatChild` time limit (2026-11-19)
+
+    **Result: the failure reproduces locally with fresh pins. The cause is in the scripted stub of FoundationModelsACPAgent. It is not in this package.**
+
+    #### Why the earlier local run passed
+    - The test builds `acp-agent-stub` from `IntegrationTests/LiveAgentServer`. That package has its own `Package.resolved`, and it is not tracked.
+    - The local `LiveAgentServer/Package.resolved` was from 2026-11-12: FoundationModelsACPAgent 74eea0a, FoundationModelsRouter e65bf9a5 (before 020d4e20). The earlier "fresh pins" comment refreshed only the root package and `IntegrationTests`.
+    - CI deletes `LiveAgentServer/Package.resolved` and resolves fresh (integ-ci-2.log line 107).
+    - I ran `swift package update` in `IntegrationTests/LiveAgentServer` (ACPAgent 6a6eec1, Router e437cda, Extras f99b111). The old file is in the scratchpad of session 1f1ff490: `LiveAgentServer.Package.resolved.2026-11-12`.
+
+    #### Local reproduction
+    `timeout 2700 swift test --package-path IntegrationTests --filter aCancelOfOneChildEndsOnlyThatChild` failed after 120 s. The log has the same lines as CI run 44530736484:
+    1. The `targetLeavesNoRoomForSummary` compaction warning about 6 s after `session/prompt`.
+    2. `session/cancel` of the first child.
+    3. `prompt.stop_reason=_repeated router.recoveries=2 router.stops=4` on the root about 6 s later.
+    4. "Time limit was exceeded: 120.000 seconds".
+
+    #### The sequence (from the root `transcript.jsonl` that I copied while the test waited)
+    1. seq 3: the root pass plays step 1, `agents` `start agent researcher "CHILD-A-MARKER work"`, call id `scripted-call-1`. Child A1 starts.
+    2. About 6 s later the call returns its pending envelope. Router measures the context with `CharacterCountTokenCounter`, and the large root instructions (the built-in sessions skill text) take it over the trigger. Router stops the model call to compact (Router `RoutedSessionActorCompactionYield.swift:66` and `:80`). The compaction fails ("a compaction left the live context as it was"). The answer continues on a new backend.
+    3. The new backend comes from `ScriptedSessionBackend.replacingTranscript` (ACPAgent `ScriptedSessionBackend.swift:207`). Its playbook comes from `ScriptedPlaybook.makeSibling(continuing:)` (`ScriptedPlaybook.swift:131`). `Progress(continuing:)` sets `nextPass` to the count of the ENDED passes only (`ScriptedPlaybook.swift:49` and `:53`, `isEndedPass` at `:74`). The interrupted pass 0 has no `.response` entry, thus `nextPass` is 0.
+    4. seq 12 (5 ms after the return): the new backend plays pass 0 again from step 1. It starts a SECOND researcher (child A2, `CHILD-A-MARKER work`) and not the reviewer. The new backend counts its calls from 1 again (`ScriptedSessionBackend.swift:607`), thus the call id is `scripted-call-1` again.
+    5. Each later continuation (run mail, recovery prompts) plays step 1 again. Router's identical tool call check stops the answer 4 times (seq 28, 31, 34, 37, `repeatedToolCall` counts 3 to 6), and the root ends with `_repeated`. This is a symptom, not the cause.
+
+    #### What the test waits for at the time limit
+    - The two children of the root are A1 and A2. Both are researchers. No reviewer session exists, and gate "b" has no reader.
+    - The test cancels A1, and A1 ends. Then the test waits at `AgentNestedScenarioTests.swift:250` for an incoming frame that holds `scripted-call-2`. That frame never comes, because no backend plays a second call.
+    - `TraceTransport.waitForIncomingFrame(containing:)` (`WireFrameTrace.swift:87`) has no failure condition. Thus the test waits until the 120 s limit.
+
+    #### Why it started after 2026-11-13
+    - The replay needs a stop in the middle of the scripted root pass. Run 44366478943 (2026-11-18 19:27 UTC) has no compaction warning. Run 44530736484 (2026-11-19) has the compaction warning in each nested test. Thus the instructions of the default agent grew past the trigger between the two runs. The likely changes are the built-in sessions skill text of 2026-11-18/19 (fork, export and search sections). I did not bisect this.
+    - ACPAgent eb8254c (2026-11-13 06:44 UTC, after the last green run at 04:53 UTC) puts the Router tool layers on the stub tools. Thus the identical tool call check now stops the stub (step 5).
+    - Router 020d4e20 is not the cause. This path reads no MLX transcript.
+
+    #### Run 44366478943 (2026-11-18): not verified
+    - That run stopped at a different place. The root cancel went out (13:35:17), thus the test passed line 250 and waited at line 257 for `second.isClosed`. The log has no compaction warning.
+    - A child model closes only when its `agents` call gets a final status (`SessionModel+Subagent.swift:173` to `:181`). Two causes are possible:
+      - A replay of the same type from another Router stop, which makes `session.children.last` a second researcher at gate "a". Gate "b" then never ends it.
+      - ACPAgent 0fbdc27 (2026-11-15). A detached `agents` call is kept open at the end of a cancelled prompt, thus the final status must come from the settlement of the run.
+    - I did not reproduce the 2026-11-18 pins, so this part is a hypothesis.
+
+    #### Confidence
+    - High for the current mains and for run 44530736484: the failure reproduces, and the recorded transcript shows each step above.
+    - Low for run 44366478943.
+    - The commits of this package (41cd2c4, 751f420 and the fork changes) are not the cause. None of them changes how a child closes or how the agent plays the script.
+
+    #### Proposed fix
+    1. **FoundationModelsACPAgent (the stub):** when Router continues an answer on a new backend after a stop in a pass (compaction yield, run mail stop, repetition recovery), the scripted session must continue the same pass. It must not play the pass again from step 1.
+       - `ScriptedPlaybook.Progress(continuing:)` must count the steps that the open pass already played (for example the `.toolCalls` entries after the last scripted `.prompt`). It must then resume after them.
+       - `ScriptedSessionBackend` must start `playedToolCallCount` from the `.toolCalls` entries in the seeded entries, so that each call id stays unique.
+       - Add a stub test: a compaction yield after step 1 of a two-call pass plays step 2 next, with the id `scripted-call-2`.
+    2. **This package (optional, test only):** give the wait at `AgentNestedScenarioTests.swift:250` a failure condition, for example the root ends or a child has a marker that the script does not expect. A replay then fails in seconds with a clear issue and does not use the full 120 s.
+    3. After the stub fix: delete `IntegrationTests/LiveAgentServer/Package.resolved` too when you check with fresh pins.
+  timestamp: 2026-11-19T14:41:42.523561+00:00
+- actor: claude-code
+  id: 01m7t45my0w4ahffrgz99ajgdf
+  text: 'FoundationModelsACPAgent accepted the brief: task ^dxtwmw0 (#bug #scripted) in foundationmodelsacpagent-9e. The scripted session will continue the open pass after a Router continuation on a new backend. `Progress(continuing:)` counts the steps that were played from the seeded entries, and `playedToolCallCount` starts from the seeded `.toolCalls`. It includes a stub test and a check of `aCancelOfOneChildEndsOnlyThatChild` with fresh pins. It starts after their D207 work. Next here: when the sha comes, run the integration job again (push, or re-run CI), and close this task when both jobs are green.'
+  timestamp: 2026-11-19T14:43:02.720876+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Test target: FoundationModelsKanban main needs C++ interoperability'

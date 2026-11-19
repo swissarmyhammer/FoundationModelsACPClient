@@ -20,6 +20,12 @@ public final class SessionMessageEntry: ObservableTranscriptEntry {
     /// ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it. The value is set when the entry starts, and it does not
+    /// change. A streamed chunk does not change it. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The identifier of the message in the transcript of this session.
     public let messageId: MessageId
 
@@ -62,6 +68,7 @@ public final class SessionMessageEntry: ObservableTranscriptEntry {
     ///   - message: The merged message that the entry holds.
     init(wire entry: FoundationModelsACP.SessionEntry, message: FoundationModelsACP.SessionEntry.InterSessionMessage) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         self.messageId = message.messageId
         copy(message)
     }

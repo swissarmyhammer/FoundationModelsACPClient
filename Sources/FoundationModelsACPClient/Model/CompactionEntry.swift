@@ -21,6 +21,12 @@ public final class CompactionEntry: ObservableTranscriptEntry {
     /// See ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it. The value is set when the entry starts, and it does not
+    /// change. A streamed chunk does not change it. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The identifier of the compaction.
     public let compactionId: CompactionId
 
@@ -55,6 +61,7 @@ public final class CompactionEntry: ObservableTranscriptEntry {
     ///   - compaction: The merged compaction that the entry holds.
     init(wire entry: FoundationModelsACP.SessionEntry, compaction: FoundationModelsACP.SessionEntry.Compaction) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         self.compactionId = compaction.compactionId
         self.status = compaction.status
         copy(compaction)

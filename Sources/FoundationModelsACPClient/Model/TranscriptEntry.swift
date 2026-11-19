@@ -105,6 +105,32 @@ public enum TranscriptEntry: Identifiable, Sendable {
         }
     }
 
+    /// The engine id of the entry, or `nil` while no engine entry is linked
+    /// to it. The value comes from the object of the case, so Observation
+    /// tracks the read on that object.
+    ///
+    /// A view can find the entry of a search hit with one predicate for
+    /// each kind of entry, for example
+    /// `transcript.first { $0.wireID == hitID }`. A streamed chunk does not
+    /// change the value, so a view that reads it across the whole
+    /// transcript is not invalidated on each token. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    @MainActor
+    public var wireID: FoundationModelsACP.SessionEntry.ID? {
+        switch self {
+        case .userMessage(let entry): entry.wireID
+        case .agentMessage(let entry): entry.wireID
+        case .thought(let entry): entry.wireID
+        case .toolCall(let entry): entry.wireID
+        case .terminal(let entry): entry.wireID
+        case .plan(let entry): entry.wireID
+        case .unknown(let entry): entry.wireID
+        case .compaction(let entry): entry.wireID
+        case .sessionMessage(let entry): entry.wireID
+        case .error(let entry): entry.wireID
+        }
+    }
+
     /// Makes the observable entry for an entry of the session merge engine.
     ///
     /// - Parameter entry: The engine entry, which the engine gave in an
@@ -161,6 +187,21 @@ public protocol ObservableTranscriptEntry: AnyObject, Observable, Identifiable w
     /// The object never changes for the life of the entry; only its times
     /// change, each one time. See ``EntryTiming``.
     var timing: EntryTiming { get }
+
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it, or `nil` while no engine entry is linked to it.
+    ///
+    /// - An entry from the wire has its engine id from its start.
+    /// - A local user message has `nil` until the client links it to the
+    ///   echo of its prompt. Then it has the engine id of that echo. A
+    ///   replay with history removes the link, and a failed replay sets the
+    ///   value back to its value before the replay.
+    /// - A local error entry has `nil`.
+    ///
+    /// The value is observable. It changes only when the link changes. A
+    /// streamed chunk does not change it, so a view that reads it across the
+    /// whole transcript is not invalidated on each token.
+    var wireID: FoundationModelsACP.SessionEntry.ID? { get }
 }
 
 extension ObservableTranscriptEntry {

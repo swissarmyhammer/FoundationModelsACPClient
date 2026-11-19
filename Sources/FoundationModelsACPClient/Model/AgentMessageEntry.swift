@@ -15,6 +15,12 @@ public final class AgentMessageEntry: MessageTranscriptEntry {
     /// ``EntryTiming``.
     public let timing = EntryTiming()
 
+    /// The engine id of the entry: the id that the session merge engine
+    /// gives it. The value is set when the entry starts, and it does not
+    /// change. A streamed chunk does not change it. See
+    /// ``ObservableTranscriptEntry/wireID``.
+    public internal(set) var wireID: FoundationModelsACP.SessionEntry.ID?
+
     /// The content of the message.
     public internal(set) var content: [ContentBlock] = []
 
@@ -29,6 +35,7 @@ public final class AgentMessageEntry: MessageTranscriptEntry {
     /// - Parameter entry: The engine entry of the message.
     init(wire entry: FoundationModelsACP.SessionEntry) {
         self.id = .wire(entry.id)
+        self.wireID = entry.id
         update(from: entry)
     }
 
