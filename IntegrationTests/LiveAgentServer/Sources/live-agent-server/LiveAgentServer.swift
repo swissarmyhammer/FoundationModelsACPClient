@@ -82,12 +82,14 @@ enum LiveAgentServer {
     /// Makes the agent, serves it on stdin and stdout, and returns when the
     /// connection closed and the agent finished its teardown.
     ///
-    /// - Throws: `LaunchArguments.Failure` for a wrong argument list, or
-    ///   the error of the file write, of the configuration load or of the
-    ///   profile resolution.
-    static func main() async throws {
-        let arguments = try LaunchArguments(commandLine: CommandLine.arguments)
-        let agent = try await makeAgent(arguments)
+    /// A start error (`LaunchArguments.Failure` for a wrong argument list, or
+    /// the error of the file write, of the configuration load or of the
+    /// profile resolution) does not get out of this function: `ServerStart`
+    /// writes the reason to stderr and exits with status 1.
+    static func main() async {
+        let agent = await ServerStart.make {
+            try await makeAgent(LaunchArguments(commandLine: CommandLine.arguments))
+        }
         let connection = await AgentSideConnection(stream: StdioTransport()) { connection in
             agent.bind(connection: connection)
         }

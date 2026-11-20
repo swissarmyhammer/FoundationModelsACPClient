@@ -35,11 +35,33 @@ enum GraphQLTunnelServer {
     /// Makes the agent, serves it on stdin and stdout, and returns when the
     /// connection closed and the agent closed its sessions.
     ///
-    /// - Throws: `LaunchArguments.Failure` for a wrong argument list, or
-    ///   the error of the file write, of the configuration load or of the
-    ///   profile resolution.
-    static func main() async throws {
-        let arguments = try LaunchArguments(commandLine: CommandLine.arguments)
+    /// A start error (`LaunchArguments.Failure` for a wrong argument list, or
+    /// the error of the file write, of the configuration load, of the agent
+    /// make or of the board open) does not get out of this function:
+    /// `ServerStart` writes the reason to stderr and exits with status 1.
+    static func main() async {
+        let (composed, board) = await ServerStart.make {
+            try await makeAgent(LaunchArguments(commandLine: CommandLine.arguments))
+        }
+        let connection = await composed.serve(over: StdioTransport())
+        _ = await connection.closed
+        await composed.waitForConnectionTeardown()
+        await composed.closeOpenSessions()
+        await board.close()
+    }
+
+    /// Makes the agent and the board of the working directory: writes the
+    /// user layer under the state directory, composes the agent on the stub
+    /// model path, opens the board, and registers the host tools.
+    ///
+    /// - Parameter arguments: The directories of the launch.
+    /// - Returns: The composed agent, and the board that its `kanban`
+    ///   endpoint serves.
+    /// - Throws: The error of the file write, of the configuration load, of
+    ///   the agent make or of the board open.
+    private static func makeAgent(
+        _ arguments: LaunchArguments
+    ) async throws -> (composed: ComposedAgent, board: KanbanGraph) {
         let home = try IntegrationAgentHome.make(
             under: arguments.stateDirectory, userConfigYAML: IntegrationAgentHome.offlineToolsYAML)
         let composed = try await ComposedAgent.compose(
@@ -51,10 +73,6 @@ enum GraphQLTunnelServer {
             modelSource: .stub)
         let board = try await KanbanHost.shared.session(workingDirectory: arguments.workingDirectory, actor: agentName)
         await composed.agent.registerHostTools([ProbeTool(), KanbanTool(graph: board)])
-        let connection = await composed.serve(over: StdioTransport())
-        _ = await connection.closed
-        await composed.waitForConnectionTeardown()
-        await composed.closeOpenSessions()
-        await board.close()
+        return (composed, board)
     }
 }
