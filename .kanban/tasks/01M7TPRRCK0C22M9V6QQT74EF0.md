@@ -42,6 +42,45 @@ comments:
     - evidence: local commit fix(integration): exit 1 with one stderr line on a server start error (not pushed)
     - next: review
   timestamp: 2026-11-20T06:04:19.742149+00:00
+- actor: claude-code
+  id: 01m7vs09yzrzs7w45sqpw5hhpd
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (bc95c6e). 1 finding, 1 confirmed, 0 refuted. IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/LiveAgentServerBuild.swift:191 (reuse/reuse).
+    - next: Put the shared process and stderr log steps of `runToExit` and `runSwiftBuild` into one private helper. Keep the non-zero status throw in `runSwiftBuild`. Then do the review again.
+  timestamp: 2026-11-20T06:06:22.175379+00:00
+- actor: claude-code
+  id: 01m7vs0rd75zc6gcz06j8bsdrr
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 5 files (ServerStart.swift, LiveAgentServer.swift, GraphQLTunnelServer.swift, LiveAgentServerBuild.swift, ServerStartFailureTests.swift); the new test was red (signal 5, Fatal error) and then green
+    - test: green — root swift test 961 passed; both builds OK; the new test passed (2 cases); GraphQLTunnelTests 10 passed; only the allowed MLX warning
+    - commit: bc95c6e
+    - review: findings — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/LiveAgentServerBuild.swift:191
+  timestamp: 2026-11-20T06:06:36.967464+00:00
+- actor: claude-code
+  id: 01m7vs6g5bm9je2d62v9vxhay4
+  text: |-
+    Finding reuse/reuse in LiveAgentServerBuild.swift is fixed. The new private helper `runProcess(_:arguments:standardOutput:errorLogName:) -> Exit` makes the stderr log file, sets the `Process`, starts it through `Self.run`, waits for the end, and reads the stderr text. `runSwiftBuild` and `runToExit` both call it. The throw on a non-zero status stays in `runSwiftBuild`. The helper gives the `Exit` struct that already existed, so no new result type is necessary. One change of behavior: stdin of `swift build` is now the null device (before, it was the stdin of the test). `swift build` does not read stdin.
+
+    ### implement — changed
+    - evidence: 1 file — IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/LiveAgentServerBuild.swift. `timeout 1800 swift build --build-tests --package-path IntegrationTests`: build complete, only the MLX warning. `timeout 1800 swift test --package-path IntegrationTests --filter aServerWithAWrongArgumentListExitsWithStatusOneAndTellsTheReason`: 1 test, 2 cases, passed. Root `timeout 1800 swift test`: 961 tests in 79 suites passed, only the MLX warning.
+    - next: review. "Push main" stays open.
+  timestamp: 2026-11-20T06:09:45.131062+00:00
+- actor: claude-code
+  id: 01m7vsa9xnf6vypnbq6kez89gd
+  text: |-
+    ### test — green
+    - evidence: `timeout 1800 swift test` (root): 961 tests in 79 suites passed. `swift build --build-tests --package-path IntegrationTests`: build complete. Filtered integration run (wrong-argument-list exit status, GraphQLTunnelTests, aConnectionModelRunsOneTurnAgainstARealAgent): 12 tests in 3 suites passed. Zero failures, zero skipped. Only warning: the allowed MLX "missing creator for mutated node" for mlx-swift_Cmlx.bundle.
+    - next: review
+  timestamp: 2026-11-20T06:11:49.813521+00:00
+- actor: claude-code
+  id: 01m7vsavgk3pf6qmbm668nyps2
+  text: |-
+    ### commit — changed
+    - evidence: local commit "refactor(integration): share one runProcess helper". It holds LiveAgentServerBuild.swift and the .kanban files. No push.
+    - next: review
+  timestamp: 2026-11-20T06:12:07.827670+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'LiveAgentServer: the @main of each test server catches a start error, writes the reason to stderr and exits 1'
@@ -73,3 +112,12 @@ The trap is in this repo. `IntegrationTests/LiveAgentServer/Sources/live-agent-s
 
 - [x] `swift build --package-path IntegrationTests/LiveAgentServer` and the root `swift test` pass. The only allowed warning is the MLX "missing creator for mutated node" warning.
 - [ ] Push `main`.
+
+## Review Findings (2026-11-20 00:04)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `IntegrationTests/Tests/FoundationModelsACPClientIntegrationTests/LiveAgentServerBuild.swift:191` `reuse/reuse` — `runToExit` rebuilds the same process setup that `runSwiftBuild` already has: it makes a stderr log file with `makeEmptyLogFile`, creates a `Process`, sets `executableURL` and `arguments`, wires the stderr `FileHandle`, calls `Self.run(process)`, and reads the stderr text back with `String(contentsOf:)`. A second copy of this sequence means the process-and-log handling now lives in two places and can diverge. The part that differs (the `swift` launcher, the stdout log, the throw on non-zero status) could be a parameter of one shared helper. Extract the shared part into one private helper, for example `runProcess(executable:arguments:stdout:) -> (status, reason, stderr)`, that owns the log file, the `Process` configuration, and the stderr read. Have `runSwiftBuild` and `runToExit` each call it with their own launcher, arguments, and stdout choice. Keep the non-zero status throw in `runSwiftBuild`.

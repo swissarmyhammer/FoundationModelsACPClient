@@ -144,17 +144,14 @@ struct LiveAgentServerBuild {
     private func runSwiftBuild(_ arguments: [String], logName: String) async throws -> String {
         let swiftArguments = ["build", "--package-path", Self.packageDirectory.path] + arguments
         let outputFile = try makeEmptyLogFile(named: logName)
-        let errorFile = try makeEmptyLogFile(named: logName + Self.errorLogSuffix)
-        let process = Process()
-        process.executableURL = Self.environmentLauncher
-        process.arguments = ["swift"] + swiftArguments
-        process.standardOutput = try FileHandle(forWritingTo: outputFile)
-        process.standardError = try FileHandle(forWritingTo: errorFile)
-        let status = try await Self.run(process)
+        let exit = try await runProcess(
+            Self.environmentLauncher,
+            arguments: ["swift"] + swiftArguments,
+            standardOutput: try FileHandle(forWritingTo: outputFile),
+            errorLogName: logName + Self.errorLogSuffix)
         let output = try String(contentsOf: outputFile, encoding: .utf8)
-        guard status == 0 else {
-            let errors = try String(contentsOf: errorFile, encoding: .utf8)
-            throw Failure(arguments: swiftArguments, status: status, output: output + errors)
+        guard exit.status == 0 else {
+            throw Failure(arguments: swiftArguments, status: exit.status, output: output + exit.standardError)
         }
         return output
     }
@@ -162,7 +159,8 @@ struct LiveAgentServerBuild {
     /// The suffix of the name of the log file that receives stderr.
     private static let errorLogSuffix = ".err"
 
-    /// The end of an executable that ``runToExit(_:arguments:)`` ran.
+    /// The end of an executable that ``runToExit(_:arguments:)`` or a
+    /// `swift build` ran.
     struct Exit {
         /// The cause of the end: a normal exit, or a signal.
         let reason: Process.TerminationReason
@@ -188,12 +186,38 @@ struct LiveAgentServerBuild {
     ///   the process.
     func runToExit(_ productName: String, arguments: [String]) async throws -> Exit {
         let executable = try await makeExecutable(productName)
-        let errorFile = try makeEmptyLogFile(named: "run-\(productName).log" + Self.errorLogSuffix)
+        return try await runProcess(
+            URL(filePath: executable),
+            arguments: arguments,
+            standardOutput: FileHandle.nullDevice,
+            errorLogName: "run-\(productName).log" + Self.errorLogSuffix)
+    }
+
+    /// Runs an executable, and waits for its end.
+    ///
+    /// Stdin of the process is the null device. Stderr goes to a new empty
+    /// log file in ``rootDirectory``, and the result holds its text. This
+    /// function does not examine the exit status: the caller does.
+    ///
+    /// - Parameters:
+    ///   - executable: The executable file.
+    ///   - arguments: The launch arguments of the process.
+    ///   - standardOutput: The file handle that receives stdout.
+    ///   - errorLogName: The name of the log file that receives stderr.
+    /// - Returns: The cause of the end, the status, and the stderr text.
+    /// - Throws: The error of the log file or of the start of the process.
+    private func runProcess(
+        _ executable: URL,
+        arguments: [String],
+        standardOutput: FileHandle,
+        errorLogName: String
+    ) async throws -> Exit {
+        let errorFile = try makeEmptyLogFile(named: errorLogName)
         let process = Process()
-        process.executableURL = URL(filePath: executable)
+        process.executableURL = executable
         process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
+        process.standardOutput = standardOutput
         process.standardError = try FileHandle(forWritingTo: errorFile)
         let status = try await Self.run(process)
         return Exit(
