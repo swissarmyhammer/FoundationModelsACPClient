@@ -59,8 +59,31 @@ comments:
     - evidence: the orchestrator ran `swift test` again on the root package, on top of the first build: 963 tests in 79 suites pass. The build output has only the allowed MLX "missing creator for mutated node" warning. The C++17 warnings (mlx-swift Metal shaders) and the SwiftPM "maintenance.lock" cache warnings came only from the fresh build of the dependency checkouts in the first run. They are not from this repo, and a run on top of that build does not show them. The other "warning" lines are log output that the tests expect.
     - next: commit
   timestamp: 2026-11-20T13:58:27.683635+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m7wm0y7nh1jq05ckb579pb8a
+  text: |-
+    ### commit — changed
+    - evidence: 5b83b0c fix(model): drop final tool calls from background
+    - next: review
+  timestamp: 2026-11-20T13:58:34.485945+00:00
+- actor: claude-code
+  id: 01m7wm29ybtdvr56qk0e21sapz
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (5b83b0c). 0 findings, 0 confirmed, 0 refuted. 7 attempts, 0 failed. The engine examined 3 files. The ignore rule removed 2 .kanban files.
+    - next: The task moved to done. No more work is necessary.
+  timestamp: 2026-11-20T13:59:19.243952+00:00
+- actor: claude-code
+  id: 01m7wm2q3xj1x8jf41jrm2m2sg
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 3 files (SessionModel.swift, BackgroundToolCallTests.swift, SubagentResumeTests.swift), brief acpagent-agents-call-final-order.md
+    - test: green — swift test, 963 passed, MLX warning only
+    - commit: 5b83b0c
+    - review: clean — 0 findings
+  timestamp: 2026-11-20T13:59:32.733257+00:00
+position_column: done
+position_ordinal: ffc280
 title: 'Examine: the agents call of a closed child stays in the root background list for a time'
 ---
 ## Observation
