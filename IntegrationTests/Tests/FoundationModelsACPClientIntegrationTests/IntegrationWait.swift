@@ -9,7 +9,19 @@ struct WaitEndedOnFailure: Error, CustomStringConvertible {
     /// The place of the wait call that ended.
     let location: String
 
-    var description: String { "the wait at \(location) ended on its failure event" }
+    /// The name of the state that the wait expected, or `nil` when the caller
+    /// gave no name.
+    let expected: String?
+
+    /// The state that ended the wait, or `nil` when the caller gave no
+    /// description of it.
+    let observed: String?
+
+    var description: String {
+        let target = expected.map { " for \($0)" } ?? ""
+        let cause = observed.map { ": \($0)" } ?? ""
+        return "the wait at \(location)\(target) ended on its failure event\(cause)"
+    }
 }
 
 /// Waits until a condition on observable state is true, or until its failure
@@ -20,12 +32,18 @@ struct WaitEndedOnFailure: Error, CustomStringConvertible {
 /// - Parameters:
 ///   - condition: The condition to wait for.
 ///   - failure: The failure event, for example the close of the connection.
+///   - expected: The name of the state that the wait expects. The error of a
+///     failure event names it.
+///   - observed: Tells the state at the failure event. The error of a failure
+///     event holds its text.
 /// - Throws: ``WaitEndedOnFailure`` when the failure event came first, or
 ///   `CancellationError` when the task was cancelled.
 @MainActor
 func waitUntil(
     _ condition: @escaping @MainActor () -> Bool,
     orFailWhen failure: @escaping @MainActor () -> Bool,
+    expecting expected: String? = nil,
+    observed: (@MainActor () -> String)? = nil,
     fileID: String = #fileID,
     line: Int = #line
 ) async throws {
@@ -46,7 +64,9 @@ func waitUntil(
             wake.fire()
         }
     }
-    guard condition() else { throw WaitEndedOnFailure(location: "\(fileID):\(line)") }
+    guard condition() else {
+        throw WaitEndedOnFailure(location: "\(fileID):\(line)", expected: expected, observed: observed?())
+    }
 }
 
 /// The failure event of a wait for the `running` state of a session: the

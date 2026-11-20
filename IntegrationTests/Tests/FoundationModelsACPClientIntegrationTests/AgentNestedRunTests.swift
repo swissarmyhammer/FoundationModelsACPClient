@@ -104,7 +104,7 @@ struct AgentNestedRunTests {
             try run.openGate()
             try await waitUntil({ agentText(in: grandchild).contains("grandchild done") },
                 orFailWhen: { grandchild.isClosed })
-            #expect(!agentText(in: grandchild).contains("root done"))
+            #expect(!agentText(in: grandchild).contains(rootFinalText))
             try await waitUntil({ agentText(in: child).contains("child done") }, orFailWhen: { child.isClosed })
             #expect(!agentText(in: child).contains("grandchild done"))
 

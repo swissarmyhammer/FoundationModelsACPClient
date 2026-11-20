@@ -230,9 +230,27 @@ struct AgentNestedScenarioTests {
         defer { try? FileManager.default.removeItem(at: run.root) }
         defer { await started.cleanUp() }
         let ended: @MainActor () -> Bool = { sessionEnded(session) }
+        // The failure event of a wait for a state that needs more work of the
+        // root pass: the root closed, the root is idle, or the root played the
+        // last step of its pass. `ended` is not sufficient here. A root with a
+        // child in the background stays `running` after its last step, and an
+        // idle root that still has a child in the tree does not make `ended`
+        // true.
+        let rootPassEnded: @MainActor () -> Bool = {
+            session.isClosed || isIdle(session) || agentText(in: session).contains(rootFinalText)
+        }
+        let rootState: @MainActor () -> String = {
+            "the root has the work state \(session.workState), closed \(session.isClosed), "
+                + "last step played \(agentText(in: session).contains(rootFinalText)), "
+                + "\(session.children.count) children, \(session.background.count) background items"
+        }
 
         _ = try await session.prompt([.text(TextContent(text: rootMarker))])
-        try await waitUntil({ session.children.count == siblingCount }, orFailWhen: ended)
+        // The root pass starts both children before its last step. When the
+        // root pass ends after one start, the second child never comes.
+        try await waitUntil(
+            { session.children.count == siblingCount }, orFailWhen: rootPassEnded,
+            expecting: "\(siblingCount) children of the root", observed: rootState)
         let first = try #require(session.children.first)
         let second = try #require(session.children.last)
         try await waitUntil(
@@ -262,9 +280,16 @@ struct AgentNestedScenarioTests {
         // child starts about 5.7 seconds after the first, inline at first. The
         // start frame of its agents call comes at once, while the child is
         // still inline. Thus cancel only when the background list of the root
-        // holds the agents call of the second child.
+        // holds the agents call of the second child. The agent sends the
+        // background list with each state of the root, and the root plays its
+        // last step only after the call moved to the background. Thus a root
+        // that played its last step, or that is idle, without the call in its
+        // background list cannot list it later.
         let secondCall = try #require(agentsCalls(in: session).first { $0.childSession === second })
-        try await waitUntil({ isBackgroundWork(secondCall, of: session) }, orFailWhen: ended)
+        try await waitUntil(
+            { isBackgroundWork(secondCall, of: session) }, orFailWhen: rootPassEnded,
+            expecting: "the agents call \(secondCall.toolCallId.rawValue) of the second child in the background list of the root",
+            observed: rootState)
         try await session.cancel()
 
         // The background child goes idle with the stop reason `cancelled`. The

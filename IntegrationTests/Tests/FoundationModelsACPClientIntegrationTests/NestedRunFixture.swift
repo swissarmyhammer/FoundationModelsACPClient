@@ -20,6 +20,10 @@ let rootMarker = "ROOT-MARKER"
 let childMarker = "CHILD-MARKER"
 let grandchildMarker = "GRANDKID-MARK"
 
+/// The text of the last step of the scripted root pass. When the root
+/// transcript holds it, the root pass started all its children.
+let rootFinalText = "root done"
+
 /// The environment variable that gives the stub script to `acp-agent`.
 let stubScriptVariable = "ACP_AGENT_STUB_SCRIPT"
 
@@ -176,7 +180,7 @@ enum NestedScript {
     /// - Parameter starts: The steps that start agents.
     /// - Returns: The session entry.
     static func rootSession(starts: [String]) -> String {
-        scriptedSession(marker: rootMarker, passes: [starts + ["{\"text\": \"root done\"}"]])
+        scriptedSession(marker: rootMarker, passes: [starts + ["{\"text\": \"\(rootFinalText)\"}"]])
     }
 }
 
