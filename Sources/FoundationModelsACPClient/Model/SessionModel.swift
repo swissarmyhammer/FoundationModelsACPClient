@@ -163,6 +163,13 @@ public final class SessionModel: Identifiable {
     /// work. The model does not keep a different value for "not reported".
     /// A tool call in this list is still busy when the session is idle. See
     /// ``ToolCallEntry/isStale``.
+    ///
+    /// The list does not hold a tool call whose transcript entry has a final
+    /// status. The agent sends the final status of a call first, and the
+    /// state with the shorter list in a later update. The final status of an
+    /// `agents` call also closes its child. Thus the list drops the call with
+    /// its final status, and never shows finished work between the two
+    /// updates. The value is observable.
     public var background: [BackgroundWork] {
         let list: [BackgroundWork]? = switch agentState {
         case .running(let state): state.background
@@ -170,7 +177,19 @@ public final class SessionModel: Identifiable {
         case .requiresAction(let state): state.background
         case .unknown, nil: nil
         }
-        return list ?? []
+        return (list ?? []).filter { !isFinishedToolCall($0) }
+    }
+
+    /// Whether a background item is a tool call whose transcript entry has a
+    /// final status.
+    ///
+    /// - Parameter work: The item of the background list.
+    /// - Returns: `true` for a finished tool call, else `false`.
+    private func isFinishedToolCall(_ work: BackgroundWork) -> Bool {
+        guard case .toolCall(let call) = work, let status = toolCallEntry(for: call.toolCallId)?.status else {
+            return false
+        }
+        return status.isFinal
     }
 
     /// The session information, folded as a patch. A field that no update

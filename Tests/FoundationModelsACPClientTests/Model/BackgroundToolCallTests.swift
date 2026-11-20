@@ -164,4 +164,17 @@ struct BackgroundToolCallTests {
         model.apply(.stateUpdate(.running(RunningStateUpdate(background: []))))
         #expect(model.background == [])
     }
+
+    /// The agent sends the final status first, and the state with the shorter
+    /// list in a later update. The list must not show the finished call
+    /// between the two updates.
+    @Test func aFinalStatusRemovesTheCallFromTheBackgroundList() {
+        let model = timedModel()
+        model.apply(startedInBackground)
+        model.apply(.stateUpdate(.running(RunningStateUpdate(background: listedCall))))
+
+        model.apply(toolCallStatus(id: backgroundCallRawId, .completed))
+
+        #expect(model.background == [])
+    }
 }

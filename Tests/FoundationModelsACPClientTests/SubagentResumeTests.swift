@@ -502,6 +502,25 @@ struct SubagentResumeTests {
         #expect(connected.root.children.isEmpty)
     }
 
+    /// The wire order of FoundationModelsACPAgent: the final status of the
+    /// `agents` call goes out first, and the state with the shorter
+    /// background list comes in a later update. The final status closes the
+    /// child, so the same update must take the call out of the list.
+    @Test func theFinalStatusThatClosesAChildRemovesItsCallFromTheBackgroundList() async throws {
+        let connected = try await ResumeConnection.make()
+        defer { await connected.model.disconnect() }
+        let child = try await connected.announce(try snapshot(firstChild, toolCall: agentsCall), child: firstChild)
+        try await connected.agent.send(toolCallStatus(id: agentsCall.rawValue, .inProgress))
+        let listed: [BackgroundWork] = [.toolCall(BackgroundToolCall(toolCallId: agentsCall))]
+        try await connected.agent.send(.stateUpdate(.running(RunningStateUpdate(background: listed))))
+        try await waitForObservation { connected.root.background == listed } orFailWhen: { connected.root.isClosed }
+
+        try await connected.agent.send(toolCallStatus(id: agentsCall.rawValue, .completed))
+        try await waitForObservation { child.isClosed } orFailWhen: { connected.root.isClosed }
+
+        #expect(connected.root.background.isEmpty)
+    }
+
     @Test func theToolCallEntryForgetsAChildThatWasRemoved() async throws {
         let connected = try await ResumeConnection.make()
         defer { await connected.model.disconnect() }
