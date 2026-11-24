@@ -73,7 +73,7 @@ private struct KanbanTunnel {
     /// - Throws: The error of the folder, of the endpoint or of `initBoard`.
     ///   Before it throws, the call closes what it made.
     static func make(viewer: GraphQLViewer? = nil) async throws -> KanbanTunnel {
-        let folder = FileManager.default.temporaryDirectory
+        let folder = TestRunFolder.temporary
             .appending(path: "acp-client-endpoint-" + UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let graph: KanbanGraph

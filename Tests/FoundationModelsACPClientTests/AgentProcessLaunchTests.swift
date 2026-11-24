@@ -120,7 +120,8 @@ struct AgentProcessLaunchTests {
     }
 }
 
-/// A new empty directory under the temporary directory of this process.
+/// A new empty directory in the test folder of this process
+/// (``TestRunFolder/temporary``).
 private struct TemporaryDirectory {
     /// The path of the directory, as the test gives it to the child.
     let path: String
@@ -129,7 +130,7 @@ private struct TemporaryDirectory {
     ///
     /// - Throws: The error of `FileManager.createDirectory(atPath:withIntermediateDirectories:attributes:)`.
     init() throws {
-        path = FileManager.default.temporaryDirectory
+        path = TestRunFolder.temporary
             .appendingPathComponent(UUID().uuidString, isDirectory: true).path
         try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
     }

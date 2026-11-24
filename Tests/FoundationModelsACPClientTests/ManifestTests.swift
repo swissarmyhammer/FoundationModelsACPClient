@@ -145,7 +145,7 @@ struct ManifestTests {
     private static func packageDump() throws -> PackageDump {
         let root = try RepositoryFile.url(relativePath: "Package.swift")
             .deletingLastPathComponent()
-        let workingDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+        let workingDirectory = TestRunFolder.temporary
             .appendingPathComponent("acp-client-library-dump-package-\(UUID().uuidString)")
         // The child writes a scratch directory of its own under here, and the
         // two captured streams stand beside it, so one removal cleans up all

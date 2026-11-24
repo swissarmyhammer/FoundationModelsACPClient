@@ -260,14 +260,15 @@ struct LiveAgentServerBuild {
 
 /// A new temporary directory of an integration test.
 enum IntegrationTemporaryDirectory {
-    /// Makes a new temporary directory, with each symbolic link of its path
+    /// Makes a new temporary directory in the test folder of this process
+    /// (``TestRunFolder/temporary``), with each symbolic link of its path
     /// resolved.
     ///
     /// - Parameter prefix: The prefix of the name of the directory.
     /// - Returns: The directory.
     /// - Throws: The error of the directory creation.
     static func make(prefix: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
+        let directory = TestRunFolder.temporary
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.resolvingSymlinksInPath()
